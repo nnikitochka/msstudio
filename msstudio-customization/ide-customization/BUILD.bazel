@@ -25,12 +25,18 @@ jvm_library(
     deps = [
         # do not sort,
         "@lib//:kotlin-stdlib",
+        "//platform/analysis-api:analysis",
         "//platform/core-api:core",
+        "//platform/core-ui",
         "//platform/editor-ui-api:editor-ui",
         "//platform/platform-api:ide",
         "//platform/ide-core",
         "//platform/platform-impl:ide-impl",
+        "//platform/lang-core",
+        "//platform/lang-impl",
+        "//platform/project-frame",
         "//platform/util:util-ui",
+        "//platform/welcome-screen",
     ],
 )
 
@@ -46,12 +52,18 @@ jvm_library(
     runtime_deps = [
         # do not sort,
         ":msstudio-ide-customization",
+        "//platform/analysis-api:analysis_test_lib",
         "//platform/core-api:core_test_lib",
+        "//platform/core-ui:core-ui_test_lib",
         "//platform/editor-ui-api:editor-ui_test_lib",
         "//platform/platform-api:ide_test_lib",
         "//platform/ide-core:ide-core_test_lib",
         "//platform/platform-impl:ide-impl_test_lib",
+        "//platform/lang-core:lang-core_test_lib",
+        "//platform/lang-impl:lang-impl_test_lib",
+        "//platform/project-frame:project-frame_test_lib",
         "//platform/util:util-ui_test_lib",
+        "//platform/welcome-screen:welcome-screen_test_lib",
     ],
 )
 ### auto-generated section `build intellij.msstudio.ide.customization` end
