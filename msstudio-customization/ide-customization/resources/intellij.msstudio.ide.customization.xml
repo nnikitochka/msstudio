@@ -12,6 +12,9 @@
   <extensions defaultExtensionNs="com.intellij">
     <toolWindow id="Files" anchor="left" icon="AllIcons.Toolwindows.ToolWindowProject"
                 factoryClass="com.intellij.msstudio.ide.customization.toolWindow.MSStudioServerFilesToolWindowFactory"/>
+    <toolWindow id="Logs" anchor="left" icon="AllIcons.Nodes.LogFolder"
+                 factoryClass="com.intellij.msstudio.ide.customization.toolWindow.MSStudioServerLogsToolWindowFactory"
+                 doNotActivateOnStart="true"/>
   </extensions>
   <actions resource-bundle="messages.MSStudioWelcomeBundle">
     <group id="NonModalWelcomeScreen.LeftTabActions">
