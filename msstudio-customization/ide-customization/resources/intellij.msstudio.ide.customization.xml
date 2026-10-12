@@ -9,6 +9,10 @@
     <module name="intellij.platform.util.ui"/>
   </dependencies>
   <!-- endregion -->
+  <extensions defaultExtensionNs="com.intellij">
+    <toolWindow id="Files" anchor="left" icon="AllIcons.Toolwindows.ToolWindowProject"
+                factoryClass="com.intellij.msstudio.ide.customization.toolWindow.MSStudioServerFilesToolWindowFactory"/>
+  </extensions>
   <actions resource-bundle="messages.MSStudioWelcomeBundle">
     <group id="NonModalWelcomeScreen.LeftTabActions">
       <action id="MSStudio.Welcome.Open" class="com.intellij.msstudio.ide.customization.welcomeScreen.MSStudioOpenServerAction"/>
