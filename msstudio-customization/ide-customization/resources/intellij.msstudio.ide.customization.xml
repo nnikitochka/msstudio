@@ -1,0 +1,18 @@
+<idea-plugin>
+  <!-- region Generated dependencies - run `Generate Product Layouts` to regenerate -->
+  <dependencies>
+    <module name="intellij.platform.core"/>
+    <module name="intellij.platform.editor.ui"/>
+    <module name="intellij.platform.ide"/>
+    <module name="intellij.platform.ide.core"/>
+    <module name="intellij.platform.ide.impl"/>
+    <module name="intellij.platform.util.ui"/>
+  </dependencies>
+  <!-- endregion -->
+  <actions resource-bundle="messages.MSStudioWelcomeBundle">
+    <group id="NonModalWelcomeScreen.LeftTabActions">
+      <action id="MSStudio.Welcome.Open" class="com.intellij.msstudio.ide.customization.welcomeScreen.MSStudioOpenServerAction"/>
+      <action id="MSStudio.Welcome.New" class="com.intellij.msstudio.ide.customization.welcomeScreen.MSStudioNewServerAction"/>
+    </group>
+  </actions>
+</idea-plugin>

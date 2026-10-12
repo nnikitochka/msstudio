@@ -25,6 +25,7 @@ load(
 _PLANNED_PRODUCTS = [
     "Idea",
     "AndroidStudio",
+    "MSStudio",
 ]
 
 _FRAGMENT_NAMES = [

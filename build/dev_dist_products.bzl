@@ -33,6 +33,13 @@ DEV_DIST_PRODUCTS = {
         "//community-resources:resources/META-INF/IdeaPlugin.xml",
         "//community-resources:resources/idea/IdeaApplicationInfo.xml",
     ),
+    # `MSStudioProperties` extends the community IDEA properties, so its images are the community ones.
+    "MSStudio": _ide(
+        "ms_studio",
+        "//build:idea_community_images",
+        "//msstudio-customization:resources/META-INF/MSStudioPlugin.xml",
+        "//msstudio-customization:resources/idea/MSStudioApplicationInfo.xml",
+    ),
 }
 
 def dev_dist_product(product):

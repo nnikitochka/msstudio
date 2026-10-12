@@ -5,15 +5,15 @@
 # three share one; see `intellij_dev_run_configurations` in `intellij_dev_community.bzl`.
 load("//build:intellij_dev_community.bzl", "intellij_dev_run_configurations")
 
+# A flag list of two or more items that two or more rows state alike, named after the first of those rows.
+_JVM_FLAGS_IDEA_COMMUNITY = [
+    "-Dawt.toolkit.name=auto",
+    "-Dide.assert.get.service.in.static.init=true",
+]
+
 DEV_RUN_CONFIGURATIONS = {
     "android_studio_dev_build": struct(product = "AndroidStudio", jvm_flags = ["-Dawt.toolkit.name=auto"]),  # Android_Studio__dev_build__.xml
-    "idea_community": struct(
-        product = "Idea",  # IDEA_Community.xml
-        jvm_flags = [
-            "-Dawt.toolkit.name=auto",
-            "-Dide.assert.get.service.in.static.init=true",
-        ],
-    ),
+    "idea_community": struct(product = "Idea", jvm_flags = _JVM_FLAGS_IDEA_COMMUNITY),  # IDEA_Community.xml
     "idea_with_compose_dev_build": struct(
         product = "Idea",  # IDEA_With_Compose__dev_build_.xml
         additional_modules = ["intellij.devkit"],
@@ -22,6 +22,7 @@ DEV_RUN_CONFIGURATIONS = {
             "-Djavax.xml.parsers.SAXParserFactory=com.sun.org.apache.xerces.internal.jaxp.SAXParserFactoryImpl",
         ],
     ),
+    "msstudio": struct(product = "MSStudio", jvm_flags = _JVM_FLAGS_IDEA_COMMUNITY),  # MSStudio.xml
 }
 
 def dev_server_run_configurations():

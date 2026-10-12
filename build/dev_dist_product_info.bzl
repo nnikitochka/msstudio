@@ -29,4 +29,5 @@ _STAMPS_AndroidStudio = struct(
 DEV_DIST_PRODUCT_INFO = {
     "AndroidStudio": _STAMPS_AndroidStudio,
     "Idea": _STAMPS_AndroidStudio,
+    "MSStudio": _STAMPS_AndroidStudio,
 }

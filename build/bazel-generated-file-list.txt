@@ -702,6 +702,8 @@ libraries/zxing-core
 module-set-plugins/generated/intellij.moduleSet.plugin.main
 mps/build
 mps/build/intellij.mps.resources
+msstudio-customization
+msstudio-customization/ide-customization
 notebooks/notebook-ui
 notebooks/visualization
 notebooks/visualization/testFramework

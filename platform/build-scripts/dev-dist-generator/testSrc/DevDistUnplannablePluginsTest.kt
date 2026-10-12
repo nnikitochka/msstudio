@@ -316,7 +316,7 @@ class DevDistUnplannablePluginsTest {
       ),
     )
 
-    assertThat(CommunityDevDistHalf.splitProducts).containsExactly("AndroidStudio", "Idea")
+    assertThat(CommunityDevDistHalf.splitProducts).containsExactly("AndroidStudio", "Idea", "MSStudio")
     // A plugin without an explicit layout goes to the first split product, which gives it an automatic layout.
     assertThat(assigned).isEqualTo(mapOf("AndroidStudio" to listOf("intellij.shared", "intellij.auto"), "Idea" to listOf("intellij.idea.only")))
     assertThat(assigned.keys).containsExactly("AndroidStudio", "Idea")

@@ -1,0 +1,67 @@
+load("@rules_jvm//:jvm.bzl", "jvm_library")
+load("//platform/build-scripts/bazel-rules:content_module_jar.bzl", "content_module_jar")
+
+### auto-generated section `dev intellij.msstudio.ide.customization` start
+content_module_jar(module = ":msstudio-ide-customization")
+### auto-generated section `dev intellij.msstudio.ide.customization` end
+
+### auto-generated section `build intellij.msstudio.ide.customization` start
+jvm_library(
+    name = "msstudio-ide-customization",
+    srcs = glob(
+        [
+            "src/**/*.kt",
+            "src/**/*.java",
+            "src/**/*.form",
+        ],
+        allow_empty = True,
+    ),
+    module_name = "intellij.msstudio.ide.customization",
+    resource_strip_prefix = "resources",
+    resources = glob(
+        ["resources/**/*"],
+    ),
+    visibility = ["//visibility:public"],
+    deps = [
+        # do not sort,
+        "@lib//:kotlin-stdlib",
+        "//platform/core-api:core",
+        "//platform/editor-ui-api:editor-ui",
+        "//platform/platform-api:ide",
+        "//platform/ide-core",
+        "//platform/platform-impl:ide-impl",
+        "//platform/util:util-ui",
+    ],
+)
+
+jvm_library(
+    name = "msstudio-ide-customization_test_lib",
+    testonly = True,
+    srcs = glob(
+        [],
+        allow_empty = True,
+    ),
+    module_name = "intellij.msstudio.ide.customization",
+    visibility = ["//visibility:public"],
+    runtime_deps = [
+        # do not sort,
+        ":msstudio-ide-customization",
+        "//platform/core-api:core_test_lib",
+        "//platform/editor-ui-api:editor-ui_test_lib",
+        "//platform/platform-api:ide_test_lib",
+        "//platform/ide-core:ide-core_test_lib",
+        "//platform/platform-impl:ide-impl_test_lib",
+        "//platform/util:util-ui_test_lib",
+    ],
+)
+### auto-generated section `build intellij.msstudio.ide.customization` end
+
+### auto-generated section `iml intellij.msstudio.ide.customization` start
+exports_files(
+    [
+        "intellij.msstudio.ide.customization.iml",
+        "resources/intellij.msstudio.ide.customization.xml",
+    ],
+    visibility = ["//visibility:public"],
+)
+### auto-generated section `iml intellij.msstudio.ide.customization` end

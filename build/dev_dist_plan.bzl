@@ -83,6 +83,7 @@ _PLAN_AndroidStudio = struct(
 DEV_DIST_PLANS = {
     "AndroidStudio": _PLAN_AndroidStudio,
     "Idea": _PLAN_AndroidStudio,
+    "MSStudio": _PLAN_AndroidStudio,
 }
 
 # The launch model of every product, which its `platform_resources` component renders. A model file takes the
@@ -91,6 +92,7 @@ DEV_DIST_PLANS = {
 DEV_DIST_LAUNCH_MODELS = {
     "AndroidStudio": "//build/dev-dist-launch:AndroidStudio.launch.json",
     "Idea": "//build/dev-dist-launch:idea_community.launch.json",
+    "MSStudio": "//build/dev-dist-launch:MSStudio.launch.json",
 }
 
 # The application info sources of every product. The product files action and the plugin descriptor actions read
@@ -98,6 +100,7 @@ DEV_DIST_LAUNCH_MODELS = {
 DEV_DIST_APPLICATION_INFOS = {
     "AndroidStudio": struct(source = "//android-customization:resources/idea/AndroidStudioApplicationInfo.xml"),
     "Idea": struct(source = "//community-resources:resources/idea/IdeaApplicationInfo.xml"),
+    "MSStudio": struct(source = "//msstudio-customization:resources/idea/MSStudioApplicationInfo.xml"),
 }
 
 # The `lib/` jar order of the platform as a rule with two lists, for every product with the runtime module repository

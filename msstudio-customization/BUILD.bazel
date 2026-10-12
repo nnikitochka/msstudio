@@ -1,0 +1,58 @@
+load("@rules_jvm//:jvm.bzl", "jvm_library")
+
+### auto-generated section `build intellij.msstudio.customization` start
+jvm_library(
+    name = "msstudio-customization",
+    srcs = glob(
+        [],
+        allow_empty = True,
+    ),
+    module_name = "intellij.msstudio.customization",
+    resource_strip_prefix = "resources",
+    resources = glob(
+        ["resources/**/*"],
+    ),
+    visibility = ["//visibility:public"],
+    runtime_deps = [
+        # do not sort,
+        "//java/ide-resources",
+        "//platform/platform-impl:ide-impl",
+        "//idea/customization/min",
+        "//platform/experiment",
+        "//community-resources/ide-customization",
+        "//msstudio-customization/ide-customization:msstudio-ide-customization",
+    ],
+)
+
+jvm_library(
+    name = "msstudio-customization_test_lib",
+    testonly = True,
+    srcs = glob(
+        [],
+        allow_empty = True,
+    ),
+    module_name = "intellij.msstudio.customization",
+    visibility = ["//visibility:public"],
+    runtime_deps = [
+        # do not sort,
+        ":msstudio-customization",
+        "//java/ide-resources:ide-resources_test_lib",
+        "//platform/platform-impl:ide-impl_test_lib",
+        "//idea/customization/min:min_test_lib",
+        "//platform/experiment:experiment_test_lib",
+        "//community-resources/ide-customization:ide-customization_test_lib",
+        "//msstudio-customization/ide-customization:msstudio-ide-customization_test_lib",
+    ],
+)
+### auto-generated section `build intellij.msstudio.customization` end
+
+### auto-generated section `iml intellij.msstudio.customization` start
+exports_files(
+    [
+        "intellij.msstudio.customization.iml",
+        "resources/META-INF/MSStudioPlugin.xml",
+        "resources/idea/MSStudioApplicationInfo.xml",
+    ],
+    visibility = ["//visibility:public"],
+)
+### auto-generated section `iml intellij.msstudio.customization` end

@@ -280,6 +280,17 @@ intellij_dev_launch_assembles_test(
     rows = [":android_studio_dev_build"],
 )
 
+# The `MSStudio` run configuration on the split path, `:msstudio`: the same pair of checks.
+dev_dist_local_launch_test(
+    name = "msstudio_local_launch_test",
+    target_under_test = ":msstudio_dist_launch",
+)
+
+intellij_dev_launch_assembles_test(
+    name = "msstudio_assembles_test",
+    rows = [":msstudio"],
+)
+
 # buildifier: disable=load-on-top
 load("//build:dev_server_run_configurations.bzl", "dev_server_run_configurations")
 
