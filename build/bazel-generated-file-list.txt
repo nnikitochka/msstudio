@@ -1763,6 +1763,7 @@ plugins/performanceTesting/remote-driver.compose
 plugins/performanceTesting/remote-driver.jcef
 plugins/performanceTesting/scripts-ui
 plugins/performanceTesting/structureView
+plugins/performanceTesting/todo
 plugins/performanceTesting/vcs
 plugins/properties
 plugins/properties/copyright
@@ -1832,6 +1833,7 @@ plugins/terminal/cloud
 plugins/terminal/completion
 plugins/terminal/completion-ml
 plugins/terminal/emulator
+plugins/terminal/execution
 plugins/terminal/frontend
 plugins/terminal/libraries
 plugins/terminal/sh

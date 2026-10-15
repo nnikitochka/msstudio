@@ -20,7 +20,6 @@ import com.intellij.openapi.editor.impl.marker.SnapshotMarkerStores
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.util.ProperTextRange
 import com.intellij.util.text.ImmutableCharSequence
-import java.util.function.UnaryOperator
 import kotlin.concurrent.Volatile
 
 internal abstract class DocumentMutatorImpl(
@@ -31,16 +30,20 @@ internal abstract class DocumentMutatorImpl(
   @Volatile private var textChangeInProgress: Boolean = false
 
   protected abstract fun getSnapshot(): DocumentSnapshot
-  protected abstract fun updateAndGet(update: UnaryOperator<DocumentSnapshot>): DocumentSnapshot
+  protected abstract fun updateAndGet(
+    initialSnapshot: DocumentSnapshot? = null,
+    patch: DocumentPatch? = null,
+    update: (DocumentSnapshot) -> DocumentSnapshot,
+  ): DocumentSnapshot
 
   override fun setModStamp(newModStamp: Long, incrementModSequence: Boolean) {
     val op = DocumentOp.modStampOp(newModStamp, incrementModSequence)
-    updateAndGet { applyOp(it, op) }
+    updateAndGet { it.applyOp(op) }
   }
 
   override fun clearLineFlags(startLine: Int, endLine: Int, exceptLines: IntArray) {
     val op = DocumentOp.unmodifiedLinesOp(startLine, endLine, exceptLines)
-    updateAndGet { applyOp(it, op) }
+    updateAndGet { it.applyOp(op) }
   }
 
   override fun insertString(
@@ -97,28 +100,23 @@ internal abstract class DocumentMutatorImpl(
       newWholeText,
       newModStamp,
       true,
-      true,
     )
   }
 
   override fun setText(hostDocument: Document, newWholeText: CharSequence) {
     val snapshot = getSnapshot()
-    executeCommandIfNeeded(
-      hostDocument,
-      Runnable {
-        replaceString(
-          hostDocument,
-          snapshot,
-          0,
-          snapshot.text().length(),
-          0,
-          newWholeText,
-          DocumentModStamp.next(),
-          true,
-          true,
-        )
-      }
-    )
+    executeCommandIfNeeded(hostDocument) {
+      replaceString(
+        hostDocument,
+        snapshot,
+        0,
+        snapshot.text().length(),
+        0,
+        newWholeText,
+        DocumentModStamp.next(),
+        true,
+      )
+    }
   }
 
   override fun moveText(
@@ -148,7 +146,6 @@ internal abstract class DocumentMutatorImpl(
       replacement,
       DocumentModStamp.next(),
       false,
-      false,
     )
     replaceString(
       hostDocument,
@@ -158,7 +155,6 @@ internal abstract class DocumentMutatorImpl(
       dstOffset,
       "",
       DocumentModStamp.next(),
-      false,
       false,
     )
   }
@@ -170,7 +166,6 @@ internal abstract class DocumentMutatorImpl(
     moveOffset: Int,
     replaceString: CharSequence,
     newModStamp: Long,
-    wholeTextReplaced: Boolean,
   ) {
     replaceString(
       hostDocument,
@@ -180,7 +175,6 @@ internal abstract class DocumentMutatorImpl(
       moveOffset,
       replaceString,
       newModStamp,
-      wholeTextReplaced,
       false,
     )
   }
@@ -224,8 +218,7 @@ internal abstract class DocumentMutatorImpl(
     moveOffset: Int,
     s: CharSequence,
     newModStamp: Long,
-    wholeText: Boolean,
-    clearLineFlags: Boolean,
+    wholeTextReplaced: Boolean,
   ): DocumentSnapshot {
     assertBounds(snapshot, startOffset, endOffset)
     assertWriteAccess(hostDocument)
@@ -242,9 +235,8 @@ internal abstract class DocumentMutatorImpl(
       endOffset,
       moveOffset,
       s,
-      wholeText,
+      wholeTextReplaced,
       newModStamp,
-      clearLineFlags,
     )
     if (replacement.perform()) {
       return snapshot
@@ -305,14 +297,7 @@ internal abstract class DocumentMutatorImpl(
     textChangeInProgress = true
     try {
       snapshotAfterChange = dispatcher.withFiringTextUpdate(changeEvent) {
-        updateAndGet { latest ->
-          val merged = if (latest.text() === snapshotBefore.text()) {
-            latest
-          } else {
-            snapshotBefore
-          }
-          applyPatch(merged, patch)
-        }
+        updateAndGet(snapshotBefore, patch) { applyPatch(it, patch) }
       }
     } finally {
       textChangeInProgress = false
@@ -320,27 +305,12 @@ internal abstract class DocumentMutatorImpl(
     return snapshotAfterChange
   }
 
-  private fun applyOp(before: DocumentSnapshot, op: DocumentOp): DocumentSnapshot {
-    val after = before.applyOp(op)
-    if (before === after) {
-      return before
-    }
-    return onSnapshotChange(before, after, null)
-  }
-
   private fun applyPatch(before: DocumentSnapshot, patch: DocumentPatch): DocumentSnapshot {
     var after = before
     for (op in patch.ops()) {
       after = after.applyOp(op)
     }
-    if (before === after) {
-      return before
-    }
-    return onSnapshotChange(before, after, patch)
-  }
-
-  private fun onSnapshotChange(before: DocumentSnapshot, after: DocumentSnapshot, patch: DocumentPatch?): DocumentSnapshot {
-    return snapshotMarkerStores.applyPatch(before, after, patch)
+    return after
   }
 
   private fun trimToSize(hostDocument: Document, snapshot: DocumentSnapshot): DocumentSnapshot {
@@ -355,18 +325,18 @@ internal abstract class DocumentMutatorImpl(
     return snapshot
   }
 
-  private fun executeCommandIfNeeded(hostDocument: Document, runnable: Runnable) {
+  private inline fun executeCommandIfNeeded(hostDocument: Document, crossinline command: () -> Unit) {
     if (!settings.isCommandCheckEnabled()) {
-      runnable.run()
+      command.invoke()
       return
     }
     val commandProcessor = CommandProcessor.getInstance()
-    if (commandProcessor.isUndoTransparentActionInProgress) {
-      runnable.run()
+    if (commandProcessor.isUndoTransparentActionInProgress || commandProcessor.isCommandInProgress) {
+      command.invoke()
     } else {
       commandProcessor.executeCommand(
         null,
-        runnable,
+        Runnable { command.invoke() },
         "",
         DocCommandGroupId.noneGroupId(hostDocument),
       )

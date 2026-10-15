@@ -1201,6 +1201,16 @@ public abstract class KotlinFirInlineTestGenerated extends AbstractKotlinFirInli
                 runTest("testData/inline/namedFunction/expressionBody/also2.kt");
             }
 
+            @TestMetadata("annotatedExpression.kt")
+            public void testAnnotatedExpression() throws Exception {
+                runTest("testData/inline/namedFunction/expressionBody/annotatedExpression.kt");
+            }
+
+            @TestMetadata("annotatedExpressionInfix.kt")
+            public void testAnnotatedExpressionInfix() throws Exception {
+                runTest("testData/inline/namedFunction/expressionBody/annotatedExpressionInfix.kt");
+            }
+
             @TestMetadata("ComplexArgumentNotUsed.kt")
             public void testComplexArgumentNotUsed() throws Exception {
                 runTest("testData/inline/namedFunction/expressionBody/ComplexArgumentNotUsed.kt");
@@ -2941,6 +2951,11 @@ public abstract class KotlinFirInlineTestGenerated extends AbstractKotlinFirInli
         @TestMetadata("constructorSuperProperty.kt")
         public void testConstructorSuperProperty() throws Exception {
             runTest("testData/inline/superClass/constructorSuperProperty.kt");
+        }
+
+        @TestMetadata("constructorSuperclass.kt")
+        public void testConstructorSuperclass() throws Exception {
+            runTest("testData/inline/superClass/constructorSuperclass.kt");
         }
 
         @TestMetadata("constructorSuperclassArgument.kt")

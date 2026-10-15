@@ -234,7 +234,7 @@ internal class ToolWindowManagerAppLevelHelper(coroutineScope: CoroutineScope) {
             toolWindowManager.activateToolWindow(toolWindowId, null, true)
           }
 
-          if (event.place == ActionPlaces.TOOLWINDOW_POPUP) {
+          if (ActionPlaces.isToolWindowPopupPlace(event.place)) {
             val toolWindowManager = ToolWindowManager.getInstance(event.project!!) as ToolWindowManagerImpl
             val activeEntry = toolWindowManager.idToEntry.get(toolWindowManager.lastActiveToolWindowId ?: return) ?: return
             (activeEntry.toolWindow.decorator ?: return).headerToolbar.component.isVisible = true

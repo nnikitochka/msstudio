@@ -46,6 +46,7 @@ targets:
   - ../crates/avl-host-sys/src/fs.rs
   - ../crates/avl-base/src/lib.rs
   - ../crates/avl-host-sys/src/lock.rs
+  - ../crates/avl-host-sys/src/proc/identity.rs
   - ../crates/avl-report/src/report.rs
   - ../crates/avl-report/src/aggregate.rs
   - ../crates/avl-report/src/aggregate/persist.rs
@@ -112,6 +113,7 @@ targets:
   - ../crates/avl-vm/src/worker/worker/tests.rs
   - ../crates/avl-vm/src/worker/lease.rs
   - ../crates/avl-vm/src/worker/lease/set.rs
+  - ../crates/avl-vm/src/worker/run_marker.rs
   - ../crates/avl-host-sys/src/interrupt.rs
   - ../crates/avl-vm/src/lane/observe.rs
   - ../crates/avl-vm/src/lane/observe/exec.rs
@@ -314,10 +316,12 @@ The rest of the scenario matrix is in
   [@test] ../crates/avl-base/src/config/tests.rs
 
 - A macOS host that names no engine runs the Docker workers on Apple `container` from macOS 26 on Apple silicon.
-  An older macOS runs them on the Lima engine. `AIR_VM_DOCKER_ENGINE=lima` or `container` overrides the version. A
-  host that names an engine in `DOCKER_BIN` or `DOCKER_HOST` keeps that engine.
+  Another Mac keeps the engine of its host environment. Its first engine command refuses `docker_missing` when that
+  engine does not answer. A host that names an engine in `DOCKER_BIN` or `DOCKER_HOST` keeps that engine. A set
+  `AIR_VM_DOCKER_ENGINE` is refused `invalid_environment`.
   [@test] ../crates/avl-base/src/config/tests.rs (`the_macos_version_chooses_the_engine`)
-  [@test] ../crates/avl-base/src/config/tests.rs (`the_container_choice_applies_only_to_a_mac_that_names_no_engine`)
+  [@test] ../crates/avl-base/src/config/tests.rs (`the_removed_engine_variable_is_refused`)
+  [@test] ../crates/avl-vm/src/worker/docker/tests.rs (`an_older_mac_that_names_no_engine_is_told_the_two_ways_out`)
 
 - On Apple `container`, the controller uses the server of the login session and never stops it. It starts a server
   that is down. It refuses a server of another install with another major version.
@@ -538,6 +542,12 @@ The daemon's half and the IDE's half of supervision are in
   its reason, in every output form.
   [@test] ../crates/avl-wire/src/progress/tests.rs
   [@test] ../crates/avl-vm/src/console/state/tests.rs
+
+- A test jar that the host rebuilt while the iteration ran is a note, not a verdict diagnostic. The terminal and the
+  run journal show the note, and the report carries it in `notes`. The note names the jars. The status follows the
+  counts.
+  [@test] ../crates/avl-report/src/report/tests.rs
+  [@test] ../crates/avl-vm/src/daemon/iterate/tests.rs
 
 - The run journal holds the life of the lane IDE. An `ideLaunched` record names the pid, the launch name, the
   launch key and the log directory. An `ideExited` record names the pid, the exit code and the signal.
@@ -816,6 +826,22 @@ The daemon's half and the IDE's half of supervision are in
 - `ide-gc` keeps the newest log directories of each context. It always keeps the log directory of a live IDE.
   [@test] ../crates/avl-guest/src/ide/gc/tests.rs
 
+- A cancel never refuses with `cancel_timeout` and never leaves the slot held. When the supervisor does not end the
+  cancel within its deadline, the agent kills the supervisor and the process group of the child. The run then
+  finishes as canceled, and `ide-gc` reports the IDE as killed.
+  [@test] ../crates/avl-guest/src/supervisor/tests.rs (`a_cancel_past_its_deadline_kills_the_supervisor_and_the_group_and_frees_the_slot`)
+  [@test] ../crates/avl-vm/src/lane/ide/tests.rs (`the_gc_note_names_what_the_gc_did`)
+
+- A process group that outlives the kill is abandoned. The run finishes as canceled with the survivors named, the
+  slot is free, and `abandoned.json` in the context records the run. Only a recycle of the worker discards these
+  processes.
+  [@test] ../crates/avl-guest/src/supervisor/tests.rs (`a_group_that_outlives_the_kill_is_abandoned_and_its_slot_freed`)
+
+- `ide-gc` names each abandoned run while its process group lives, and it removes the record of a group that is
+  gone. The `status` row of the worker gives these runs in `abandonedIdeRuns`, and its text asks for a recycle.
+  [@test] ../crates/avl-guest/src/ide/gc/tests.rs (`an_abandoned_run_is_named_while_its_group_lives`)
+  [@test] ../crates/avl-vm/src/lane/observe/status/tests.rs (`a_guest_that_abandoned_an_ide_run_names_it_on_its_row`)
+
 - A fresh preparation deletes the data directories, the project, the `home` and `bin` directories, the argument
   file and the launch record. It keeps the log directories and the run directories of earlier launches, and
   `ide-gc` trims them.
@@ -856,6 +882,17 @@ The daemon's half and the IDE's half of supervision are in
   [@test] ../crates/avl-vm/src/worker/lease/set/tests.rs
   [@test] ../crates/avl-vm/src/worker/lease/tests.rs
 
+- An acquisition skips a busy worker and leases a free one. Another operation, such as a start, holds the lifecycle
+  lock of a busy worker. A busy worker that may hold a lease of the holder refuses the acquisition as `worker_busy`,
+  so the holder gets no second worker. A lease that the controller cannot read counts as such a lease. A busy worker
+  can stop the placement of the lease, or of the full set of `--exact`. Then the refusal is `worker_busy`. Without a
+  busy worker it is `pool_exhausted`. Both exit 75.
+  [@test] ../crates/avl-vm/src/worker/lease/set/tests.rs
+
+- A holder recovery refuses `worker_busy` while a live run of the holder is on the worker. A stale marker does not
+  stop the recovery.
+  [@test] ../crates/avl-vm/src/worker/lease/set/tests.rs
+
 - A lease acquisition and a start remove the deadline record, so the worker keeps running for its new holder.
   [@test] ../crates/avl-vm/src/worker/lease/tests.rs
   [@test] ../crates/avl-vm/src/worker/worker/docker/tests.rs
@@ -880,6 +917,32 @@ The daemon's half and the IDE's half of supervision are in
 - A release is refused when an iteration is in flight. The refusal gives the name of that run. The lease stays
   in place, and the holder keeps the receipt for it.
   [@test] ../crates/avl-vm/src/worker/lease/tests.rs
+
+- A run takes the lifecycle lock of its worker twice: when it writes its run marker and when it removes it. The
+  marker names the run, the lease and the process.
+  [@test] ../crates/avl-vm/src/worker/lease/tests.rs
+  [@test] ../crates/avl-vm/src/worker/run_marker/tests.rs
+  [@test] ../crates/avl-vm/src/daemon/leased/tests.rs
+
+- A live run of another process blocks the commands that change its worker. `lease release`, `pool start`,
+  `pool stop`, `exec`, `peekaboo` and the `daemon` verbs `start`, `restart` and `stop` then refuse `lease_busy`.
+  The refusal names the run.
+  [@test] ../crates/avl-vm/src/worker/lease/tests.rs
+  [@test] ../crates/avl-vm/src/worker/worker/tests.rs
+  [@test] ../crates/avl-vm/src/daemon/command/tests.rs
+  [@test] ../crates/avl-vm/src/lane/observe/exec/tests.rs
+
+- A marker of a dead process is stale. The next operation under the lock removes it, and a note says so. The guest
+  check of the release still decides about an iteration that the dead process left.
+  [@test] ../crates/avl-vm/src/worker/lease/tests.rs
+  [@test] ../crates/avl-vm/src/worker/run_marker/tests.rs
+
+- `lease show`, `daemon status`, `daemon log`, `ls` and `pull` answer during a run. `lease show` with the receipt
+  names the run.
+  [@test] ../crates/avl-vm/src/worker/lease/tests.rs
+  [@test] ../crates/avl-vm/src/daemon/command/tests.rs
+  [@test] ../crates/avl-vm/src/lane/observe/ls/tests.rs
+  [@test] ../crates/avl-vm/src/lane/observe/pull/tests.rs
 
 - A daemon that does not answer is not a parked daemon. The controller refuses the release for such a daemon.
   The refusal gives the name of the daemon record that the controller compared, and the name of the command
@@ -963,18 +1026,44 @@ The daemon's half and the IDE's half of supervision are in
   Parallels backend refuses a recycle as `unsupported_backend_operation`.
   [@test] ../crates/avl-vm/src/worker/worker/tests.rs
 
-- A recycle never touches a leased worker. `pool recycle <worker>` on a leased worker is refused as
-  `worker_leased`, and that refusal names the command which releases the lease. The worker keeps its lease,
-  its machine and its clone.
-  [@test] ../crates/avl-vm/src/worker/worker/tests.rs
+- A recycle never touches a worker that another holder leased. `pool recycle <worker>` on such a worker is refused
+  as `worker_leased`. That refusal names the command which releases the lease, and the recycle of the holder. The
+  worker keeps its lease, its machine and its clone.
+  [@test] ../crates/avl-vm/src/worker/worker/tests.rs (`recycle_refuses_a_leased_worker_and_deletes_nothing`)
+
+- The holder recycles the worker of its lease with `--lease-file FILE pool recycle <worker>`, and the recycle gives
+  the lease back. A guest that refuses does not stop it, because the recycle discards that guest. This is the
+  repair for a lease that `lease release` cannot give back.
+  [@test] ../crates/avl-vm/src/worker/worker/docker/tests.rs (`a_holder_recycles_its_leased_worker_under_its_receipt_and_gives_the_lease_back`)
+
+- A receipt authorizes the recycle of its own worker only. A recycle of another worker or of `all` under that receipt
+  is refused as `usage`, and nothing is deleted.
+  [@test] ../crates/avl-vm/src/worker/worker/docker/tests.rs (`a_receipt_does_not_authorize_the_recycle_of_another_target`)
 
 - `pool recycle all` recycles the workers which it can, and reports each worker which it did not recycle.
   The answer names the recycled workers, and gives one refusal code for each other worker. A recycle which
   did not reach every target is refused as `recycle_incomplete`, and that answer is the refusal detail.
   [@test] ../crates/avl-vm/src/worker/worker/tests.rs
 
+- `pool gc` keeps a busy worker and goes on with the other workers. Another operation holds the lifecycle lock of a
+  busy worker, such as a start. The answer names that worker in `kept` as `busy`.
+  [@test] ../crates/avl-vm/src/worker/worker/docker/tests.rs
+
 - `recycle_incomplete` exits 75 when a lease or another lifecycle operation was the only thing in the way. It
   exits 1 when a worker was broken. A caller must not read a partial recycle as a fresh pool.
+  [@test] ../crates/avl-vm/src/worker/worker/tests.rs
+
+- `pool start all` and `pool stop all` change the workers which they can, and report each worker which they did
+  not. The answer names the state of each changed worker, and gives one refusal code for each other worker. A
+  start or a stop which did not reach every target is refused as `start_incomplete` or `stop_incomplete`, and that
+  answer is the refusal detail. The refusal exits 75 when each refusal of a worker exits 75, as a lease or another
+  lifecycle operation does. In all other cases it exits 1. `pool start <worker>` and `pool stop <worker>` answer
+  the refusal of that worker.
+  [@test] ../crates/avl-vm/src/worker/worker/tests.rs
+  [@test] ../crates/avl-vm/src/worker/worker/docker/tests.rs
+
+- An interrupt ends `pool start all`, `pool stop all` and `pool recycle all` at once. The answer is the refusal of
+  the interrupted worker. The workers after it stay as they are.
   [@test] ../crates/avl-vm/src/worker/worker/tests.rs
 
 ## User Experience

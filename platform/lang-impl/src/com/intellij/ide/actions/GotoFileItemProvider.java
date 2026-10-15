@@ -18,7 +18,6 @@ import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.ProjectFileIndex;
 import com.intellij.openapi.util.Ref;
-import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.io.FileUtilRt;
 import com.intellij.openapi.util.io.OSAgnosticPathUtil;
@@ -396,7 +395,8 @@ public class GotoFileItemProvider extends DefaultChooseByNameItemProvider {
    * Resolves a Go to File pattern that is an absolute path, or a path relative to the project base directory.
    * <p>
    * The line and column suffix of the pattern is ignored. A file outside the project content and libraries
-   * is found only for an absolute path, and only when {@code search.everywhere.absolute.path.outside.project} is on.
+   * is found only for an absolute path or a path relative to the project base directory,
+   * and only when {@code search.everywhere.absolute.path.outside.project} is on.
    * Needs a read action.
    *
    * @return the file or directory the pattern points to, or {@code null} if the pattern is not such a path
@@ -410,15 +410,17 @@ public class GotoFileItemProvider extends DefaultChooseByNameItemProvider {
     // the line and column detection is the same for every model that is not a class or symbol model
     String path = FileUtil.toSystemIndependentName(ChooseByNamePopup.getTransformedPattern(pattern, null));
     if (Registry.is("search.everywhere.absolute.path.outside.project")) {
-      if (!SystemInfo.isWindows) {
-        // '~' is a shell convention, not a Windows one
-        path = OSAgnosticPathUtil.expandUserHome(path);
-      }
+      path = OSAgnosticPathUtil.expandUserHome(path);
       // the filesystem root is not a meaningful exact match, and being one it would outrank every real candidate
       if (OSAgnosticPathUtil.isAbsolute(path) && !isFileSystemRoot(path)) {
         // an absolute path is an explicit navigation request, so the file doesn't have to belong to the project
         VirtualFile vFile = findFileByAbsolutePathWithoutCaching(path);
         return vFile == null ? null : PsiUtilCore.findFileSystemItem(project, vFile);
+      }
+      if (!OSAgnosticPathUtil.isAbsolute(path)) {
+        // a path relative to the project base directory is just as explicit, and a file search may well skip it, e.g. a git-ignored file
+        VirtualFile vFile = findFileRelativeToBasePath(project, path);
+        if (vFile != null) return PsiUtilCore.findFileSystemItem(project, vFile);
       }
     }
 
@@ -471,6 +473,13 @@ public class GotoFileItemProvider extends DefaultChooseByNameItemProvider {
       return cacheAvoiding.asCacheable();
     }
     return file;
+  }
+
+  private static @Nullable VirtualFile findFileRelativeToBasePath(@NotNull Project project, @NotNull String relativePath) {
+    String basePath = project.getBasePath();
+    if (basePath == null) return null;
+    String path = FileUtil.toCanonicalPath(basePath + "/" + relativePath);
+    return isFileSystemRoot(path) ? null : findFileByAbsolutePathWithoutCaching(path);
   }
 
   /** @return true for {@code "/"}, {@code "//"} and a bare DOS drive root such as {@code "C:/"} */

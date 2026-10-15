@@ -18,6 +18,7 @@ import com.intellij.ide.ui.UISettingsListener
 import com.intellij.injected.editor.VirtualFileWindow
 import com.intellij.lang.LangBundle
 import com.intellij.notebook.editor.BackedVirtualFile
+import com.intellij.openapi.DelicateLockingApi
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.actionSystem.ActionManager
 import com.intellij.openapi.actionSystem.IdeActions
@@ -57,17 +58,16 @@ import com.intellij.openapi.extensions.ExtensionPointName
 import com.intellij.openapi.extensions.PluginDescriptor
 import com.intellij.openapi.fileEditor.ClientFileEditorManager
 import com.intellij.openapi.fileEditor.CompositeTabIconHolderCreator
+import com.intellij.openapi.fileEditor.EditorOpenFuture
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.fileEditor.FileEditor
-import com.intellij.openapi.fileEditor.FileEditorOpenRequest
-import com.intellij.openapi.fileEditor.ex.buildFileEditorOpenOptions
-import com.intellij.openapi.fileEditor.ex.resolveOpenMode
 import com.intellij.openapi.fileEditor.FileEditorComposite
 import com.intellij.openapi.fileEditor.FileEditorManagerEvent
 import com.intellij.openapi.fileEditor.FileEditorManagerKeys
 import com.intellij.openapi.fileEditor.FileEditorManagerListener
-import com.intellij.openapi.fileEditor.EditorOpenFuture
 import com.intellij.openapi.fileEditor.FileEditorNavigatable
+import com.intellij.openapi.fileEditor.FileEditorOpenRequest
+import com.intellij.openapi.fileEditor.FileEditorPolicy
 import com.intellij.openapi.fileEditor.FileEditorProvider
 import com.intellij.openapi.fileEditor.FileEditorState
 import com.intellij.openapi.fileEditor.NavigatableFileEditor
@@ -76,6 +76,8 @@ import com.intellij.openapi.fileEditor.TextEditor
 import com.intellij.openapi.fileEditor.ex.FileEditorManagerEx
 import com.intellij.openapi.fileEditor.ex.FileEditorProviderManager
 import com.intellij.openapi.fileEditor.ex.FileEditorWithProvider
+import com.intellij.openapi.fileEditor.ex.buildFileEditorOpenOptions
+import com.intellij.openapi.fileEditor.ex.resolveOpenMode
 import com.intellij.openapi.fileEditor.impl.text.AsyncEditorLoader
 import com.intellij.openapi.fileEditor.impl.text.TEXT_EDITOR_PROVIDER_TYPE_ID
 import com.intellij.openapi.fileEditor.impl.text.TextEditorProvider
@@ -560,17 +562,33 @@ open class FileEditorManagerImpl(
     refreshIcons()
 
     val fileToNewProviders = openedComposites.toList().mapNotNull { composite ->
-      if (composite.providerSequence.none()) {
+      val oldProviders = composite.providerSequence.toList()
+      if (oldProviders.isEmpty()) {
         // not initialized or invalid
         return@mapNotNull null
       }
 
-      val newProviders = fileEditorProviderManager.getDumbUnawareProviders(project, composite.file, excludeIds = getEditorTypeIds(composite))
+      val newProviders = fileEditorProviderManager.getDumbUnawareProviders(
+        project = project,
+        file = composite.file,
+        excludeIds = oldProviders.mapTo(HashSet()) { it.editorTypeId },
+      )
       if (newProviders.isEmpty()) {
+        return@mapNotNull null
+      }
+
+      // HIDE_OTHER_EDITORS applies to the editors opened in dumb mode and to the ones added after it, as if the file was opened in smart mode
+      if ((oldProviders.asSequence() + newProviders).none { it.policy == FileEditorPolicy.HIDE_OTHER_EDITORS }) {
+        return@mapNotNull ProviderChange(composite = composite, newProviders = newProviders, editorTypeIdsToRemove = emptyList())
+      }
+
+      val providersToAdd = newProviders.filter { it.policy == FileEditorPolicy.HIDE_OTHER_EDITORS }
+      val editorTypeIdsToRemove = oldProviders.filter { it.policy != FileEditorPolicy.HIDE_OTHER_EDITORS }.map { it.editorTypeId }
+      if (providersToAdd.isEmpty() && editorTypeIdsToRemove.isEmpty()) {
         null
       }
       else {
-        ProviderChange(composite = composite, newProviders = newProviders, editorTypeIdsToRemove = emptyList())
+        ProviderChange(composite = composite, newProviders = providersToAdd, editorTypeIdsToRemove = editorTypeIdsToRemove)
       }
     }
 
@@ -2883,6 +2901,7 @@ fun blockingWaitForCompositeFileOpen(composite: EditorComposite) {
   }
 }
 
+@OptIn(DelicateLockingApi::class)
 @Suppress("RAW_RUN_BLOCKING")
 @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
 private fun Job.waitBlockingAndPumpEdt() {

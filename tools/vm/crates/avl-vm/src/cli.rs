@@ -58,8 +58,8 @@ pub(crate) const PROGRAM: &str = "./community/tools/vm.cmd";
 
 /// The paragraphs under the help of `vm`: the pools, the global options, and the form of the output.
 const AFTER_HELP: &str = "--backend names a pool: docker (the default) is the Ubuntu guest in a container, with its own \
-air-docker-N slots and an image the controller builds; on macOS its engine is a Lima VM the controller starts, and \
-elsewhere it is the engine DOCKER_HOST names or the host's own. tart is a sealed macOS guest with its own \
+air-docker-N slots and an image the controller builds; its engine is the one DOCKER_BIN or DOCKER_HOST names, else \
+Apple container on macOS 26 or newer on Apple silicon, else the host's own. tart is a sealed macOS guest with its own \
 air-macos-N slots, and parallels is the single pre-existing macOS VM. A command without --backend, such as \
 pool stop, acts on the docker pool. A lease receipt records the selection, so later receipt-bearing commands \
 infer it.
@@ -321,11 +321,17 @@ pub(crate) enum PoolVerb {
         golden: Option<String>,
     },
     /// Starts every worker, or one.
+    ///
+    /// A named worker answers its own refusal. "all" starts the other workers and then refuses start_incomplete,
+    /// naming each refused worker: 75 when a lease or a lock was the only thing in its way, 1 when something is broken.
     Start {
         #[arg(value_name = "all|worker", default_value = "all", value_parser = pool_target)]
         target: PoolTarget,
     },
     /// Stops every worker, or one.
+    ///
+    /// A named worker answers its own refusal. "all" stops the other workers and then refuses stop_incomplete,
+    /// naming each refused worker: 75 when a lease or a lock was the only thing in its way, 1 when something is broken.
     Stop {
         #[arg(value_name = "all|worker", default_value = "all", value_parser = pool_target)]
         target: PoolTarget,
@@ -340,8 +346,9 @@ pub(crate) enum PoolVerb {
     /// The repair for a worker whose guest is unusable: stop, delete the clone, re-clone, start, provision. The target
     /// is never defaulted, because this deletes clones. A leased worker is refused when it is named, and reported
     /// unrecycled by "all", which recycles the rest and then refuses: 75 when a lease was the only thing in its way, 1
-    /// when something is broken. On the macOS pool the sealed golden and the per-worker provenance still hold: a
-    /// recycle is pool gc plus a re-clone, not a way around the image.
+    /// when something is broken. With --lease-file, the holder recycles the worker of its lease and gives the lease
+    /// back, also when the guest refuses a release. On the macOS pool the sealed golden and the per-worker provenance
+    /// still hold: a recycle is pool gc plus a re-clone, not a way around the image.
     Recycle {
         #[arg(value_name = "all|worker", value_parser = pool_target)]
         target: PoolTarget,

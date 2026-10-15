@@ -14075,6 +14075,11 @@ public abstract class K2IntentionTestGenerated extends AbstractK2IntentionTest {
             runTest("../../../idea/tests/testData/intentions/moveToCompanionExtension/infixFun.kt");
         }
 
+        @TestMetadata("internalReceiver.kt")
+        public void testInternalReceiver() throws Exception {
+            runTest("../../../idea/tests/testData/intentions/moveToCompanionExtension/internalReceiver.kt");
+        }
+
         @TestMetadata("invokeOperator.kt")
         public void testInvokeOperator() throws Exception {
             runTest("../../../idea/tests/testData/intentions/moveToCompanionExtension/invokeOperator.kt");
@@ -14088,6 +14093,21 @@ public abstract class K2IntentionTestGenerated extends AbstractK2IntentionTest {
         @TestMetadata("jvmStaticPropertyFromCompanionObject.kt")
         public void testJvmStaticPropertyFromCompanionObject() throws Exception {
             runTest("../../../idea/tests/testData/intentions/moveToCompanionExtension/jvmStaticPropertyFromCompanionObject.kt");
+        }
+
+        @TestMetadata("lastCompanionObjectMemberWithImplicitReceiver.kt")
+        public void testLastCompanionObjectMemberWithImplicitReceiver() throws Exception {
+            runTest("../../../idea/tests/testData/intentions/moveToCompanionExtension/lastCompanionObjectMemberWithImplicitReceiver.kt");
+        }
+
+        @TestMetadata("lastCompanionObjectMemberWithThis.kt")
+        public void testLastCompanionObjectMemberWithThis() throws Exception {
+            runTest("../../../idea/tests/testData/intentions/moveToCompanionExtension/lastCompanionObjectMemberWithThis.kt");
+        }
+
+        @TestMetadata("lastNamedCompanionObjectMemberWithThis.kt")
+        public void testLastNamedCompanionObjectMemberWithThis() throws Exception {
+            runTest("../../../idea/tests/testData/intentions/moveToCompanionExtension/lastNamedCompanionObjectMemberWithThis.kt");
         }
 
         @TestMetadata("memberExtensionFun.kt")
@@ -14108,6 +14128,11 @@ public abstract class K2IntentionTestGenerated extends AbstractK2IntentionTest {
         @TestMetadata("memberFunctionShortening.kt")
         public void testMemberFunctionShortening() throws Exception {
             runTest("../../../idea/tests/testData/intentions/moveToCompanionExtension/memberFunctionShortening.kt");
+        }
+
+        @TestMetadata("memberFunctionWithCompanionObjectThis.kt")
+        public void testMemberFunctionWithCompanionObjectThis() throws Exception {
+            runTest("../../../idea/tests/testData/intentions/moveToCompanionExtension/memberFunctionWithCompanionObjectThis.kt");
         }
 
         @TestMetadata("memberFunctionWithInstanceAccess.kt")
@@ -14143,6 +14168,26 @@ public abstract class K2IntentionTestGenerated extends AbstractK2IntentionTest {
         @TestMetadata("plusOperator.kt")
         public void testPlusOperator() throws Exception {
             runTest("../../../idea/tests/testData/intentions/moveToCompanionExtension/plusOperator.kt");
+        }
+
+        @TestMetadata("privateCompanionBlockMember.kt")
+        public void testPrivateCompanionBlockMember() throws Exception {
+            runTest("../../../idea/tests/testData/intentions/moveToCompanionExtension/privateCompanionBlockMember.kt");
+        }
+
+        @TestMetadata("privateNestedReceiver.kt")
+        public void testPrivateNestedReceiver() throws Exception {
+            runTest("../../../idea/tests/testData/intentions/moveToCompanionExtension/privateNestedReceiver.kt");
+        }
+
+        @TestMetadata("privateReceiver.kt")
+        public void testPrivateReceiver() throws Exception {
+            runTest("../../../idea/tests/testData/intentions/moveToCompanionExtension/privateReceiver.kt");
+        }
+
+        @TestMetadata("privateTopLevelHelper.kt")
+        public void testPrivateTopLevelHelper() throws Exception {
+            runTest("../../../idea/tests/testData/intentions/moveToCompanionExtension/privateTopLevelHelper.kt");
         }
     }
 

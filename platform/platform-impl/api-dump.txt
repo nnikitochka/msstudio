@@ -1985,6 +1985,8 @@ c:com.intellij.notification.impl.ui.StickyButton
 - p:createUI():javax.swing.plaf.ButtonUI
 - getForeground():java.awt.Color
 - setUI(javax.swing.plaf.ButtonUI):V
+@:com.intellij.openapi.DelicateLockingApi
+- java.lang.annotation.Annotation
 c:com.intellij.openapi.actionSystem.SplitButtonAction
 - com.intellij.openapi.actionSystem.ActionGroupWrapper
 - com.intellij.openapi.actionSystem.ex.CustomComponentAction
@@ -5140,7 +5142,6 @@ c:com.intellij.ui.components.BasicOptionButtonUI$MainButton
 - com.intellij.ui.components.BasicOptionButtonUI$BaseButton
 - <init>(com.intellij.ui.components.BasicOptionButtonUI):V
 f:com.intellij.ui.components.ComponentsKt
-- sf:RadioButton(java.lang.String):javax.swing.JRadioButton
 com.intellij.ui.components.DialogManager
 - a:performAction(kotlin.jvm.functions.Function0):V
 - bs:performAction$default(com.intellij.ui.components.DialogManager,kotlin.jvm.functions.Function0,I,java.lang.Object):V
