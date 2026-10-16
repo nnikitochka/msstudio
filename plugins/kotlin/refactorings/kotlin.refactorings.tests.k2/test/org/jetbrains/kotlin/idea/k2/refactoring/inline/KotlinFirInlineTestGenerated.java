@@ -2159,6 +2159,11 @@ public abstract class KotlinFirInlineTestGenerated extends AbstractKotlinFirInli
                 runTest("testData/inline/namedFunction/DiffirentNamedParameters.kt");
             }
 
+            @TestMetadata("dropEmptyNamedVarargArray.kt")
+            public void testDropEmptyNamedVarargArray() throws Exception {
+                runTest("testData/inline/namedFunction/dropEmptyNamedVarargArray.kt");
+            }
+
             @TestMetadata("emptyBody.kt")
             public void testEmptyBody() throws Exception {
                 runTest("testData/inline/namedFunction/emptyBody.kt");
@@ -2217,6 +2222,21 @@ public abstract class KotlinFirInlineTestGenerated extends AbstractKotlinFirInli
             @TestMetadata("extensionFunction2.kt")
             public void testExtensionFunction2() throws Exception {
                 runTest("testData/inline/namedFunction/extensionFunction2.kt");
+            }
+
+            @TestMetadata("forwardIntVarargToAnyVararg.kt")
+            public void testForwardIntVarargToAnyVararg() throws Exception {
+                runTest("testData/inline/namedFunction/forwardIntVarargToAnyVararg.kt");
+            }
+
+            @TestMetadata("forwardVarargArrayValueToVararg.kt")
+            public void testForwardVarargArrayValueToVararg() throws Exception {
+                runTest("testData/inline/namedFunction/forwardVarargArrayValueToVararg.kt");
+            }
+
+            @TestMetadata("forwardVarargToVararg.kt")
+            public void testForwardVarargToVararg() throws Exception {
+                runTest("testData/inline/namedFunction/forwardVarargToVararg.kt");
             }
 
             @TestMetadata("functionReferenceBeforeLambdaArgument.kt")
@@ -2282,6 +2302,11 @@ public abstract class KotlinFirInlineTestGenerated extends AbstractKotlinFirInli
             @TestMetadata("InvokeFunction.kt")
             public void testInvokeFunction() throws Exception {
                 runTest("testData/inline/namedFunction/InvokeFunction.kt");
+            }
+
+            @TestMetadata("keepVarargArrayForArrayParameter.kt")
+            public void testKeepVarargArrayForArrayParameter() throws Exception {
+                runTest("testData/inline/namedFunction/keepVarargArrayForArrayParameter.kt");
             }
 
             @TestMetadata("Kt19459.kt")
