@@ -2525,7 +2525,8 @@ open class FileEditorManagerImpl(
         continue
       }
 
-      if (fileEntry.currentInTab || !isLazyComposite) {
+      val isInitializedNow = fileEntry.currentInTab || !isLazyComposite
+      if (isInitializedNow) {
         composite.initDeferred.complete(Unit)
       }
 
@@ -2543,7 +2544,12 @@ open class FileEditorManagerImpl(
         }
       }
       val customizer = { tab: TabInfo ->
-        tab.setIconHolder(CompositeTabIconHolderCreator.getInstance().createTabIconHolder(composite, tab))
+        tab.setIconHolder(CompositeTabIconHolderCreator.getInstance().createTabIconHolder(
+          composite = composite,
+          owner = tab,
+          startupIcon = item.cachedTabIcon,
+          waitForEditors = isInitializedNow,
+        ))
         item.customizer(tab)
       }
 
@@ -2561,7 +2567,7 @@ open class FileEditorManagerImpl(
       openedCompositeEntries.add(editorCompositeEntry)
       composite.coroutineScope.launch {
         // remove delayed state as soon as composite can provide state
-        composite.waitForAvailable()
+        composite.waitForAvailableWithoutTriggeringInit()
         editorCompositeEntry.delayedState = null
       }
     }

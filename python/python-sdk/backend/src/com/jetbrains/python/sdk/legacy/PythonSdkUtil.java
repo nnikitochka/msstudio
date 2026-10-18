@@ -123,10 +123,21 @@ public final class PythonSdkUtil {
   }
 
   /**
-   * Consider to use suspended {@link com.jetbrains.python.sdk.ModuleExKt#findPythonSdk} instead, it waits for project model to be ready
+   * @deprecated Use the interpreter of the Python project, {@code PyProject.getInterpreter}. It waits for the project structure.
+   * A caller that cannot wait reads the snapshot of {@code EvoPyProjectModel}.
    */
-  @ApiStatus.Obsolete
+  @Deprecated
   public static @Nullable Sdk findPythonSdk(@Nullable Module module) {
+    return readStoredPythonSdk(module);
+  }
+
+  /**
+   * The Python SDK stored on {@code module}, read now. For low-level code that runs inside the platform roots-change
+   * cycle and fills an index from it, such as the language level pusher. Every other caller reads the interpreter of
+   * the Python project.
+   */
+  @ApiStatus.Internal
+  public static @Nullable Sdk readStoredPythonSdk(@Nullable Module module) {
     if (module == null || module.isDisposed()) {
       return null;
     }
@@ -292,6 +303,11 @@ public final class PythonSdkUtil {
     return ProjectJdkTable.getInstance().findJdk(key);
   }
 
+  /**
+   * @deprecated Use the interpreter of the Python project of the file, {@code findPythonInterpreter(file)}.
+   * A caller that cannot wait reads {@code EvoPyProjectModel.snapshotOrNull()?.forFile(file)}.
+   */
+  @Deprecated
   public static @Nullable Sdk findPythonSdk(final @NotNull PsiElement element) {
     return findPythonSdk(ModuleUtilCore.findModuleForPsiElement(element));
   }

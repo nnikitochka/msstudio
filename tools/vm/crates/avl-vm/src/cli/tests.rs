@@ -356,6 +356,27 @@ fn a_global_option_after_the_command_is_the_same_option() {
     );
 }
 
+// `--runner` is a global option: a known word names the runner on either side of the command, and an unknown word is a
+// usage refusal before any command runs.
+#[test]
+fn the_runner_is_a_global_option_with_two_words() {
+    let pipe = TerminalFacts::default();
+    assert_eq!(invocation(&["status"], &pipe).runner, None);
+    assert_eq!(
+        invocation(&["--runner", "daemon", "daemon", "status"], &pipe).runner,
+        Some(Runner::Daemon)
+    );
+    assert_eq!(
+        invocation(&["daemon", "status", "--runner", "jvm"], &pipe).runner,
+        Some(Runner::Jvm)
+    );
+    let Parsed::Refused { command, refusal, .. } = parse_argv(&["--runner", "kotlin", "status"], &pipe) else {
+        panic!("an unknown runner was accepted");
+    };
+    assert_eq!((command, refusal.exit), (None, Exit::USAGE));
+    assert!(refusal.message.contains("the runners are jvm, daemon"), "{}", refusal.message);
+}
+
 // An acquisition that names no holder takes the invoking user's, in the shape a self-leased run uses, so a caller
 // needs no uuid of its own; a named holder is kept as it is.
 #[test]
@@ -730,8 +751,8 @@ fn the_help_names_the_wrapper_and_interpolates_the_lists_it_does_not_own() {
     // Each of these has exactly one owner; the help text reads it rather than restating it.
     let text = every_long_help().join("\n");
     for expected in [
-        "ui|ui-real|ui-live|ui-perf|gui-chat",
-        "explicit-only lane (ui-live, ui-perf)",
+        "ui|ui-real|ui-live|ui-perf|jcp|gui-chat",
+        "explicit-only lane (ui-live, ui-perf, jcp)",
         "none|fresh-ide|daemon",
         "capped at 5",
         "default --reset fresh-ide",

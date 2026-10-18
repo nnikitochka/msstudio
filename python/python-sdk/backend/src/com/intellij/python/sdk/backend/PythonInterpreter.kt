@@ -1,23 +1,29 @@
 // Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.python.sdk.backend
 
+import com.intellij.openapi.project.Project
 import com.intellij.openapi.projectRoots.Sdk
 import com.intellij.openapi.util.io.toNioPathOrNull
+import com.intellij.python.sdk.backend.impl.enrichLocalPythonSdkWithHomeInfo
 import com.intellij.python.sdk.common.PyEnvId
 import com.intellij.python.sdk.common.PyInterpreterRef
-import com.intellij.python.sdk.backend.impl.enrichLocalPythonSdkWithHomeInfo
 import com.intellij.util.concurrency.annotations.RequiresBackgroundThread
+import com.intellij.util.PathMappingSettings
 import com.intellij.util.concurrency.annotations.RequiresBlockingContext
 import com.jetbrains.python.PythonBinary
 import com.jetbrains.python.PythonHomePath
 import com.jetbrains.python.errorProcessing.PyResult
+import com.jetbrains.python.remote.PyRemotePathMapper
 import com.jetbrains.python.sdk.InvalidSdkException
 import com.jetbrains.python.sdk.PythonSdkAdditionalData
+import com.jetbrains.python.sdk.add.v2.FileSystem
 import com.jetbrains.python.sdk.add.v2.PathHolder
-import org.jetbrains.annotations.NonNls
-import java.nio.file.Path
+import com.jetbrains.python.sdk.add.v2.toFileSystem
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.jetbrains.annotations.ApiStatus
+import org.jetbrains.annotations.NonNls
+import java.nio.file.Path
 
 /**
  * A Python interpreter: an [Sdk], the [PyInterpreterRef] that names it, and the PyProject directory it belongs to.
@@ -182,6 +188,18 @@ private fun Sdk.buildPythonInterpreter(forceRefresh: Boolean): PyResult<PythonIn
 suspend fun Sdk.pythonInterpreterResultAsync(forceRefresh: Boolean = false): PyResult<PythonInterpreter> = withContext(Dispatchers.IO) {
   this@pythonInterpreterResultAsync.buildPythonInterpreter(forceRefresh)
 }
+
+
+@ApiStatus.Internal
+suspend fun PythonInterpreter.toFileSystem(): FileSystem<*> = sdk.toFileSystem()
+
+/**
+ * Creates the [PyRemotePathMapper] of this interpreter with the user-defined [console] mappings.
+ * The [FileSystem] and the [Sdk] that [FileSystem.createMapper] needs come from this one interpreter.
+ */
+@ApiStatus.Internal
+suspend fun PythonInterpreter.createMapper(project: Project, console: PathMappingSettings): PyRemotePathMapper =
+  toFileSystem().createMapper(project, console, sdk)
 
 /**
  * [Sdk.pythonInterpreterResult] for a Java caller that reports a broken SDK as an [InvalidSdkException], with the message

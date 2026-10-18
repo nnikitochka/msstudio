@@ -265,9 +265,7 @@
     <extensionPoint qualifiedName="com.intellij.fileTypeOverrider" interface="com.intellij.openapi.fileTypes.impl.FileTypeOverrider" dynamic="true"/>
     <extensionPoint qualifiedName="com.intellij.colorPickerListenerFactory" interface="com.intellij.ui.ColorPickerListenerFactory" dynamic="true"/>
     <extensionPoint qualifiedName="com.intellij.search.projectOptionsTopHitProvider" interface="com.intellij.ide.ui.OptionsSearchTopHitProvider$ProjectLevelProvider" dynamic="true"/>
-    <extensionPoint qualifiedName="com.intellij.pluginInitializationErrorHandler"
-                    interface="com.intellij.ide.plugins.PluginInitializationErrorHandler"
-                    dynamic="true"/>
+    <extensionPoint qualifiedName="com.intellij.pluginLoadingProblemsNotificationHandler" interface="com.intellij.ide.plugins.PluginLoadingProblemsNotificationHandler" dynamic="true"/>
     <extensionPoint qualifiedName="com.intellij.pluginSuggestionProvider" dynamic="true"
                     interface="com.intellij.openapi.updateSettings.impl.pluginsAdvertisement.PluginSuggestionProvider"/>
     <extensionPoint qualifiedName="com.intellij.pluginAdvertiserSuppressor" dynamic="true"
@@ -469,7 +467,8 @@
     <applicationService serviceInterface="com.intellij.openapi.ui.DialogBackgroundImageProvider" open="true"
                         serviceImplementation="com.intellij.openapi.wm.impl.DialogBackgroundImageProviderImpl"/>
     <applicationLoadHandler implementation="com.intellij.util.imageio.ImageReaderWriterSpiRegistrar"/>
-    <applicationActivity implementation="com.intellij.ide.debug.ImageDebugUtilLoader"/>
+    <postStartupActivity implementation="com.intellij.ide.debug.ImageDebugUtilLoader"/>
+    <applicationActivity implementation="com.intellij.openapi.editor.impl.softwrap.SoftWrapSignFontPreloader"/>
     <applicationService serviceImplementation="com.intellij.ui.WaylandAppIconPatcher"
                         preload="notHeadless"
                         os="linux"/>
@@ -720,7 +719,7 @@
         Enable new inspection widget experiment
       </description>
     </experimentalFeature>
-    <pluginInitializationErrorHandler implementation="com.intellij.ide.plugins.DefaultPluginInitializationErrorHandler"/>
+    <pluginLoadingProblemsNotificationHandler implementation="com.intellij.ide.plugins.DefaultPluginLoadingProblemsNotificationHandler"/>
     <applicationService serviceInterface="com.intellij.execution.wsl.WslDistributionManager"
                         serviceImplementation="com.intellij.execution.wsl.WslDistributionManagerImpl"/>
     <virtualFileSystem implementationClass="com.intellij.openapi.vfs.impl.local.AsyncableLocalFileSystemImpl" key="file" physical="true"/>
@@ -1858,6 +1857,8 @@
                         serviceImplementation="com.intellij.workspaceModel.ide.impl.GlobalWorkspaceModelCacheImpl"/>
     <projectService serviceInterface="com.intellij.platform.backend.workspace.WorkspaceModelCache"
                     serviceImplementation="com.intellij.workspaceModel.ide.impl.WorkspaceModelCacheImpl"/>
+    <applicationActivity implementation="com.intellij.ide.ui.UiDslAndHtmlClassesWarmUp"/>
+    <applicationActivity implementation="com.intellij.openapi.wm.impl.FrameClassesWarmUp"/>
     <cachesInvalidator implementation="com.intellij.workspaceModel.ide.impl.WorkspaceModelCachesInvalidator"/>
     <recoveryAction implementation="com.intellij.workspaceModel.ide.impl.WorkspaceModelRecoveryAction"/>
     <backgroundPostStartupActivity implementation="com.intellij.workspaceModel.ide.impl.WorkspaceModelCachesInvalidatorBackgroundActivity"/>
@@ -1961,7 +1962,7 @@
               class="com.intellij.internal.statistic.StatisticsRegionSettingsListener"/>
     <listener class="com.intellij.ide.plugins.DynamicPluginsFrameStateListener"
               topic="com.intellij.openapi.application.ApplicationActivationListener"/>
-    <listener class="com.intellij.ide.plugins.PluginInitializationErrorStartupReporter"
+    <listener class="com.intellij.ide.plugins.PluginLoadingProblemsStartupReporter"
               topic="com.intellij.ide.AppLifecycleListener"/>
     <listener class="com.intellij.openapi.updateSettings.impl.PluginAutoUpdateService$PluginAutoUpdateAppLifecycleListener"
               topic="com.intellij.ide.AppLifecycleListener"/>
@@ -2069,6 +2070,8 @@
   <projectListeners>
     <listener class="com.intellij.openapi.fileEditor.impl.EditorHistoryManager$MyEditorManagerListener"
               topic="com.intellij.openapi.fileEditor.FileEditorManagerListener"/>
+    <listener class="com.intellij.openapi.fileEditor.impl.LegacyRecentPlacesListenerBridge"
+              topic="com.intellij.openapi.fileEditor.ex.RecentPlacesListener"/>
     <listener class="com.intellij.notification.impl.NotificationsListener"
               activeInHeadlessMode="false"
               activeInTestMode="false"

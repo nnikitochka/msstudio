@@ -12,7 +12,7 @@ use avl_base::{Config, Exit, OrRefuse, PhaseRun, Refusal};
 use avl_host_sys::Ctx;
 use avl_host_sys::runfiles::{GuestRunfilesTree, GuestTreeInputs, HostRunfiles};
 use avl_report::digest::{self, FileDigestCache, PathDigest, ProductIdentityInput};
-use avl_wire::daemon::{LABEL, LINUX_GUEST_LABEL};
+use avl_wire::daemon::{LABEL, LINUX_GUEST_LABEL, Runner};
 use avl_wire::progress::{Event, Phase};
 use avl_wire::report::Tree;
 use avl_wire::runtime::{self, RuntimeDescriptor, RuntimeFile};
@@ -59,6 +59,9 @@ pub(crate) struct PreparedBuild {
     /// The files of the context plugins, in descriptor order: pushed with the hot tier, and installed by the daemon into
     /// the plugin directory of the IDE context.
     pub plugin_files: Vec<PluginFile>,
+    /// The lane inputs of the descriptor, in key order: pushed with the hot tier. No identity reads them, so an edit of
+    /// the fake agent or of a document restages nothing and restarts nothing.
+    pub lane_inputs: Vec<LaneInput>,
     pub runtime_digest: String,
     pub launch_digest: String,
     pub product_digest: String,
@@ -66,6 +69,9 @@ pub(crate) struct PreparedBuild {
     /// The identity of [`Self::plugin_files`]: each destination with its content digest. Neither the product digest
     /// nor the mount digest reads it, so a change of the context plugins alone refreshes no share.
     pub plugins_digest: String,
+    /// The digest of each context plugin directory, such as the bridge plugin and its resident part, by directory
+    /// name. The lane daemon decides by them whether a change reloads the bridge plugin or relaunches the IDE.
+    pub plugin_directories: BTreeMap<String, String>,
     /// The immutable environment the daemon is exec'd with that no build produces: what every lane sets by value,
     /// plus the guest's Node. Its [`lane_environment_digest`] is part of the launch digest, so a change here
     /// re-execs the daemon.
@@ -73,6 +79,9 @@ pub(crate) struct PreparedBuild {
     /// The host checkout when the build started, or why it could not be read. The run report carries it; nothing
     /// selects or skips a suite from it.
     pub tree: Result<Tree, Refusal>,
+    /// The build of the IDE without its product code, from the `build.txt` of the distribution, or why it cannot be
+    /// read. Only the IJ Perf files name it, so a distribution without the file still runs.
+    pub ide_build: Result<String, String>,
     /// Bazel's cost, and this controller's own hashing, timed apart so neither can hide inside the other.
     pub build: Duration,
     pub stamp: Duration,
@@ -84,6 +93,38 @@ pub(crate) struct PreparedBuild {
 pub(crate) struct PluginFile {
     pub destination: String,
     pub host: PathDigest,
+}
+
+/// One lane input of the descriptor: its key in the `ide` section, such as `fakeAgentJar`, and its bytes on the host by
+/// path and content digest, as `/jars` is asked about them.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct LaneInput {
+    pub field: &'static str,
+    pub host: PathDigest,
+}
+
+/// The note that names the digest of each lane input, in key order, as `<key> <first 12 hex digits>`.
+pub(crate) fn lane_inputs_note(inputs: &[LaneInput]) -> String {
+    let named: Vec<String> = inputs
+        .iter()
+        .map(|input| format!("{} {}", input.field, input.host.sha256.get(..12).unwrap_or(&input.host.sha256)))
+        .collect();
+    format!("lane inputs by digest: {}", named.join(", "))
+}
+
+/// The digest of each context plugin directory, by the formula of the lane daemon and of the resident plugin.
+pub(crate) fn plugin_directories(files: &[PluginFile]) -> BTreeMap<String, String> {
+    avl_wire::daemon::plugin_directory_digests(files.iter().map(|file| (file.destination.as_str(), file.host.sha256.as_str())))
+}
+
+/// The note that names the digest of each context plugin directory, in name order, as `<directory> <first 12 hex
+/// digits>`.
+pub(crate) fn plugin_directories_note(directories: &BTreeMap<String, String>) -> String {
+    let named: Vec<String> = directories
+        .iter()
+        .map(|(directory, digest)| format!("{directory} {}", digest.get(..12).unwrap_or(digest)))
+        .collect();
+    format!("context plugins by digest: {}", named.join(", "))
 }
 
 /// The identity of the context plugin files: each destination with its content digest, so a moved file and a changed
@@ -160,6 +201,9 @@ pub(crate) struct ControllerBoot<'a> {
     pub(crate) vm_node: &'a str,
     pub(crate) vm_tmp: &'a str,
     pub(crate) vm_user: &'a str,
+    /// The `lane-daemon` verb, or absent for the JVM daemon, so the digest of a JVM daemon stays what it was.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) runner: Option<&'a str>,
 }
 
 fn literal_digest(literal: &impl Serialize) -> String {
@@ -184,6 +228,7 @@ pub(crate) fn controller_boot_digest(settings: &Config, guest_runfiles_root: &st
         vm_node: &settings.vm_node,
         vm_tmp: &settings.vm_tmp,
         vm_user: &settings.vm_user,
+        runner: (settings.daemon.runner != Runner::Jvm).then(|| settings.daemon.runner.as_str()),
     })
 }
 
@@ -275,11 +320,30 @@ pub(crate) fn jbr_input(
     Ok(PathDigest::new(logical_path, sha256))
 }
 
+/// The build of the IDE of `descriptor`: the `build.txt` of its distribution without the product code, or why it cannot
+/// be read.
+fn ide_build(runfiles: &HostRunfiles, descriptor: &RuntimeDescriptor) -> Result<String, String> {
+    let home = &descriptor.dev_dist.home.logical_path;
+    let path = runfiles
+        .host_path(home)
+        .ok_or_else(|| format!("the runfiles hold no distribution {home}"))?
+        .join(BUILD_TXT);
+    let text = fs::read_to_string(&path).map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+    match avl_report::performance::build_without_product_code(&text) {
+        build if build.is_empty() => Err(format!("{} is empty", path.display())),
+        build => Ok(build),
+    }
+}
+
+/// The file of an IDE distribution that names its build, such as `IU-271.1234`.
+const BUILD_TXT: &str = "build.txt";
+
 /// The digests of one descriptor's inputs, which is all the stamp reads from disk.
 struct Stamped {
     guest_tree: GuestRunfilesTree,
     hot_jars: Vec<PathDigest>,
     plugin_files: Vec<PluginFile>,
+    lane_inputs: Vec<LaneInput>,
     runtime_digest: String,
     product_digest: String,
     mount_digest: String,
@@ -297,7 +361,8 @@ struct StampParts {
 
 /// Hashes every declared input of a descriptor through the digest cache and composes three of the four identities;
 /// the launch digest needs the settings and is composed by the caller. The context plugin files are hashed here too,
-/// and their identity is composed apart from the other four. The guest runfiles tree is planned here too, because the
+/// and their identity is composed apart from the other four. The lane inputs are hashed for the push, and no identity
+/// reads them. The guest runfiles tree is planned here too, because the
 /// plan reads each staged runfile. Blocking: the first sweep reads gigabytes.
 fn stamp(
     descriptor: &RuntimeDescriptor,
@@ -321,6 +386,14 @@ fn stamp(
         let declared = file(&plugin.file)?;
         plugin_files.push(PluginFile {
             destination: plugin.destination.clone(),
+            host: PathDigest::new(declared.host_path.to_string_lossy(), declared.identity.sha256),
+        });
+    }
+    let mut lane_inputs = Vec::with_capacity(3);
+    for (field, input) in descriptor.ide.lane_inputs() {
+        let declared = file(input)?;
+        lane_inputs.push(LaneInput {
+            field,
             host: PathDigest::new(declared.host_path.to_string_lossy(), declared.identity.sha256),
         });
     }
@@ -370,6 +443,7 @@ fn stamp(
         guest_tree,
         hot_jars,
         plugin_files,
+        lane_inputs,
         runtime_digest,
         product_digest,
         mount_digest,
@@ -432,6 +506,7 @@ impl Host {
         )
         .map_err(avl_base::descriptor_refusal)?;
         let runfiles = HostRunfiles::of(&descriptor_path)?;
+        let ide_build = ide_build(&runfiles, &descriptor);
         let tree_inputs = GuestTreeInputs::of(&self.settings)?;
         let stamped = {
             let _one_sweep = self.stamping.lock().await;
@@ -472,13 +547,16 @@ impl Host {
             descriptor,
             hot_jars: stamped.hot_jars,
             plugins_digest: plugins_digest(&stamped.plugin_files),
+            plugin_directories: plugin_directories(&stamped.plugin_files),
             plugin_files: stamped.plugin_files,
+            lane_inputs: stamped.lane_inputs,
             runtime_digest: stamped.runtime_digest,
             launch_digest,
             product_digest: stamped.product_digest,
             mount_digest: stamped.mount_digest,
             daemon_environment,
             tree,
+            ide_build,
             build,
             stamp: stamp_started.elapsed(),
         })

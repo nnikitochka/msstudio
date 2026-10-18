@@ -11,7 +11,10 @@ use avl_base::{Exit, OrRefuse, Refusal, Scope};
 use avl_host_sys::Ctx;
 use avl_host_sys::guest::ensure_host_paths;
 use avl_report::digest::PathDigest;
-use avl_wire::daemon::{self as wire, RunEvent, RunEventKind, RunFailed, Summary, WatchdogExpired, conflict};
+use avl_wire::daemon::{
+    self as wire, IdePlugin, LaneClass, LaneInputs, RunEvent, RunEventKind, RunFailed, RunRequest, Runner, SessionLog, Summary,
+    WatchdogExpired, conflict,
+};
 use avl_wire::progress::Event;
 use bt_junit::simple_class_name_pattern;
 use futures::StreamExt as _;
@@ -210,6 +213,9 @@ pub(crate) struct RunSelection {
     pub selectors: Vec<String>,
     pub junit5_filters: Vec<String>,
     pub description: String,
+    /// The catalog lane that the selection runs in, such as `ui`, or `None` when the selection names no lane. The lane
+    /// daemon launches the IDE of this lane.
+    pub lane: Option<String>,
 }
 
 /// One controller-side selector in the daemon's `/run` shape: the selectors, then the JUnit5 filters.
@@ -376,6 +382,7 @@ impl Host {
                                 format!("{asked} -> lane {}: {}", affected.lane, affected.classes.join(", ")),
                                 extra,
                             ),
+                            lane: Some(affected.lane.clone()),
                         },
                         lane: Some(affected.lane),
                         classes: affected.classes,
@@ -403,6 +410,7 @@ impl Host {
                 selectors: Vec::new(),
                 junit5_filters,
                 description: describe_selection(format!("lane {lane}"), extra),
+                lane: Some(lane.to_owned()),
             }));
         }
 
@@ -424,6 +432,7 @@ impl Host {
             selectors,
             junit5_filters,
             description,
+            lane: avl_affected::ui_lane_of_label(&resolved.label).map(|lane| lane.name.to_owned()),
         }))
     }
 }
@@ -468,17 +477,26 @@ pub(crate) fn upload_concurrency(bytes: u64) -> usize {
         .clamp(1, MAX_PARALLEL_UPLOADS)
 }
 
-/// Offers the hot tier and the context plugin files by digest, and uploads only what the guest does not already hold,
-/// answering how many files travelled. A digest that two files share is offered once.
+/// Offers the hot tier, the context plugin files, the lane inputs and the zips of the recorded sessions by digest, and
+/// uploads only what the guest does not already hold, answering how many files travelled. A digest that two files
+/// share is offered once.
 ///
 /// [`upload_concurrency`] of the bytes to push decides how many uploads run at once. The first upload that fails ends
 /// the push with its refusal, and the uploads still in flight end with it, because their futures are dropped.
-pub(crate) async fn push_jars(ctx: &Ctx, daemon: &DaemonClient, state: &HostState, prep: &PreparedBuild) -> Result<usize, Refusal> {
+pub(crate) async fn push_jars(
+    ctx: &Ctx,
+    daemon: &DaemonClient,
+    state: &HostState,
+    prep: &PreparedBuild,
+    session_logs: &[PathDigest],
+) -> Result<usize, Refusal> {
     let mut offered = HashSet::new();
     let jars: Vec<&PathDigest> = prep
         .hot_jars
         .iter()
         .chain(prep.plugin_files.iter().map(|file| &file.host))
+        .chain(prep.lane_inputs.iter().map(|input| &input.host))
+        .chain(session_logs)
         .filter(|jar| offered.insert(jar.sha256.as_str()))
         .collect();
     let digests: Vec<&str> = jars.iter().map(|jar| jar.sha256.as_str()).collect();
@@ -596,28 +614,75 @@ pub(crate) struct RunExecution {
     pub protocol_failure: Option<Refusal>,
 }
 
-/// The `/run` request. Kotlin's fields are non-nullable, so an empty selection is `[]` and never `null`.
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct RunRequestBody<'a> {
-    pub(crate) selectors: &'a [String],
-    pub(crate) junit5_filters: &'a [String],
-    pub(crate) product_stamp: &'a str,
-    /// How the daemon rejects work prepared for a different immutable launch generation.
-    pub(crate) launch_digest: &'a str,
-    pub(crate) hot_jars: Vec<&'a str>,
-    pub(crate) active_execution_timeout_sec: u64,
-    pub(crate) progress_gap_timeout_sec: u64,
-    /// The context plugin files, which the daemon installs into the plugin directory of the IDE context.
-    pub(crate) ide_plugins: Vec<IdePlugin<'a>>,
-}
-
-/// One context plugin file of the `/run` request: its destination below the plugin directory of the IDE context, and
-/// the digest that the push stored it under.
-#[derive(Serialize)]
-pub(crate) struct IdePlugin<'a> {
-    pub(crate) destination: &'a str,
-    pub(crate) sha256: &'a str,
+/// The `/run` request of `selection` for the build `prep` and the daemon of `runner`.
+///
+/// The lane daemon also gets the lane, the digests of the lane inputs, `lane_classes`, the suites of the lane that the
+/// catalog names, and `session_logs`, the recorded sessions that the push stored. It refuses a run of no lane here, before the request goes out, because it cannot choose a lane
+/// IDE for it. The `lane` field selects the documents of the lane, so the JUnit5 filter of the lane's own tag does not
+/// go to the lane daemon; every other filter does.
+pub(crate) fn run_request(
+    prep: &PreparedBuild,
+    selection: &RunSelection,
+    policy: WatchdogPolicy,
+    runner: Runner,
+    lane_classes: Vec<LaneClass>,
+    session_logs: &[SessionLog],
+) -> Result<RunRequest, Refusal> {
+    let mut junit5_filters = selection.junit5_filters.clone();
+    let (lane, lane_inputs, lane_classes) = match runner {
+        Runner::Jvm => (None, None, Vec::new()),
+        Runner::Daemon => {
+            let Some(lane) = &selection.lane else {
+                return Err(Refusal::new(
+                    "lane_daemon_lane_unknown",
+                    Exit::USAGE,
+                    format!(
+                        "the lane daemon runs one lane at a time, and the selection {} names none; pass --lane",
+                        selection.description
+                    ),
+                ));
+            };
+            let digest = |field: &str| {
+                prep.lane_inputs
+                    .iter()
+                    .find(|input| input.field == field)
+                    .map(|input| input.host.sha256.clone())
+                    .ok_or_else(|| Refusal::internal(format!("the descriptor names no lane input {field}")))
+            };
+            let inputs = LaneInputs {
+                fake_agent_jar: digest("fakeAgentJar")?,
+                lane_documents: digest("laneDocuments")?,
+                suite_documents: digest("suiteDocuments")?,
+            };
+            let own_tag = crate::lane::lanes::jvm_lane_filter(lane)?;
+            junit5_filters.retain(|filter| *filter != own_tag);
+            (Some(lane.clone()), Some(inputs), lane_classes)
+        }
+    };
+    Ok(RunRequest {
+        selectors: selection.selectors.clone(),
+        junit5_filters,
+        product_stamp: prep.product_digest.clone(),
+        launch_digest: prep.launch_digest.clone(),
+        hot_jars: prep.hot_jars.iter().map(|jar| jar.sha256.clone()).collect(),
+        active_execution_timeout_sec: policy.active_execution.as_secs(),
+        progress_gap_timeout_sec: policy.progress_gap.as_secs(),
+        ide_plugins: prep
+            .plugin_files
+            .iter()
+            .map(|file| IdePlugin {
+                destination: file.destination.clone(),
+                sha256: file.host.sha256.clone(),
+            })
+            .collect(),
+        lane,
+        lane_inputs,
+        lane_classes,
+        session_logs: match runner {
+            Runner::Jvm => Vec::new(),
+            Runner::Daemon => session_logs.to_vec(),
+        },
+    })
 }
 
 impl Host {
@@ -636,25 +701,22 @@ impl Host {
         prep: &PreparedBuild,
         selection: &RunSelection,
         policy: WatchdogPolicy,
+        session_logs: &[SessionLog],
         observe: &mut (dyn FnMut(&RunEvent) + Send),
     ) -> Result<RunExecution, Refusal> {
-        let body = encode(&RunRequestBody {
-            selectors: &selection.selectors,
-            junit5_filters: &selection.junit5_filters,
-            product_stamp: &prep.product_digest,
-            launch_digest: &prep.launch_digest,
-            hot_jars: prep.hot_jars.iter().map(|jar| jar.sha256.as_str()).collect(),
-            active_execution_timeout_sec: policy.active_execution.as_secs(),
-            progress_gap_timeout_sec: policy.progress_gap.as_secs(),
-            ide_plugins: prep
-                .plugin_files
-                .iter()
-                .map(|file| IdePlugin {
-                    destination: &file.destination,
-                    sha256: &file.host.sha256,
-                })
-                .collect(),
-        })?;
+        // The JVM runner discovers the classes of its lane by the tag, so only the lane daemon gets the catalog.
+        let lane_classes = match (self.daemon.runner(), &selection.lane) {
+            (Runner::Daemon, Some(lane)) => crate::lane::lane_classes(&self.settings, lane, &self.reporter)?,
+            _ => Vec::new(),
+        };
+        let body = encode(&run_request(
+            prep,
+            selection,
+            policy,
+            self.daemon.runner(),
+            lane_classes,
+            session_logs,
+        )?)?;
         let mut watchdog = TransportWatchdog::armed(policy.progress_gap + TRANSPORT_MARGIN);
         let run_failed = |message: String| Refusal::new("daemon_run_failed", Exit::SOFTWARE, message);
         let run = wire::RUN;
@@ -714,8 +776,9 @@ impl Host {
                     watchdog = TransportWatchdog::armed(delay);
                 }
                 // One publish per record. The terminal, `--stream` and every sink derive their own form from it,
-                // so the line a person reads and the record an agent parses are one fact.
-                self.reporter.publish(Event::Daemon(event.clone()), Some(&scope));
+                // so the line a person reads and the record an agent parses are one fact. A decision of the lane
+                // daemon is a `decision` record of the journal, as each decision of the controller is.
+                self.reporter.publish(published(&event), Some(&scope));
                 observe(&event);
                 execution.absorb(event);
             }
@@ -735,6 +798,14 @@ impl Host {
 }
 
 // --- the decisions of a run stream: values in, an answer out, no I/O --------------------------------------------
+
+/// What the controller publishes for one record of the stream: the record itself, or the decision that it names.
+pub(crate) fn published(event: &RunEvent) -> Event {
+    match &event.kind {
+        RunEventKind::Decision(decision) => Event::Decision(decision.clone()),
+        _ => Event::Daemon(event.clone()),
+    }
+}
 
 impl RunExecution {
     /// Takes one record of the stream: the identity of the iteration from `runStarted`, the watchdog expiry, the
@@ -765,12 +836,6 @@ pub(crate) fn conflict_refusal(refused: &wire::Conflict, wanted_launch: &str) ->
                  this run wants {wanted_launch}); the host state file is out of date — recover with: daemon restart",
                 refused.launch_digest.as_deref().unwrap_or("an unnamed generation"),
             ),
-        ),
-        // Distinct from busy: the shares are unmounted, so the next move is to resume them rather than wait.
-        conflict::MOUNT_QUIESCED => Refusal::new(
-            "daemon_mount_quiesced",
-            Exit::TEMP_FAIL,
-            "the daemon has its shares quiesced and cannot start a run; recover with: daemon restart",
         ),
         reason => Refusal::new("daemon_busy", Exit::TEMP_FAIL, format!("the daemon rejected the run: {reason}")),
     }

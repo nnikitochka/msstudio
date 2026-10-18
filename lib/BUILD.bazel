@@ -3577,7 +3577,7 @@ jvm_import(
 )
 
 jvm_import(
-    name = "grazie-markdown-ai-grazie-tasks-library-model-jvm",
+    name = "grazie-markdown-specification-ai-grazie-tasks-library-model-jvm",
     jar = "@ai_grazie_tasks-library-tasks-library-model-jvm-0_8_256_http//file",
     source_jar = "@ai_grazie_tasks-library-tasks-library-model-jvm-0_8_256-sources_http//file",
     visibility = ["//visibility:public"],
@@ -5137,21 +5137,6 @@ jvm_import(
 )
 
 copy_file(
-    name = "org.jetbrains.kotlin/kotlin-script-runtime-2.4.21-RC.jar_copy",
-    src = "@org_jetbrains_kotlin-kotlin-script-runtime-2_4_21-RC_http//file",
-    out = "org.jetbrains.kotlin/kotlin-script-runtime-2.4.21-RC.jar",
-    allow_symlink = True,
-    visibility = ["//visibility:public"],
-)
-
-jvm_import(
-    name = "kotlin-script-runtime",
-    jar = "@org_jetbrains_kotlin-kotlin-script-runtime-2_4_21-RC_http//file",
-    source_jar = "@org_jetbrains_kotlin-kotlin-script-runtime-2_4_21-RC-sources_http//file",
-    visibility = ["//visibility:public"],
-)
-
-copy_file(
     name = "org.jetbrains.kotlin/kotlin-stdlib-2.4.21-RC.jar_copy",
     src = "@org_jetbrains_kotlin-kotlin-stdlib-2_4_21-RC_http//file",
     out = "org.jetbrains.kotlin/kotlin-stdlib-2.4.21-RC.jar",
@@ -5343,17 +5328,17 @@ java_library(
 )
 
 copy_file(
-    name = "org.jetbrains.kotlin/kotlin-dist-for-ide-2.4.20.jar_copy",
-    src = "@org_jetbrains_kotlin-kotlin-dist-for-ide-2_4_20_http//file",
-    out = "org.jetbrains.kotlin/kotlin-dist-for-ide-2.4.20.jar",
+    name = "org.jetbrains.kotlin/kotlin-dist-for-ide-2.4.21.jar_copy",
+    src = "@org_jetbrains_kotlin-kotlin-dist-for-ide-2_4_21_http//file",
+    out = "org.jetbrains.kotlin/kotlin-dist-for-ide-2.4.21.jar",
     allow_symlink = True,
     visibility = ["//visibility:public"],
 )
 
 jvm_import(
     name = "kotlinc-kotlin-dist",
-    jar = "@org_jetbrains_kotlin-kotlin-dist-for-ide-2_4_20_http//file",
-    source_jar = "@org_jetbrains_kotlin-kotlin-dist-for-ide-2_4_20-sources_http//file",
+    jar = "@org_jetbrains_kotlin-kotlin-dist-for-ide-2_4_21_http//file",
+    source_jar = "@org_jetbrains_kotlin-kotlin-dist-for-ide-2_4_21-sources_http//file",
     visibility = ["//visibility:public"],
 )
 
@@ -5387,17 +5372,17 @@ java_library(
 )
 
 copy_file(
-    name = "org.jetbrains.kotlin/kotlin-jps-plugin-classpath-2.4.20.jar_copy",
-    src = "@org_jetbrains_kotlin-kotlin-jps-plugin-classpath-2_4_20_http//file",
-    out = "org.jetbrains.kotlin/kotlin-jps-plugin-classpath-2.4.20.jar",
+    name = "org.jetbrains.kotlin/kotlin-jps-plugin-classpath-2.4.21.jar_copy",
+    src = "@org_jetbrains_kotlin-kotlin-jps-plugin-classpath-2_4_21_http//file",
+    out = "org.jetbrains.kotlin/kotlin-jps-plugin-classpath-2.4.21.jar",
     allow_symlink = True,
     visibility = ["//visibility:public"],
 )
 
 jvm_import(
     name = "kotlinc-kotlin-jps-plugin-classpath",
-    jar = "@org_jetbrains_kotlin-kotlin-jps-plugin-classpath-2_4_20_http//file",
-    source_jar = "@org_jetbrains_kotlin-kotlin-jps-plugin-classpath-2_4_20-sources_http//file",
+    jar = "@org_jetbrains_kotlin-kotlin-jps-plugin-classpath-2_4_21_http//file",
+    source_jar = "@org_jetbrains_kotlin-kotlin-jps-plugin-classpath-2_4_21-sources_http//file",
     visibility = ["//visibility:public"],
 )
 
@@ -5431,17 +5416,17 @@ java_library(
 )
 
 copy_file(
-    name = "org.jetbrains.kotlin/kotlin-jps-plugin-tests-for-ide-2.4.20.jar_copy",
-    src = "@org_jetbrains_kotlin-kotlin-jps-plugin-tests-for-ide-2_4_20_http//file",
-    out = "org.jetbrains.kotlin/kotlin-jps-plugin-tests-for-ide-2.4.20.jar",
+    name = "org.jetbrains.kotlin/kotlin-jps-plugin-tests-for-ide-2.4.21.jar_copy",
+    src = "@org_jetbrains_kotlin-kotlin-jps-plugin-tests-for-ide-2_4_21_http//file",
+    out = "org.jetbrains.kotlin/kotlin-jps-plugin-tests-for-ide-2.4.21.jar",
     allow_symlink = True,
     visibility = ["//visibility:public"],
 )
 
 jvm_import(
     name = "kotlinc-kotlin-jps-plugin-tests",
-    jar = "@org_jetbrains_kotlin-kotlin-jps-plugin-tests-for-ide-2_4_20_http//file",
-    source_jar = "@org_jetbrains_kotlin-kotlin-jps-plugin-tests-for-ide-2_4_20-sources_http//file",
+    jar = "@org_jetbrains_kotlin-kotlin-jps-plugin-tests-for-ide-2_4_21_http//file",
+    source_jar = "@org_jetbrains_kotlin-kotlin-jps-plugin-tests-for-ide-2_4_21-sources_http//file",
     visibility = ["//visibility:public"],
 )
 
@@ -12194,16 +12179,16 @@ jvm_import(
 )
 
 copy_file(
-    name = "com.android.tools.layoutlib/layoutlib-16.2.4.jar_copy",
-    src = "@com_android_tools_layoutlib-layoutlib-16_2_4_http//file",
-    out = "com.android.tools.layoutlib/layoutlib-16.2.4.jar",
+    name = "com.android.tools.layoutlib/layoutlib-17.0.0.jar_copy",
+    src = "@com_android_tools_layoutlib-layoutlib-17_0_0_http//file",
+    out = "com.android.tools.layoutlib/layoutlib-17.0.0.jar",
     allow_symlink = True,
     visibility = ["//visibility:public"],
 )
 
 jvm_import(
     name = "libraries-layoutlib-layoutlib",
-    jar = "@com_android_tools_layoutlib-layoutlib-16_2_4_http//file",
+    jar = "@com_android_tools_layoutlib-layoutlib-17_0_0_http//file",
     visibility = ["//visibility:public"],
 )
 
@@ -12306,17 +12291,17 @@ jvm_import(
 )
 
 copy_file(
-    name = "org.jetbrains/markdown-jvm-0.7.17.jar_copy",
-    src = "@org_jetbrains-markdown-jvm-0_7_17_http//file",
-    out = "org.jetbrains/markdown-jvm-0.7.17.jar",
+    name = "org.jetbrains/markdown-jvm-0.7.18.jar_copy",
+    src = "@org_jetbrains-markdown-jvm-0_7_18_http//file",
+    out = "org.jetbrains/markdown-jvm-0.7.18.jar",
     allow_symlink = True,
     visibility = ["//visibility:public"],
 )
 
 jvm_import(
     name = "libraries-markdown-jetbrains-markdown",
-    jar = "@org_jetbrains-markdown-jvm-0_7_17_http//file",
-    source_jar = "@org_jetbrains-markdown-jvm-0_7_17-sources_http//file",
+    jar = "@org_jetbrains-markdown-jvm-0_7_18_http//file",
+    source_jar = "@org_jetbrains-markdown-jvm-0_7_18-sources_http//file",
     visibility = ["//visibility:public"],
 )
 
@@ -19677,17 +19662,17 @@ jvm_import(
 )
 
 copy_file(
-    name = "org.jetbrains.intellij.deps/studio-platform-2026.1.2-456.jar_copy",
-    src = "@org_jetbrains_intellij_deps-studio-platform-2026_1_2-456_http//file",
-    out = "org.jetbrains.intellij.deps/studio-platform-2026.1.2-456.jar",
+    name = "org.jetbrains.intellij.deps/studio-platform-2026.1.3-470.jar_copy",
+    src = "@org_jetbrains_intellij_deps-studio-platform-2026_1_3-470_http//file",
+    out = "org.jetbrains.intellij.deps/studio-platform-2026.1.3-470.jar",
     allow_symlink = True,
     visibility = ["//visibility:public"],
 )
 
 jvm_import(
     name = "studio-platform",
-    jar = "@org_jetbrains_intellij_deps-studio-platform-2026_1_2-456_http//file",
-    source_jar = "@org_jetbrains_intellij_deps-studio-platform-2026_1_2-456-sources_http//file",
+    jar = "@org_jetbrains_intellij_deps-studio-platform-2026_1_3-470_http//file",
+    source_jar = "@org_jetbrains_intellij_deps-studio-platform-2026_1_3-470-sources_http//file",
     visibility = ["//visibility:public"],
 )
 
@@ -19699,17 +19684,17 @@ java_library(
 )
 
 copy_file(
-    name = "org.jetbrains.intellij.deps/studio-test-platform-2026.1.2-456.jar_copy",
-    src = "@org_jetbrains_intellij_deps-studio-test-platform-2026_1_2-456_http//file",
-    out = "org.jetbrains.intellij.deps/studio-test-platform-2026.1.2-456.jar",
+    name = "org.jetbrains.intellij.deps/studio-test-platform-2026.1.3-470.jar_copy",
+    src = "@org_jetbrains_intellij_deps-studio-test-platform-2026_1_3-470_http//file",
+    out = "org.jetbrains.intellij.deps/studio-test-platform-2026.1.3-470.jar",
     allow_symlink = True,
     visibility = ["//visibility:public"],
 )
 
 jvm_import(
     name = "studio-test-platform",
-    jar = "@org_jetbrains_intellij_deps-studio-test-platform-2026_1_2-456_http//file",
-    source_jar = "@org_jetbrains_intellij_deps-studio-test-platform-2026_1_2-456-sources_http//file",
+    jar = "@org_jetbrains_intellij_deps-studio-test-platform-2026_1_3-470_http//file",
+    source_jar = "@org_jetbrains_intellij_deps-studio-test-platform-2026_1_3-470-sources_http//file",
     visibility = ["//visibility:public"],
 )
 

@@ -68,13 +68,15 @@ targets:
 # Unified Plugin Manager UI
 
 Status: Active
-Date: 2026-09-29
+Date: 2026-10-13
 
 ## Purpose
 
 The unified Plugins page presents installed and available plugins from several sources in one searchable page.
 
 This specification defines stable page behavior. [Plugin Operations](./plugin-operations.spec.md) defines changes to installed plugins.
+
+[Plugin Loading Problems](./plugin-loading-problems.spec.md) defines loading explanations and offered recovery actions.
 
 ## Scope
 
@@ -92,6 +94,7 @@ This specification covers the page structure, section model, search, source load
 - This specification does not require the legacy search completion popup or its shortcut.
 - This specification does not define the rollout mechanism.
 - This specification does not assign classes to architecture layers.
+- This specification does not define loading problem classification or notification reporting.
 
 ## Page Structure
 
@@ -254,6 +257,12 @@ Untested: Product welcome buttons on a remote backend keep the Settings route be
     `filter actions reflect snapshot and emit semantic intents`;
     `repository filter is hidden without repository values`;
     `installed actions share an optional radio selection`
+  )
+
+- Update available must include only plugins enabled in the current settings session.
+- Enabling or disabling a plugin must update this filter before Apply or restart.
+  [@test] ../../testSrc/com/intellij/ide/plugins/unified/UnifiedPluginsPageSourceCoordinatorTest.kt (
+    `update filter follows session enablement with cached disabled updates`
   )
 
 - An empty search field must show `Search all plugins` and the Filter control.

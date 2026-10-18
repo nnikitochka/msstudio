@@ -204,6 +204,8 @@ class PluginDetailsPageComponent private constructor(
   private var myEnableDisableButton: JButton? = null
   private var myUninstallButton: JButton? = null
   private var errorComponent: ErrorComponent? = null
+  private var loadingErrors: List<HtmlChunk> = emptyList()
+  private var expectedExplanations: List<@Nls String> = emptyList()
   private var version: JTextField? = null
   private var isEnabledForProject: JLabel? = null
   private var versionSize: JLabel? = null
@@ -496,7 +498,10 @@ class PluginDetailsPageComponent private constructor(
     createButtons()
     nameAndButtons!!.setProgressDisabledButton((if (isMarketplace) installButton?.getComponent() else if (pluginManagerCustomizer != null && updateDescriptor == null) gearButton else updateButton)!!)
 
-    followingRows.add(ErrorComponent().also { errorComponent = it }, ListLayout.GrowPolicy.GROW)
+    followingRows.add(ErrorComponent().also {
+      errorComponent = it
+      it.isVisible = false
+    }, ListLayout.GrowPolicy.GROW)
     followingRows.add(licensePanel)
     licensePanel.border = JBUI.Borders.emptyBottom(5)
     followingRows.add(customLicensePanel)
@@ -1099,8 +1104,10 @@ class PluginDetailsPageComponent private constructor(
         (component == null || updateDescriptor === component.getUpdatePluginDescriptor()) &&
         readOnlyPreparedUpdate == preparedUpdate) {
       setReadOnlyProgress(readOnlyProgress)
+      updateExpectedExplanations(component?.getExpectedExplanations().orEmpty())
       return
     }
+    updateLoadingProblems(emptyList(), emptyList())
     setReadOnlyProgress(null)
     if (readOnlyPreparedUpdate != null && preparedUpdate == null) {
       updateButton?.apply {
@@ -1295,7 +1302,7 @@ class PluginDetailsPageComponent private constructor(
     scheduleNotificationsUpdate()
     updateIcon()
 
-    errorComponent?.isVisible = false
+    updateExpectedExplanations(showComponent?.getExpectedExplanations().orEmpty())
 
     updateButtons()
     if (!isCurrentPlugin(pluginModel)) return
@@ -1760,7 +1767,7 @@ class PluginDetailsPageComponent private constructor(
         myEnableDisableButton!!.isVisible = bundled
         /** FIXME duplicated with [ListPluginComponent] */
         myEnableDisableButton!!.isEnabled = plugin?.isDisableAllowed != false && showComponent?.isNotFreeInFreeMode() != true
-        updateButton!!.isVisible = !uninstalled && updateDescriptor != null && !installedWithoutRestart
+        updateButton!!.isVisible = !uninstalled && isUpdateAvailable() && !installedWithoutRestart
         updateEnableForNameAndIcon()
         updateErrors()
       }
@@ -1788,7 +1795,7 @@ class PluginDetailsPageComponent private constructor(
 
         updateEnabledForProject()
 
-        updateButton!!.isVisible = updateDescriptor != null && !installedWithoutRestart
+        updateButton!!.isVisible = isUpdateAvailable() && !installedWithoutRestart
       }
       enableDisableController?.apply {
         this.update()
@@ -1827,12 +1834,36 @@ class PluginDetailsPageComponent private constructor(
 
   private fun updateErrors() {
     val descriptor = descriptorForActions ?: return
+    val component = showComponent
     if (showComponent?.isNotFreeInFreeMode() != true) {
-      PluginModelAsyncOperationsExecutor.updateErrors(coroutineScope, pluginModel.getModel().sessionId, descriptor.pluginId) {
-        updateIcon(it)
-        errorComponent!!.setErrors(it) { this.handleErrors() }
+      PluginModelAsyncOperationsExecutor.updateLoadingProblems(coroutineScope, pluginModel.getModel().sessionId, descriptor.pluginId) {
+        if (showComponent !== component || descriptorForActions?.pluginId != descriptor.pluginId ||
+            showComponent?.isNotFreeInFreeMode() == true) {
+          return@updateLoadingProblems
+        }
+        val errors = MyPluginModel.getErrors(it)
+        updateIcon(errors)
+        updateLoadingProblems(errors, MyPluginModel.getExpectedExplanations(it))
       }
     }
+    else {
+      updateLoadingProblems(emptyList(), emptyList())
+    }
+  }
+
+  internal fun updateExpectedExplanations(explanations: List<@Nls String>) {
+    updateLoadingProblems(loadingErrors, explanations)
+  }
+
+  private fun updateLoadingProblems(errors: List<HtmlChunk>, explanations: List<@Nls String>) {
+    val expected = if (showComponent?.isNotFreeInFreeMode() == true) emptyList() else explanations
+    if (loadingErrors == errors && expectedExplanations == expected) return
+    loadingErrors = errors.toList()
+    expectedExplanations = expected.toList()
+    val foreground = ColorUtil.toHtmlColor(UIUtil.getContextHelpForeground())
+    val messages = expectedExplanations.map { HtmlChunk.div().style("color: $foreground").addText(it) }
+    errorComponent?.setErrors(loadingErrors + messages) { this.handleErrors() }
+    fullRepaint()
   }
 
   private fun handleErrors() {
@@ -2094,9 +2125,14 @@ class PluginDetailsPageComponent private constructor(
     updateErrors()
     updateEnabledForProject()
 
-    updateButton!!.isVisible = updateDescriptor != null
+    updateButton!!.isVisible = isUpdateAvailable()
 
     fullRepaint()
+  }
+
+  private fun isUpdateAvailable(): Boolean {
+    val descriptor = descriptorForActions ?: return false
+    return updateDescriptor != null && pluginModel.isEnabled(descriptor)
   }
 
   suspend fun updateAfterUninstall(showRestart: Boolean) {

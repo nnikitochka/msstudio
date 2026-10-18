@@ -9,7 +9,11 @@ import com.intellij.openapi.editor.ex.RangeMarkerEx
 import com.intellij.openapi.editor.impl.DocumentImpl
 import com.intellij.openapi.util.Key
 import com.intellij.openapi.util.TextRange
+import com.intellij.util.Processor
 import com.intellij.util.ref.GCUtil
+import it.unimi.dsi.fastutil.longs.LongArrayList
+import it.unimi.dsi.fastutil.longs.LongList
+import it.unimi.dsi.fastutil.longs.LongLists
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
@@ -19,6 +23,8 @@ import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 import java.lang.ref.Reference
 import java.lang.ref.WeakReference
 import java.util.concurrent.ConcurrentLinkedQueue
@@ -727,7 +733,7 @@ class SnapshotMarkerEngineImplTest {
     val allRemoved = oneRemoved.remove(2)
     assertTrue(allRemoved.isEmpty())
     assertTrue(allRemoved.resolve(1, TextRange.EMPTY_RANGE) is PMarkerResolution.Absent)
-    assertTrue(allRemoved.purge(1).purge(2).isEmpty())
+    assertTrue(allRemoved.purgeMany(LongArrayList(longArrayOf(1, 2))).isEmpty())
     assertFalse(populated.isEmpty())
   }
 
@@ -742,7 +748,7 @@ class SnapshotMarkerEngineImplTest {
 
     val noValidMarkers = invalidated.remove(2)
     assertTrue(noValidMarkers.isEmpty())
-    assertTrue(noValidMarkers.purge(1).purge(2).isEmpty())
+    assertTrue(noValidMarkers.purgeMany(LongArrayList(longArrayOf(1, 2))).isEmpty())
     assertFalse(populated.isEmpty())
   }
 
@@ -814,7 +820,7 @@ class SnapshotMarkerEngineImplTest {
       .overlappingIterator(0, document.textLength, 0)
       .asSequence()
       .associate { it.markerId to (it.markerReference as Reference<*>) }
-    assertTrue(rootStore.purge(snapshot, secondMarker.id))
+    assertTrue(rootStore.purgeMany(snapshot, LongLists.singleton(secondMarker.id)))
 
     // Manual enqueue uses reverse order. The successful purge runs first.
     assertTrue(markerReferences.getValue(secondMarker.id).enqueue())
@@ -822,6 +828,93 @@ class SnapshotMarkerEngineImplTest {
 
     assertTrue(SnapshotMarkerEngineImpl.processQueue())
     assertFalse(rootStore.containsMarkerId(snapshot, firstMarker.id))
+  }
+
+  @ParameterizedTest
+  @ValueSource(ints = [1, 2, 3])
+  fun `queue processing purges one batch per document`(documentCount: Int) {
+    val documents = List(documentCount) { DocumentImpl("abcdef", true) }
+    val markers = documents.map { document -> List(3) { document.createRangeMarker(it, it + 1) as SnapshotMarker } }
+    val batches = ArrayList<List<Long>>()
+    val originalRoots = documents.map { document ->
+      val reference = document.rangeMarkers.rootStore().rootReference(document.core.snapshot())
+      val root = reference.get()
+      reference.set(object : PMarkerRoot by root {
+        override fun purgeMany(markerIds: LongList): PMarkerRoot {
+          batches.add(markerIds.toLongArray().toList())
+          return root.purgeMany(markerIds)
+        }
+      })
+      root
+    }
+    val entriesByRoot = originalRoots.map { it.overlappingIterator(0, 6, 0).asSequence().toList() }
+    for (index in markers.first().indices) {
+      for (entries in entriesByRoot) {
+        assertTrue((entries[index].markerReference as Reference<*>).enqueue())
+      }
+    }
+
+    assertTrue(SnapshotMarkerEngineImpl.processQueue())
+
+    assertEquals(documentCount, batches.size)
+    assertEquals(markers.map { group -> group.map { it.id }.toSet() }.toSet(), batches.map { it.toSet() }.toSet())
+    for ((index, document) in documents.withIndex()) {
+      val root = document.rangeMarkers.rootStore().rootReference(document.core.snapshot()).get()
+      for (marker in markers[index]) {
+        assertFalse((root as PMarkerRootImpl).containsMarkerId(marker.id))
+        assertTrue((originalRoots[index] as PMarkerRootImpl).containsMarkerId(marker.id))
+      }
+    }
+    assertFalse(SnapshotMarkerEngineImpl.processQueue())
+  }
+
+  @ParameterizedTest
+  @ValueSource(booleans = [true, false])
+  fun `traversal batches collected markers when the processor stops or fails`(overlapping: Boolean) {
+    for (fail in listOf(false, true)) {
+      val document = DocumentImpl("abcdefgh", true)
+      val markers = List(4) { document.createRangeMarker(it * 2, it * 2 + 1) as SnapshotMarker }
+      val snapshot = document.core.snapshot()
+      val rootStore = document.rangeMarkers.rootStore()
+      val reference = rootStore.rootReference(snapshot)
+      val root = reference.get()
+      val entries = root.overlappingIterator(0, document.textLength, 0).asSequence().toList()
+      for (index in listOf(0, 1, 3)) {
+        (entries[index].markerReference as Reference<*>).clear()
+      }
+      val batches = ArrayList<List<Long>>()
+      reference.set(object : PMarkerRoot by root {
+        override fun purgeMany(markerIds: LongList): PMarkerRoot {
+          batches.add(markerIds.toLongArray().toList())
+          return root.purgeMany(markerIds)
+        }
+      })
+      val failure = IllegalStateException("The processor failed")
+      val visited = ArrayList<Long>()
+      val processor = Processor<RangeMarkerEx> {
+        visited.add(it.id)
+        if (fail) throw failure
+        false
+      }
+      val traverse = {
+        if (overlapping) {
+          SnapshotMarkerEngineImpl.processRangeMarkersOverlappingWith(rootStore, snapshot, 0, document.textLength, 0, processor)
+        }
+        else {
+          SnapshotMarkerEngineImpl.processAllRangeMarkers(rootStore, snapshot, processor)
+        }
+      }
+
+      if (fail) assertSame(failure, assertThrows(IllegalStateException::class.java) { traverse() })
+      else assertFalse(traverse())
+
+      assertEquals(listOf(markers[2].id), visited)
+      assertEquals(listOf(listOf(markers[0].id, markers[1].id)), batches)
+      assertFalse(rootStore.containsMarkerId(snapshot, markers[0].id))
+      assertFalse(rootStore.containsMarkerId(snapshot, markers[1].id))
+      assertTrue(rootStore.containsMarkerId(snapshot, markers[2].id))
+      assertTrue(rootStore.containsMarkerId(snapshot, markers[3].id))
+    }
   }
 
   @Test
@@ -928,7 +1021,7 @@ class SnapshotMarkerEngineImplTest {
     val root = PMarkerRootImpl.empty().insert(1, 2, 4, nonGreedySpec(), flavorFlags = 0, markerReference = null)
 
     val removed = root.remove(1) as PMarkerRootImpl
-    val purged = root.purge(1) as PMarkerRootImpl
+    val purged = root.purgeMany(LongLists.singleton(1)) as PMarkerRootImpl
 
     assertTrue(removed.containsMarkerId(1))
     assertFalse(purged.containsMarkerId(1))

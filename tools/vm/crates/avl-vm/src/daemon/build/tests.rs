@@ -267,10 +267,69 @@ async fn a_changed_context_plugin_file_changes_only_the_plugins_digest() {
     let after = fixture.prepared().await;
     assert_ne!(before.plugins_digest, after.plugins_digest);
     assert_ne!(before.plugin_files[0].host.sha256, after.plugin_files[0].host.sha256);
+    assert_ne!(before.plugin_directories["bridge"], after.plugin_directories["bridge"]);
     assert_eq!(before.product_digest, after.product_digest);
     assert_eq!(before.mount_digest, after.mount_digest);
     assert_eq!(before.runtime_digest, after.runtime_digest);
     assert_eq!(before.launch_digest, after.launch_digest);
+}
+
+// The lane inputs travel by the push: an edit of the fake agent moves no identity, so it refreshes no share, keeps the
+// IDE and keeps the daemon. Only the digest that the push offers moves.
+#[tokio::test]
+async fn a_changed_fake_agent_jar_changes_no_identity_and_only_its_pushed_digest() {
+    let fixture = Fixture::new().await;
+    let before = fixture.prepared().await;
+    let fields: Vec<&str> = before.lane_inputs.iter().map(|input| input.field).collect();
+    assert_eq!(fields, ["fakeAgentJar", "laneDocuments", "suiteDocuments"]);
+    // The jars of the documents are the hot jar of the fixture, so the push offers their digest once.
+    assert_eq!(before.lane_inputs[1].host, before.hot_jars[0]);
+    assert_eq!(before.lane_inputs[2].host, before.hot_jars[0]);
+
+    let agent = runtime::runfiles_root(&fixture.bazel.descriptor_path).join(crate::daemon::testing::FIXTURE_FAKE_AGENT_JAR);
+    fs::write(&agent, "another fake agent").unwrap();
+    let after = fixture.prepared().await;
+    assert_ne!(before.lane_inputs[0].host.sha256, after.lane_inputs[0].host.sha256);
+    assert_eq!(before.mount_digest, after.mount_digest);
+    assert_eq!(before.product_digest, after.product_digest);
+    assert_eq!(before.runtime_digest, after.runtime_digest);
+    assert_eq!(before.launch_digest, after.launch_digest);
+    assert_eq!(before.plugins_digest, after.plugins_digest);
+}
+
+#[test]
+fn the_lane_inputs_note_names_each_key_with_its_digest() {
+    let input = |field, sha256: &str| LaneInput {
+        field,
+        host: PathDigest::new("/host/x.jar", sha256),
+    };
+    assert_eq!(
+        lane_inputs_note(&[input("fakeAgentJar", "0123456789abcdef"), input("laneDocuments", "short")]),
+        "lane inputs by digest: fakeAgentJar 0123456789ab, laneDocuments short"
+    );
+}
+
+// Each context plugin directory has its own digest, so a bridge edit moves the bridge digest and keeps the digest of the
+// resident part. The note names each directory with the first 12 hex digits.
+#[test]
+fn each_context_plugin_directory_has_its_own_digest_and_a_note() {
+    let file = |destination: &str, sha256: &str| PluginFile {
+        destination: destination.to_owned(),
+        host: PathDigest::new("/host/x.jar", sha256),
+    };
+    let before = plugin_directories(&[file("bridge/lib/b.jar", "1"), file("resident/lib/r.jar", "2")]);
+    let after = plugin_directories(&[file("bridge/lib/b.jar", "3"), file("resident/lib/r.jar", "2")]);
+    assert_eq!(before.keys().collect::<Vec<_>>(), ["bridge", "resident"]);
+    assert_ne!(before["bridge"], after["bridge"]);
+    assert_eq!(before["resident"], after["resident"]);
+    assert_eq!(
+        plugin_directories_note(&before),
+        format!(
+            "context plugins by digest: bridge {}, resident {}",
+            &before["bridge"][..12],
+            &before["resident"][..12]
+        )
+    );
 }
 
 // The plugin identity reads the destination too: the same bytes at another place are another plugin directory.
@@ -392,4 +451,21 @@ fn the_environment_digest_is_by_name() {
 fn each_guest_builds_its_own_daemon_target() {
     assert_eq!(daemon_label(GuestOs::Macos), LABEL);
     assert_eq!(daemon_label(GuestOs::Linux), LINUX_GUEST_LABEL);
+}
+
+// The runner is a boot setting: a change of it restarts the daemon. The JVM runner adds nothing to the boot settings,
+// so the launch digest of a JVM daemon stays what it was.
+#[tokio::test]
+async fn the_runner_enters_the_launch_digest() {
+    let fixture = Fixture::new().await;
+    let prep = fixture.prepared().await;
+    let jvm = controller_boot_digest(&fixture.settings, &prep.guest_runfiles_root, 27_100, &prep.runtime_digest);
+    assert_eq!(
+        prep.launch_digest,
+        launch_digest(&prep.runtime_digest, &jvm, &prep.daemon_environment)
+    );
+    let mut settings = Config::clone(&fixture.settings);
+    settings.daemon.runner = Runner::Daemon;
+    let verb = controller_boot_digest(&settings, &prep.guest_runfiles_root, 27_100, &prep.runtime_digest);
+    assert_ne!(jvm, verb);
 }

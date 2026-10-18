@@ -74,6 +74,8 @@ import com.intellij.util.concurrency.annotations.RequiresEdt;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.execution.ParametersListUtil;
 import com.jetbrains.python.PyBundle;
+import com.jetbrains.python.PyInternalExecApi;
+import com.jetbrains.python.configuration.PyModuleInterpreterReader;
 import com.jetbrains.python.console.PyDebugConsoleBuilder;
 import com.jetbrains.python.debugger.PyDebuggerOptionsProvider;
 import com.jetbrains.python.debugger.PyEelSdkKt;
@@ -940,6 +942,7 @@ public abstract class PythonCommandLineState extends CommandLineState {
     }
   }
 
+  @PyInternalExecApi
   @ApiStatus.Internal
   public static void buildPythonPath(@NotNull Project project,
                                      @Nullable Module module,
@@ -1151,7 +1154,7 @@ public abstract class PythonCommandLineState extends CommandLineState {
     if (config.isUseModuleSdk() || StringUtil.isEmpty(sdkHome)) {
       Module module = getModule(project, config);
 
-      Sdk sdk = PythonSdkUtil.findPythonSdk(module);
+      Sdk sdk = PyModuleInterpreterReader.findModuleSdkIfReady(module);
 
       if (sdk != null) {
         sdkHome = sdk.getHomePath();

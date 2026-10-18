@@ -345,24 +345,19 @@ fn the_two_tag_axes_are_disjoint_and_every_lane_tag_names_a_real_lane() {
         assert_eq!(described.axis, TagAxis::Lane, "{tag} is a category, not a lane tag");
         // Every lane is an IDE-launching one, so its target carries the one category CI excludes for a display.
         assert_eq!(described.category.as_deref(), Some("air-integration-ui"), "lane tag {tag}");
-        // The controller and the trace planner read these two instead of a table of their own, and a lane without
-        // them is one a VM worker cannot run.
+        // The controller and the trace planner read the test label instead of a table of their own, and a lane
+        // without it is one a VM worker cannot run.
         let label = spec.test_label.as_deref().unwrap_or_default();
         assert!(
             label.starts_with("//plugins/air/tests/integration/") && label.ends_with("_test"),
             "the integration lane {} has no test label: {label:?}",
             spec.name
         );
-        assert!(
-            spec.junit_tag.as_deref().is_some_and(|tag| tag.starts_with("air-")),
-            "the integration lane {} has no JUnit tag",
-            spec.name
-        );
     }
     for spec in lanes().iter().filter(|spec| spec.integration_tag.is_none()) {
         assert!(
-            spec.test_label.is_none() && spec.junit_tag.is_none(),
-            "{} runs no IDE, so no VM worker selects it by label or JUnit tag",
+            spec.test_label.is_none(),
+            "{} runs no IDE, so no VM worker selects it by label",
             spec.name
         );
     }
@@ -390,6 +385,52 @@ fn an_integration_lane_without_a_catalog_name_is_explicit_only() {
         assert_eq!(spec.test_label.as_deref(), Some(spec.targets[0].as_str()));
         assert_eq!(lanes().by_catalog_lane(catalog_lane).map(|spec| spec.name.as_str()), None);
     }
+    // The suites of ui-live and ui-perf have documents, so their lanes name the document lane; jcp has none.
+    for (suite_lane, name) in [("UI_LIVE", Some("ui-live")), ("UI_PERF", Some("ui-perf")), ("JCP", None)] {
+        assert_eq!(
+            lanes().by_suite_lane(suite_lane).map(|spec| spec.name.as_str()),
+            name,
+            "{suite_lane}"
+        );
+    }
+    assert_eq!(lanes().by_suite_lane("UI").map(|spec| spec.name.as_str()), Some("ui"));
+}
+
+/// A lane is reached through its catalog lane or explicit-only with a document lane, never both. A document lane
+/// belongs to an IDE-launching lane, and no two lanes name one suite lane.
+#[test]
+fn the_parser_refuses_a_document_lane_that_contradicts_its_lane() {
+    let category = r#"{ "name": "air-integration-ui", "axis": "category", "excludedFromBroadRuns": "ci", "description": "x" }"#;
+    let tag = |name: &str| format!(r#"{{ "name": "{name}", "axis": "lane", "category": "air-integration-ui", "description": "x" }}"#);
+    let refused = |tags: &[&str], lanes: &str| {
+        let tags: Vec<String> = tags.iter().map(|name| tag(name)).collect();
+        let text = format!(r#"{{ "tags": [{category}, {}], "lanes": [{lanes}] }}"#, tags.join(", "));
+        Lanes::parse(&text).expect_err("the table parses, and it must not")
+    };
+    let perf = |extra: &str| {
+        format!(
+            r#"{{ "name": "ui-perf", "target": "//perf:perf_test", "extra": [], "integrationTag": "t", {extra}"documentLane": "UI_PERF" }}"#
+        )
+    };
+    assert_eq!(
+        refused(&["t"], &perf(r#""catalogLane": "UI_PERF", "#)),
+        "the lane ui-perf states catalogLane and documentLane; a lane is reached or explicit-only, never both"
+    );
+    assert_eq!(
+        refused(
+            &["t"],
+            &format!(
+                r#"{}, {{ "name": "perf", "target": "//perf:other_test", "extra": [], "documentLane": "UI_OTHER" }}"#,
+                perf("")
+            )
+        ),
+        "the lane perf states the documentLane UI_OTHER and launches no IDE"
+    );
+    let ui = r#"{ "name": "ui", "target": "//ui:ui_test", "extra": [], "integrationTag": "u", "catalogLane": "UI_PERF" }"#;
+    assert_eq!(
+        refused(&["t", "u"], &format!("{ui}, {}", perf(""))),
+        "two lanes name the suite lane UI_PERF"
+    );
 }
 
 /// The table is the one description of the tags, so the parser holds its two halves to each other. A table without
@@ -458,7 +499,7 @@ fn lane_names_cover_every_lane_exactly_once() {
         names,
         [
             "fast", "property", "ui", "ui-real", "ui-live", "ui-perf", "jcp", "gui-chat", "headless", "all", "claude", "codex", "pi",
-            "junie", "acp"
+            "opencode", "junie", "acp"
         ]
     );
 }
@@ -546,7 +587,6 @@ fn the_lane_table_parses_with_the_paths_the_join_reads() {
         Some(Catalog {
             flow_profile_dir: "plugins/air/tests/integration/flow-profiles/resources/flow-profiles",
             flow_text_dir: "plugins/air/docs/flows",
-            authored_suites_file: "plugins/air/tests/integration/flow-profiles/resources/authored-suites.json",
         })
     );
     assert_eq!(lanes().catalog_lane_names(), ["GUI_CHAT", "UI", "UI_REAL"]);

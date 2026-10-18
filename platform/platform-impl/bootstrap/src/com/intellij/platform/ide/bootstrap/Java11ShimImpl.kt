@@ -74,4 +74,16 @@ class Java11ShimImpl : Java11Shim() {
       stream.skip(stackFrameIndex.toLong()).map { it.declaringClass }.findFirst().orElse(null)
     }
   }
+
+  override val walksOnlyRequestedFrames: Boolean
+    get() = true
+
+  override fun getStackTrace(limit: Int, vararg calleeClassNames: String): Array<StackTraceElement> {
+    return StackWalker.getInstance().walk { frames ->
+      frames.dropWhile { isSkippedFrame(it.className, calleeClassNames) }
+        .limit(limit.toLong())
+        .map { it.toStackTraceElement() }
+        .toList()
+    }.toTypedArray()
+  }
 }

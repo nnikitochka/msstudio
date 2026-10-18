@@ -113,6 +113,23 @@ internal class DocBranchImpl private constructor(
     return DocMerge.ready(branch, ops)
   }
 
+  /**
+   * The text of this branch is the document at its version, so a trim to that version takes it as
+   * the base text. A deferred mod state keeps the old graph alive until its first read.
+   */
+  override fun trimmedTo(safepoint: Version): DocBranch {
+    val trimmed = graph.trimmedTo(graph.lvVersionOf(safepoint), text)
+    if (trimmed === graph) {
+      return this
+    }
+    return DocBranchImpl(
+      text = text,
+      modState = modState,
+      agent = agent,
+      graph = trimmed,
+    )
+  }
+
   override fun newInstance(): DocBranch {
     return DocBranchImpl(text, modState, agent, graph)
   }
@@ -292,17 +309,17 @@ internal class DocBranchImpl private constructor(
   }
 
   companion object {
+    /**
+     * A branch at the root of a new graph. The base text of the graph has the characters of the
+     * branch text, and the two share them.
+     */
     fun create(chars: CharSequence, agent: Agent): DocBranchImpl {
-      var graph = EventGraphImpl.empty()
-      if (chars.isNotEmpty()) {
-        graph = graph.appendAtVersion(EventImpl(agent, 0, DocumentOp.insertOp(0, chars)))
-      }
       val text = DocumentText.createText(chars)
       return DocBranchImpl(
         text = text,
         modState = BranchModState.ready(RangeModState.create(text)),
         agent = agent,
-        graph = graph,
+        graph = EventGraphImpl.startingFrom(text),
       )
     }
 

@@ -465,8 +465,8 @@ Linux worker on 2026-08-13.
 `umount` answers "target is busy" while anything in the guest still holds the mount open. The IDE
 holds it, because the IDE runs from the share, and so does any in-flight run that reads share-backed
 data. The daemon does not, and the next section states how that is asserted. Each lane IDE is a run of
-the guest agent's supervisor, so after a quiesce the controller asks the supervisor about every IDE
-context. A run that is not finished refuses the remount as `daemon_mount_quiesce_failed`.
+the guest agent's supervisor, so after the IDE stop the controller asks the supervisor about every IDE
+context. A run that is not finished refuses the remount as `daemon_remount_ide_running`.
 
 ### Guest-local writable state
 
@@ -535,7 +535,7 @@ No other variable reaches the IDE, and the run spec records this policy and no v
 The bridge token is a private file of the config directory, `config/air-ui-test/token`, which the daemon
 writes. No launch document, argument file or argv holds it.
 
-The IDE has no run budget. It ends only when something stops it: `--fresh-ide`, a quiesce, the watchdog, the
+The IDE has no run budget. It ends only when something stops it: `--fresh-ide`, a remount, the watchdog, the
 controller, or its own crash. An IDE that ended on its own, or whose bridge stopped answering, is found by the
 host's probe at the next suite boundary and relaunched on its context, so the lane pays a launch and no timeout.
 
@@ -567,10 +567,20 @@ iteration's timing line reports the one it took.
 | change | detection | cost |
 | --- | --- | --- |
 | test code, meaning the Air test-only modules | hot-jar digest diff | a push plus a fresh classloader. The IDE is reused, and there is **no remount** |
-| product inputs, meaning anything inside the prepared distribution | product stamp diff | quiesce, remount, resume, then launch the IDE again. The daemon JVM survives, and nothing is assembled |
-| the context plugins, meaning the in-IDE test bridge, which no lane distribution carries | plugins digest diff | a push of the changed plugin files and an IDE relaunch on the same context. The timing line reports `ide relaunch`, and there is **no remount** and no distribution compose |
+| product inputs, meaning anything inside the prepared distribution | product stamp diff | stop every lane IDE, remount, then launch the IDE again. The daemon survives, and nothing is assembled |
+| the context plugins, meaning the in-IDE test bridge and its resident part, which no lane distribution carries | the digest of each plugin directory | a push of the changed plugin files, with **no remount** and no distribution compose. Under the lane daemon, an edit of the bridge directory alone reloads the bridge plugin in the running IDE, and the timing line reports `ide reload`. An edit of the resident part relaunches the IDE on the same context, and so does a reload that fails. The JVM daemon relaunches the IDE for each plugin edit, and the timing line reports `ide relaunch` |
 | the daemon's parent tier, meaning platform and framework jars | stable digest diff | an automatic daemon restart. The IDE of the same product survives it, and the timing line reports `ide keep` |
 | the container's declaration, meaning the image tag, the share or the display | create-record diff | a recreate plus a cold daemon start; Docker only |
+
+The series of 2026-10-15 measured the plugin rows under the lane daemon. It ran on master `64c3e5270948e`, on
+the worker `air-docker-2`, under one held lease, with the suite `rename-session`. The other lanes held their builds.
+The first row of each kind includes a host build of 7 to 13 s.
+
+| row | edit | decision | total s |
+| --- | --- | --- | --- |
+| R0 | none | `ide reuse` | 22.9, 10.0, 10.4 |
+| R3 | a literal of the resident plugin | `ide relaunch` | 23.1, 19.6, 15.9 |
+| R4 | a literal of the bridge plugin | `ide reload` | 20.4, 8.7, 9.1. The reload took 3.6, 2.4 and 2.4 s |
 
 The three questions are asked independently, and one file may answer yes to more than one. An Air
 production jar is both hot and a product input. Treating "hot" as an answer to the product question
@@ -587,9 +597,10 @@ asserts that rather than arranging it: it refuses to serve unless `user.dir`, ev
 entry and `java.home` are under the guest-local runtime root. So the daemon can outlive a remount,
 and there are two remount windows:
 
-- **With the daemon alive**, for a product change. `POST /mount/quiesce` refuses new runs and stops
-  the IDE, and it answers `409 busy` if a run is in flight. The controller remounts, and
-  `POST  /mount/resume` hands the run endpoint back. The timing line reports `ide remount`. On
+- **With the daemon alive**, for a product change. `POST /ide/stop` makes the daemon quit its IDE, and it
+  answers `409 busy` if a run is in flight. `ide-gc --stop-all` then cancels every other IDE run of the
+  worker, and the controller remounts. The controller holds the lease, so no run starts in between. Both
+  runners serve `/ide/stop`, so the remount needs no route of its own. The timing line reports `ide remount`. On
   Docker, the controller refreshes the shares with the 2 s settle instead of a remount. The timing
   line still reads `ide remount`.
 - **Between daemons**, for a stable-tier change. `start_daemon` in `crates/avl-vm/src/daemon/start.rs`
@@ -686,11 +697,12 @@ reports a stream that ends mid-run as `daemon_died` (exit 70). `daemon log` stil
 daemon is gone. The next run starts a new daemon, and that start stops a lane IDE that the dead daemon
 left alive.
 
-**The versioned JSON report is the contract, and JUnit XML is only the daemon's producer format.**
-The controller fetches the XML through an authenticated endpoint, and it falls back to a guest pull
-after daemon death. It returns the report in both the success and the error envelope. Missing,
-stale, truncated, malformed, oversized or summary-mismatched producer evidence can never be green.
-Agents consume the JSON report.
+**The versioned JSON report is the contract, and the run stream is its one source.** The report, the
+JUnit XML and the TeamCity service messages are three readers of that stream. The controller writes
+the XML of each iteration beside its report, and the XML of the command to the file that
+`XML_OUTPUT_FILE` names. It returns the report in both the success and the error envelope. A stream
+that ends without a summary, a summary that contradicts its records, and a recorder that contradicts
+the stream can never be green. Agents consume the JSON report.
 
 ## What it costs
 
@@ -778,15 +790,16 @@ Normal execution requires neither Peekaboo nor guest Screen Recording or Accessi
 
 | what | where in the guest |
 | --- | --- |
-| JUnit XML, per iteration. A wedged exit flushes partial XML | `$AIR_VM_DATA/daemon/iterations/<iterationId>/test.xml` |
+| JUnit XML of the JVM daemon, per iteration. A wedged exit flushes partial XML. The controller writes its own XML of the stream beside the report on the host | `$AIR_VM_DATA/daemon/iterations/<iterationId>/test.xml` |
 | `idea.log`, the heartbeat screenshots and the other IDE logs, per IDE launch | `$AIR_VM_DATA/ide/<launchKey>/log/<launchName>/` |
 | the thread dump of an IDE that the watchdog or a stop killed | `threadDump-before-kill-<millis>.txt` in that same directory |
 | the standard output and error of one IDE launch, and its supervisor log | `$AIR_VM_DATA/ide/<launchKey>/run-ide-<launchName>/` |
 
 Three properties of those paths are worth stating. Each IDE launch writes its own log directory, so
 iterations never overwrite each other, and `TEST_UNDECLARED_OUTPUTS_DIR` stays empty for that reason.
-The first launch of a context is `start-<stamp>`, and a relaunch is `recycle-N`, so list the `log`
-directory rather than assuming the path. The guest agent keeps the newest five log directories of each
+The first launch of a context is `start-<stamp>`. Under the lane daemon, a relaunch for `restart-ide` is
+`restart-N` and a relaunch after a reset that did not hold is `recycle-N`. So list the `log` directory rather than
+assuming the path. The guest agent keeps the newest five log directories of each
 context, and always the one of a live IDE. A fresh preparation deletes the data directories, the project, the
 argument file and the launch record. It keeps the log directories and the run directories of earlier launches, and
 `ide-gc` trims them. An iteration id includes the daemon boot identity, and each

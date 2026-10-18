@@ -23,7 +23,10 @@ const PORT: u16 = 7654;
 /// A client over `guests`, the way a host builds one over its manager.
 fn client(guests: &Arc<FakeGuests>) -> DaemonClient {
     let guests = Arc::clone(guests);
-    DaemonClient::new(Arc::new(move |worker: &str| guests.channel(worker) as Arc<dyn Channel>))
+    DaemonClient::new(
+        Arc::new(move |worker: &str| guests.channel(worker) as Arc<dyn Channel>),
+        wire::Runner::Jvm,
+    )
 }
 
 /// A daemon record that aims at one worker's guest port.
@@ -39,6 +42,8 @@ fn state(worker: &str, port: u16) -> HostState {
         last_product_digest: String::new(),
         last_mount_digest: String::new(),
         last_plugins_digest: String::new(),
+        agent_digest: String::new(),
+        runner: None,
     }
 }
 

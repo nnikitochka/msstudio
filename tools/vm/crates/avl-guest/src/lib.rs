@@ -14,6 +14,8 @@
 //! which is how the controller pulls a file. `runfiles-tree` builds the runfiles tree of a host MANIFEST, for a
 //! Windows host that writes no tree.
 //! `ide-prepare`, `ide-launch` and `ide-gc` own the contexts of the lane IDE, whose process is a supervisor run.
+//! `lane-daemon` serves the control channel of the lane daemon in the run slot: it owns the lane services and the lane
+//! IDE, and it streams the records of each iteration.
 //!
 //! The image pair takes three named flags (`--macos-version --node-major --junie-version`), because the Packer
 //! template `air-macos.pkr.hcl` passes them by name. `validate-guest` takes a positional argv: a `:88` and an
@@ -29,6 +31,7 @@ mod cli;
 mod clock;
 mod ide;
 mod image;
+mod lane;
 mod linux;
 mod read_file;
 mod relay;

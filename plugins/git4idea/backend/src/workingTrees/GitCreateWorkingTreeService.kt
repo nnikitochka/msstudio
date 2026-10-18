@@ -3,15 +3,21 @@ package git4idea.workingTrees
 
 import com.intellij.diagnostic.rethrowControlFlowException
 import com.intellij.dvcs.ui.CloneDvcsValidationUtils
+import com.intellij.ide.RecentProjectMetaInfo
+import com.intellij.ide.RecentProjectsManager
+import com.intellij.ide.RecentProjectsManagerBase
 import com.intellij.ide.impl.ProjectUtil
 import com.intellij.ide.trustedProjects.TrustedProjects
 import com.intellij.ide.util.PropertiesComponent
 import com.intellij.internal.statistic.StructuredIdeActivity
 import com.intellij.openapi.Disposable
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.EDT
 import com.intellij.openapi.application.UiWithModelAccess
 import com.intellij.openapi.application.readAction
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
+import com.intellij.openapi.components.serviceAsync
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.FileEditorManagerListener
@@ -36,10 +42,7 @@ import com.intellij.util.concurrency.annotations.RequiresReadLock
 import com.intellij.util.io.sanitizeFileName
 import com.intellij.util.text.UniqueNameGenerator
 import com.intellij.vcsUtil.VcsUtil
-import org.jetbrains.annotations.ApiStatus
-import org.jetbrains.annotations.VisibleForTesting
 import git4idea.GitBranch
-import git4idea.GitNotificationIdsHolder
 import git4idea.GitOperationsCollector
 import git4idea.GitReference
 import git4idea.GitWorkingTree
@@ -50,6 +53,7 @@ import git4idea.commands.GitBranchAlreadyCheckedOutInOtherWorktreeDetector
 import git4idea.i18n.GitBundle
 import git4idea.repo.GitRepository
 import git4idea.util.EelUtils.getEel
+import git4idea.workingTrees.actions.GitChooseWorkingTreeDialog
 import git4idea.workingTrees.dialog.GitWorkingTreeDialog
 import git4idea.workingTrees.dialog.GitWorktreeCreationRequest
 import git4idea.workingTrees.dialog.GitWorktreeDialogContext
@@ -63,6 +67,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import org.jetbrains.annotations.ApiStatus
+import org.jetbrains.annotations.VisibleForTesting
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.coroutines.resume
@@ -111,13 +117,18 @@ class GitCreateWorkingTreeService(private val coroutineScope: CoroutineScope) {
   ) {
     if (!GitWorkingTreesService.isWorktreeCreationSupported(repository)) return
 
-    val existingWorkingTree = GitSingleRefAction.findCheckedOutWorkingTree(branch, listOf(repository), skipCurrentWorkingTree = false)
+    val checkedOutWorkingTrees = GitSingleRefAction.findCheckedOutWorkingTrees(branch, listOf(repository), skipCurrentWorkingTree = false)
     var force = false
-    if (existingWorkingTree != null) {
+    if (checkedOutWorkingTrees.isNotEmpty()) {
       // If the branch is checked out in the current worktree there's nothing to open; the popup item is hidden in that case.
-      if (existingWorkingTree.isCurrent) return
-      if (!confirmCreateNewWorktreeInsteadOfOpening(repository.project, branch, existingWorkingTree.path.path)) {
-        GitWorkingTreesService.getInstance(repository.project).openWorkingTreeProject(existingWorkingTree, onProjectOpened)
+      if (checkedOutWorkingTrees.any { it.isCurrent }) return
+      // Name the single location only when there is one; naming one of several would read as if it were the only one.
+      val worktreePathToMention = checkedOutWorkingTrees.singleOrNull()?.path?.path
+      if (!confirmCreateNewWorktreeInsteadOfOpening(repository.project, branch, worktreePathToMention)) {
+        val chosen = chooseWorkingTreeToOpen(repository.project, checkedOutWorkingTrees)
+        if (chosen != null) {
+          GitWorkingTreesService.getInstance(repository.project).openWorkingTreeProject(chosen, onProjectOpened)
+        }
         return
       }
       force = true
@@ -147,6 +158,16 @@ class GitCreateWorkingTreeService(private val coroutineScope: CoroutineScope) {
     return decision == GitBranchUiHandler.CheckoutInOtherWorktreeDecision.CHECKOUT_ANYWAY
   }
 
+  /**
+   * [workingTrees]' only entry, or the one the user picks from a chooser when there is more than one.
+   * Skips the UI-thread hop entirely when [workingTrees] already has a single entry.
+   */
+  private suspend fun chooseWorkingTreeToOpen(project: Project, workingTrees: List<GitWorkingTree>): GitWorkingTree? {
+    val single = workingTrees.singleOrNull()
+    if (single != null) return single
+    return withContext(Dispatchers.UiWithModelAccess) { GitChooseWorkingTreeDialog.chooseAmong(project, workingTrees) }
+  }
+
   private fun loadLastParentPath(project: Project): String? =
     PropertiesComponent.getInstance(project).getValue(LAST_PARENT_PATH_KEY)
 
@@ -168,6 +189,7 @@ class GitCreateWorkingTreeService(private val coroutineScope: CoroutineScope) {
     refFromContext: GitReference?,
     place: String,
     candidateRepositories: List<GitRepository> = listOf(repository),
+    openAfterCreation: Boolean = true,
     onProjectOpened: ((Project) -> Unit)? = null,
   ) {
     val project = repository.project
@@ -185,7 +207,7 @@ class GitCreateWorkingTreeService(private val coroutineScope: CoroutineScope) {
         val lastParentPath = loadLastParentPath(project)
         val initialParentPath = computeInitialParentPath(project, repository, systemTempDir) { getDefaultParentDir(eel) }
         GitWorktreeDialogContext(project, repository, ideActivity, refFromContext,
-                                 lastParentPath ?: initialParentPath, candidateRepositories)
+                                 lastParentPath ?: initialParentPath, candidateRepositories, openAfterCreation)
       }
 
       withContext(Dispatchers.UiWithModelAccess) {
@@ -198,7 +220,8 @@ class GitCreateWorkingTreeService(private val coroutineScope: CoroutineScope) {
               val request = dialog.getWorkTreeData()
               request.workingTreePath.parentPath?.path?.let { saveLastParentPath(project, it) }
               withContext(Dispatchers.Default) {
-                doCreateWorkingTree(dialogContext.ideActivity, request, onProjectOpened)
+                doCreateWorkingTree(dialogContext.ideActivity, request, onProjectOpened,
+                                    openAfterCreation = dialogContext.openAfterCreation)
               }
               return@withContext
             }
@@ -272,6 +295,7 @@ class GitCreateWorkingTreeService(private val coroutineScope: CoroutineScope) {
     onProjectOpened: ((Project) -> Unit)? = null,
     force: Boolean = false,
     reportOwnProgress: Boolean = true,
+    openAfterCreation: Boolean = true,
   ) {
     GitOperationsCollector.logWorktreeCreationDialogExitedWithOk(ideActivity, request)
 
@@ -295,6 +319,13 @@ class GitCreateWorkingTreeService(private val coroutineScope: CoroutineScope) {
       createAndConfigureWorkingTree(project, request, gitWTService, targetWorktreeDir, force)
     }
     if (!workingTreeCreated) return
+
+    if (!openAfterCreation) {
+      registerAsRecentProject(project, targetWorktreeDir)
+      request.repository.workingTreeHolder.scheduleReload()
+      GitWorktreeNotifications.notifyWorktreeCreated(project, request.branch.presentableBranchName, targetWorktreeDir)
+      return
+    }
 
     openWorktreeProject(project, request, gitWTService, targetWorktreeDir, ideActivity, onProjectOpened)
   }
@@ -473,6 +504,15 @@ class GitCreateWorkingTreeService(private val coroutineScope: CoroutineScope) {
           request.repository.workingTreeHolder.scheduleReload()
         }
       }
+    }
+  }
+
+  private suspend fun registerAsRecentProject(project: Project, worktreePath: Path) {
+    val pathToOpen = resolveWorktreeOpenPath(project, worktreePath)
+    val recentProjectsManager = serviceAsync<RecentProjectsManager>() as? RecentProjectsManagerBase ?: return
+    recentProjectsManager.addRecentPath(pathToOpen, RecentProjectMetaInfo())
+    withContext(Dispatchers.EDT) {
+      ApplicationManager.getApplication().messageBus.syncPublisher(RecentProjectsManager.RECENT_PROJECTS_CHANGE_TOPIC).change()
     }
   }
 

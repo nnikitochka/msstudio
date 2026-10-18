@@ -123,6 +123,24 @@ impl Checkout {
     }
 }
 
+// The lane daemon plans every suite of its lane that the catalog names: each suite document of the lane, by test class.
+// A suite of another lane is none of them.
+#[test]
+fn the_lane_classes_are_the_suite_documents_of_the_lane() {
+    let checkout = Checkout::new();
+    let class = |suite: &str, test_class_name: &str| LaneClass {
+        suite: suite.to_owned(),
+        test_class_name: test_class_name.to_owned(),
+    };
+    assert_eq!(
+        lane_classes(&checkout.settings(), "ui", &quiet()).unwrap(),
+        [
+            class("quick-start", "AirQuickStartGeneratedFlowUiTest"),
+            class("second-ui", "AirSecondGeneratedFlowUiTest"),
+        ]
+    );
+}
+
 fn filters_of(selection: &AffectedSelection) -> Vec<&str> {
     selection.selection.test_env["JB_TEST_JUNIT5_FILTERS"].split(';').collect()
 }

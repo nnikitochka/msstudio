@@ -5,8 +5,7 @@ use avl_testkit::traces::{example_bundle, example_file};
 use avl_trace::bundle::{BundleStatus, MANIFEST_FILE, Manifest, ROOT_DIR_NAME, SPANS_FILE, bundle_path, decode_manifest};
 use avl_trace_tools::discover::{SourceKind, Status};
 use avl_wire::report::{
-    self, ExecutionCounts, Failure, FailureKind, FailureSource, Integrity, ORDERING, RUN_REPORT_SCHEMA_VERSION, Retrieval, RunReport,
-    TraceArchive, Watchdog, XmlCounts,
+    self, ExecutionCounts, Failure, FailureKind, ORDERING, RUN_REPORT_SCHEMA_VERSION, RunReport, TraceArchive, Watchdog,
 };
 use bt_core::ResolutionInputs;
 use bt_core::catalog::SuiteDocument;
@@ -15,7 +14,7 @@ use pretty_assertions::assert_eq;
 use serde_json::{Value, json};
 
 use super::cli::run_plan;
-use super::commands::{BILLED_WARNING, HOST_WARNING, render, vm_run};
+use super::commands::{BILLED_WARNING, EXPLICIT_WARNING, HOST_WARNING, explicit_only, explicit_warning, render, vm_run};
 use super::names::git_list_files;
 use super::*;
 
@@ -104,7 +103,11 @@ fn command_of<'r>(result: &'r PlanResult, kind: CommandKind, lane: &str) -> &'r 
 }
 
 fn widest(documents: &[SuiteDocument]) -> Option<SuiteDocument> {
-    let widest = documents.iter().max_by_key(|document| document.profiles.len())?;
+    // A story suite: the caller walks the steps of its first scenario, and an authored suite has no steps.
+    let widest = documents
+        .iter()
+        .filter(|document| document.profiles.iter().all(|profile| !profile.steps.is_empty()))
+        .max_by_key(|document| document.profiles.len())?;
     if widest.profiles.len() < 2 {
         println!("skipped: no committed suite has two scenarios");
         return None;
@@ -150,12 +153,14 @@ fn every_committed_class_plans_its_suites_scenarios() {
         let vm = command_of(&result, CommandKind::Vm, lane);
         assert_eq!(vm.lines, vec![vm_run(lane, &[&document.test_class_name])], "{suite}");
         let host = command_of(&result, CommandKind::Host, lane);
-        assert_eq!(
-            host.lines,
-            vec![format!("./community/tools/bt.cmd {}", document.test_class_name)],
-            "{suite}"
-        );
-        assert_eq!(host.warning.as_deref(), Some(HOST_WARNING), "{suite}");
+        assert_eq!(host.lines, vec![host_line(lane, &document.test_class_name)], "{suite}");
+        // A suite of an explicit-only lane is planned when its own class names it, with the warning of its lane.
+        let warning = if explicit_only(lane) {
+            format!("{HOST_WARNING}; {}", explicit_warning(lane))
+        } else {
+            HOST_WARNING.to_owned()
+        };
+        assert_eq!(host.warning.as_deref(), Some(warning.as_str()), "{suite}");
         assert!(HOST_WARNING.contains("takes your screen"));
         // The fully qualified spelling is the same class.
         let qualified = plan(
@@ -163,6 +168,20 @@ fn every_committed_class_plans_its_suites_scenarios() {
             vec![text(&format!("com.intellij.air.tests.{}", document.test_class_name))],
         );
         assert_eq!(scenario_keys(&qualified), want, "{suite}: the FQN planned the wrong scenarios");
+    }
+}
+
+/// The host line of one class of `lane`. A class of the live lane names the passthroughs of its lane, because only
+/// `--lane` applies them.
+fn host_line(lane: &str, class: &str) -> String {
+    if lane == "ui-live" {
+        format!(
+            "./community/tools/bt.cmd {class} --test-env AIR_LIVE_CREDENTIALS --test-env AIR_LIVE_REUSE_HOST_HOMES --test-env \
+             ANTHROPIC_API_KEY --test-env CLAUDE_BIN --test-env JUNIE_API_KEY --test-env JUNIE_BIN --test-env NODE_BIN \
+             --test-env NPM_BIN --test-env OPENAI_API_KEY"
+        )
+    } else {
+        format!("./community/tools/bt.cmd {class}")
     }
 }
 
@@ -182,10 +201,14 @@ fn a_vm_line_is_one_self_leased_run_on_the_lanes_guest() {
         }
         let result = plan(&repo.root, vec![text(&document.test_class_name)]);
         let vm = command_of(&result, CommandKind::Vm, lane);
-        let want = if lane == "gui-chat" {
-            format!("./community/tools/vm.cmd --backend parallels run {}", document.test_class_name)
-        } else {
-            format!("./community/tools/vm.cmd run {}", document.test_class_name)
+        let want = match lane {
+            "gui-chat" => format!("./community/tools/vm.cmd --backend parallels run {}", document.test_class_name),
+            // The guest run of the live lane needs the developer's own Central session, piped in (ADR 0200).
+            "ui-live" => format!(
+                "central login export | ./community/tools/vm.cmd run {} --test-env AIR_LIVE_CENTRAL_LOGIN=@-",
+                document.test_class_name
+            ),
+            _ => format!("./community/tools/vm.cmd run {}", document.test_class_name),
         };
         assert_eq!(vm.lines, vec![want], "the {lane} lane's VM line");
         for line in &vm.lines {
@@ -266,6 +289,14 @@ fn an_explicit_only_class_plans_the_piped_guest_run_and_the_billed_host_run() {
              | ./community/tools/vm.cmd run AirLiveLaneEnvironmentUiTest --test-env AIR_LIVE_CENTRAL_LOGIN=@-\n"
         ),
         "{text}"
+    );
+
+    let perf = plan_classes(&[("AirLongSessionPerformanceUiTest", "ui-perf")]);
+    let perf_host = command_of(&perf, CommandKind::Host, "ui-perf");
+    assert_eq!(
+        perf_host.warning.as_deref(),
+        Some(format!("{HOST_WARNING}; {EXPLICIT_WARNING}").as_str()),
+        "the perf lane is explicit-only, and its scenarios spend no billed turn"
     );
 
     let ui = command_of(&result, CommandKind::Vm, "ui");
@@ -507,21 +538,11 @@ fn failed_report(document: &SuiteDocument, scenario: &str, traces: Vec<TraceArch
         duration_ms: 300_000.0,
         ordering: ORDERING.to_owned(),
         execution: ExecutionCounts::default(),
-        xml: XmlCounts::default(),
-        source: report::Source {
-            guest_path: "/x/test.xml".to_owned(),
-            retrieval: Retrieval::DaemonHttp,
-            integrity: Integrity::Complete,
-            diagnostic: None,
-        },
-        suites: Vec::new(),
+        cases: Vec::new(),
         failures: vec![Failure {
-            source: FailureSource::JunitXml,
-            suite: Some(class_name.clone()),
-            suite_timestamp: None,
             class_name: Some(class_name),
             test_name: scenario.to_owned(),
-            kind: FailureKind::Failure,
+            kind: FailureKind::Test,
             r#type: None,
             message: "boom".to_owned(),
             detail: None,
@@ -831,33 +852,6 @@ fn git_lists_files_by_their_literal_name() {
     }
     assert_eq!(git_list_files(repo.path(), "Wanted.kt"), Ok(vec!["a/b/Wanted.kt".to_owned()]));
     assert_eq!(git_list_files(repo.path(), "W*nted.kt"), Ok(vec!["c/W*nted.kt".to_owned()]));
-}
-
-/// An authored suite has no scenario document. A path that reaches one plans it as a class with its own run, and a
-/// note says why, rather than failing the whole join or dropping the suite.
-#[test]
-#[cfg_attr(windows, ignore = "the Windows CI host cannot fetch the jar of the suite documents (ADR 0186)")]
-fn a_path_that_reaches_an_authored_suite_plans_its_class() {
-    let documents = documents_or_skip!();
-    let repo = fixture_repo(&documents);
-    repo.write(
-        air_area().catalog().expect("a catalog").authored_suites_file,
-        r#"{ "suites": [ { "suite": "problem-feedback", "lane": "GUI_CHAT", "testClassName": "AcpProblemFeedbackUiTest" } ] }"#,
-    );
-    let path = "plugins/air/tests/integration/gui-chat/test/AcpProblemFeedbackUiTest.kt";
-    repo.write(path, "package air\n\nclass AcpProblemFeedbackUiTest\n");
-
-    let result = plan(&repo.root, vec![text(path)]);
-    assert!(result.scenarios.is_empty(), "{:?}", scenario_keys(&result));
-    assert_eq!(result.classes, vec!["AcpProblemFeedbackUiTest".to_owned()]);
-    assert_eq!(result.lanes, vec!["gui-chat".to_owned()]);
-    assert!(
-        notes_of(&result).contains("AcpProblemFeedbackUiTest, which have no generated profile"),
-        "{:?}",
-        result.notes
-    );
-    let vm = command_of(&result, CommandKind::Vm, "gui-chat");
-    assert_eq!(vm.lines, vec![vm_run("gui-chat", &["AcpProblemFeedbackUiTest"])]);
 }
 
 // --- the CLI -------------------------------------------------------------------------------------------------

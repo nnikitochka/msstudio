@@ -16,7 +16,7 @@ use clap::{Args, ColorChoice, Parser, Subcommand};
 use crate::reply::AgentRefusalExt;
 use crate::reply::{self, AgentRefusal, Streams, answer_bare, answer_enveloped};
 use crate::step::SystemRunner;
-use crate::{ide, image, linux, read_file, relay, runfiles, shape, stage, supervisor, tracepack};
+use crate::{ide, image, lane, linux, read_file, relay, runfiles, shape, stage, supervisor, tracepack};
 
 #[cfg(test)]
 mod tests;
@@ -63,6 +63,15 @@ the agent, and nothing else.
 
 ide-gc cancels every live IDE under ROOT with --stop-all, or every one whose launch record names another product with \
 --keep-product. It keeps the newest --keep-logs log directories of each context.
+
+lane-daemon serves the control channel of the lane daemon on --bind:--port until a POST /shutdown. It reads the lane IDE \
+inputs from the runtime descriptor, publishes STATE_DIR/daemon.json with its token, and owns the lane services and the \
+lane IDE. It writes its log on standard error.
+
+lane-run runs one iteration of --lane from the runfiles of --descriptor, with no control channel. It writes the run \
+stream on standard output and into RUNTIME_ROOT/run.ndjson, quits the IDE, and exits 0 when the run is green. With \
+--plan-only it stages the inputs, writes the plan of the run as one JSON document on standard output, and launches no \
+IDE.
 
 cancel --thread-dump JCMD runs JCMD PID Thread.print before the TERM, and writes the dump into the log directory of an \
 IDE launch or into the run directory.
@@ -114,6 +123,10 @@ pub(crate) enum Verb {
     IdeLaunch,
     /// Cancel or keep the live IDEs under an IDE root, and remove their old log directories.
     IdeGc(IdeGcArgs),
+    /// Serve the control channel of the lane daemon until its shutdown.
+    LaneDaemon(LaneDaemonArgs),
+    /// Run one iteration of a lane from a runfiles tree, with no control channel.
+    LaneRun(LaneRunArgs),
 }
 
 impl Verb {
@@ -141,6 +154,8 @@ impl Verb {
             Self::IdePrepare => AgentVerb::IdePrepare,
             Self::IdeLaunch => AgentVerb::IdeLaunch,
             Self::IdeGc(_) => AgentVerb::IdeGc,
+            Self::LaneDaemon(_) => AgentVerb::LaneDaemon,
+            Self::LaneRun(_) => AgentVerb::LaneRun,
         }
     }
 }
@@ -254,6 +269,70 @@ pub(crate) struct IdeGcArgs {
     #[arg(long, value_name = "MILLIS", default_value_t = 10_000,
           value_parser = clap::value_parser!(u64).range(0..=60_000))]
     pub grace_ms: u64,
+}
+
+// --- the lane daemon ----------------------------------------------------------------------------------------
+
+#[derive(Args, Debug, Clone)]
+pub(crate) struct LaneDaemonArgs {
+    /// The state directory: the state file, the jar store and the iterations.
+    #[arg(long, value_name = "DIR", value_parser = absolute_path)]
+    pub state_dir: PathBuf,
+    /// The port of the control channel.
+    #[arg(long, value_name = "PORT", value_parser = clap::value_parser!(u16).range(1..))]
+    pub port: u16,
+    /// The address of the control channel. A container-linux guest binds every interface.
+    #[arg(long, value_name = "ADDRESS", default_value = "127.0.0.1")]
+    pub bind: std::net::IpAddr,
+    /// The launch digest that the controller prepared the daemon for. A run of another one is refused.
+    #[arg(long, value_name = "DIGEST", value_parser = non_empty_string)]
+    pub launch_digest: String,
+    /// The runtime descriptor in the guest runfiles tree.
+    #[arg(long, value_name = "FILE", value_parser = absolute_path)]
+    pub descriptor: PathBuf,
+    /// The root of the guest runfiles tree, which every runfile of the descriptor is below.
+    #[arg(long, value_name = "DIR", value_parser = absolute_path)]
+    pub runfiles_root: PathBuf,
+    /// The parent of every context of the lane IDE.
+    #[arg(long, value_name = "DIR", value_parser = absolute_path)]
+    pub ide_root: PathBuf,
+    /// The empty home of the staged generation, which the IDE gets as idea.dev.project.root.
+    #[arg(long, value_name = "DIR", value_parser = absolute_path)]
+    pub home: PathBuf,
+}
+
+#[derive(Args, Debug, Clone)]
+pub(crate) struct LaneRunArgs {
+    /// The lane of the run, such as ui: the lane document lanes/<lane>.json.
+    #[arg(long, value_name = "LANE", value_parser = non_empty_string)]
+    pub lane: String,
+    /// The runtime descriptor in the runfiles tree.
+    #[arg(long, value_name = "FILE", value_parser = absolute_path)]
+    pub descriptor: PathBuf,
+    /// The root of the runfiles tree. The default is the root that holds the descriptor.
+    #[arg(long, value_name = "DIR", value_parser = absolute_path)]
+    pub runfiles_root: Option<PathBuf>,
+    /// The directory of the run: the jar store, the IDE contexts, the home and the run stream. The default is
+    /// $AIR_LANE_RUNTIME_ROOT, and then $TEST_TMPDIR/air-lane.
+    #[arg(long, value_name = "DIR", value_parser = absolute_path)]
+    pub runtime_root: Option<PathBuf>,
+    /// A test class, with or without a package, and an optional #<scenario>. Repeat it to name more. A Bazel
+    /// --test_filter, $TESTBRIDGE_TEST_ONLY, adds its comma-separated selectors.
+    #[arg(long = "selector", value_name = "CLASS[#SCENARIO]")]
+    pub selectors: Vec<String>,
+    /// A JUnit5 filter <option>=<value>. Repeat it to name more. $JB_TEST_JUNIT5_FILTERS adds its filters, separated by
+    /// ';'.
+    #[arg(long = "junit5-filter", value_name = "FILTER")]
+    pub junit5_filters: Vec<String>,
+    /// The budget of one scenario, in seconds.
+    #[arg(long, value_name = "SECONDS", default_value_t = 1_800)]
+    pub active_execution_timeout_sec: u64,
+    /// The budget between two records of the run, in seconds.
+    #[arg(long, value_name = "SECONDS", default_value_t = 300)]
+    pub progress_gap_timeout_sec: u64,
+    /// Stage the inputs, select the suite documents, write the plan of the run on standard output, and launch no IDE.
+    #[arg(long)]
+    pub plan_only: bool,
 }
 
 // --- the image and Linux worker verbs -----------------------------------------------------------------------
@@ -441,5 +520,13 @@ pub(crate) fn dispatch(verb: Verb, streams: &mut Streams<'_>) -> u8 {
             answer_bare(streams, name, result)
         }
         Verb::IdeGc(args) => answer_bare(streams, name, ide::gc::collect(&system, &args)),
+        Verb::LaneDaemon(args) => match lane::channel::serve(&args) {
+            Ok(exit) => exit,
+            Err(refusal) => reply::fail(streams, name.as_str(), refusal),
+        },
+        Verb::LaneRun(args) => match lane::run::run(&args, &|name| std::env::var(name).ok()) {
+            Ok(exit) => exit,
+            Err(refusal) => reply::fail(streams, name.as_str(), refusal),
+        },
     }
 }

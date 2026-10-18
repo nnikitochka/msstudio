@@ -643,8 +643,21 @@ impl State {
                 );
                 self.push_line_entry(vec![line]);
             }
-            // The lane IDE's life is the run journal's and the viewer's, not a line of the console.
-            RunEventKind::WatchdogState(_) | RunEventKind::Output(_) | RunEventKind::IdeLaunched(_) | RunEventKind::IdeExited(_) => {}
+            RunEventKind::TraceFailed(failed) => {
+                let prefix = self.worker_prefix(worker);
+                let line = format!(
+                    "  {}",
+                    paint.warn(&format!("⚠ {prefix}trace failed: {}", first_line(&failed.reason)))
+                );
+                self.push_line_entry(vec![line]);
+            }
+            // The lane IDE's life is the run journal's and the viewer's, not a line of the console. The controller
+            // publishes a decision of the daemon as its own decision, which the console renders.
+            RunEventKind::WatchdogState(_)
+            | RunEventKind::Output(_)
+            | RunEventKind::IdeLaunched(_)
+            | RunEventKind::IdeExited(_)
+            | RunEventKind::Decision(_) => {}
         }
     }
 

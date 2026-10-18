@@ -9,6 +9,7 @@ import com.intellij.openapi.util.TextRange
 import com.intellij.openapi.util.UserDataHolderBase
 import com.intellij.openapi.vfs.VirtualFile
 import org.jetbrains.annotations.ApiStatus
+import java.util.concurrent.atomic.AtomicIntegerFieldUpdater
 import java.util.concurrent.atomic.AtomicReference
 
 /**
@@ -17,7 +18,7 @@ import java.util.concurrent.atomic.AtomicReference
 @ApiStatus.Internal
 open class SnapshotRangeMarkerImpl private constructor(
   private val documentOrFile: Any,
-  internal val fileRoot: FileMarkerRoot?,
+  internal val fileRoot: VirtualFileMarkerRoot?,
   private val rootStorage: MarkerRootUpdater,
   internal val markerId: Long,
   initialSpec: MarkerSpec,
@@ -28,7 +29,7 @@ open class SnapshotRangeMarkerImpl private constructor(
    */
   internal constructor(
     document: DocumentImpl,
-    fileRoot: FileMarkerRoot?,
+    fileRoot: VirtualFileMarkerRoot?,
     markerId: Long,
     initialSpec: MarkerSpec,
     initialRange: TextRange,
@@ -36,7 +37,7 @@ open class SnapshotRangeMarkerImpl private constructor(
 
   /** Creates a marker in [fileRoot] before the document is available. */
   internal constructor(
-    fileRoot: FileMarkerRoot,
+    fileRoot: VirtualFileMarkerRoot,
     markerId: Long,
     initialSpec: MarkerSpec,
     initialRange: TextRange,
@@ -54,11 +55,13 @@ open class SnapshotRangeMarkerImpl private constructor(
   ) : this(document, null, rootStore.currentRootUpdater, markerId, initialSpec, initialRange)
 
   @Volatile
-  internal var disposed: Boolean = false
-    private set
+  private var disposalState: Int = ACTIVE
+
+  internal val disposed: Boolean
+    get() = disposalState == DISPOSED
 
   internal fun markDisposed() {
-    disposed = true
+    disposalState = DISPOSED
   }
 
   @Volatile
@@ -108,12 +111,18 @@ open class SnapshotRangeMarkerImpl private constructor(
 
   fun isStickingToRight(): Boolean = spec.isStickingToRight
 
-  @Synchronized
   override fun dispose() {
-    if (disposed) return
-    beforeDispose()
-    SnapshotMarkerEngineImpl.removeRangeMarker(this)
-    afterDispose()
+    if (DISPOSAL_STATE_UPDATER.compareAndSet(this, ACTIVE, DISPOSING)) {
+      try {
+        beforeDispose()
+        markDisposed()
+        SnapshotMarkerEngineImpl.removeRangeMarker(this)
+        afterDispose()
+      }
+      finally {
+        DISPOSAL_STATE_UPDATER.compareAndSet(this, DISPOSING, ACTIVE)
+      }
+    }
   }
 
   protected open fun beforeDispose() {
@@ -169,4 +178,12 @@ open class SnapshotRangeMarkerImpl private constructor(
   override fun toString(): String = "SnapshotRangeMarker(id=$markerId" +
                                     (if (disposed) ", disposed" else "") +
                                     ")"
+
+  private companion object {
+    private const val ACTIVE: Int = 0
+    private const val DISPOSING: Int = 1
+    private const val DISPOSED: Int = 2
+    private val DISPOSAL_STATE_UPDATER: AtomicIntegerFieldUpdater<SnapshotRangeMarkerImpl> =
+      AtomicIntegerFieldUpdater.newUpdater(SnapshotRangeMarkerImpl::class.java, "disposalState")
+  }
 }

@@ -47,6 +47,7 @@ android/android/gradle.project.sync
 android/android/gutter
 android/android/imports
 android/android/integration
+android/android/integration/adb_wifi
 android/android/jetbrains
 android/android/lang
 android/android/model
@@ -387,10 +388,10 @@ jps/standalone-builder
 json
 json/backend
 json/backend/regexp
-json/backend/spellchecker
 json/backend/tests
 json/networknt.wrapper
 json/networknt.wrapper/tests
+json/spellchecker
 json/structureView
 json/syntax
 jupyter
@@ -1094,6 +1095,7 @@ platform/tasks-platform-impl/plugin
 platform/tasks-platform-impl/tasks.impl.bookmarks
 platform/tasks-platform-impl/tasks.impl.debugger
 platform/terminal
+platform/terminal/tests
 platform/testFramework
 platform/testFramework/bootstrap
 platform/testFramework/buildView
@@ -1381,10 +1383,12 @@ plugins/grazie
 plugins/grazie/java
 plugins/grazie/json
 plugins/grazie/markdown
+plugins/grazie/markdown/specification
 plugins/grazie/properties
 plugins/grazie/src
 plugins/grazie/src/test
 plugins/grazie/todo
+plugins/grazie/vcs
 plugins/grazie/xml
 plugins/grazie/yaml
 plugins/groovy
@@ -1735,7 +1739,6 @@ plugins/mcp-server/mcpserver.testFramework
 plugins/mcp-server/mcpserver.toolsets
 plugins/mcp-server/mcpserver.vcs
 plugins/mcp-server/tests
-plugins/mcp-server/tests/plugin
 plugins/mermaid
 plugins/mermaid/frontend
 plugins/mermaid/json
@@ -1870,6 +1873,7 @@ plugins/xpath
 plugins/xpath/xslt-rt
 plugins/yaml
 plugins/yaml/backend
+plugins/yaml/spellchecker
 plugins/yaml/syntax
 python
 python/IntelliLang-python
@@ -1948,6 +1952,7 @@ python/python-pyrefly/frontend
 python/python-pyright
 python/python-pyright/common
 python/python-pyright/frontend
+python/python-pytools-runtime/backend
 python/python-pytools/backend
 python/python-pytools/common
 python/python-pytools/frontend
@@ -2004,6 +2009,7 @@ python/tools
 spellchecker
 spellchecker/vcs
 spellchecker/xml
+spellchecker/xml/backend
 tools/apiDump
 tools/apiDump/testData
 tools/intellij.ide.starter.allure.annotations.scanner

@@ -61,6 +61,10 @@ internal class DefaultJava11Shim : Java11Shim() {
     return ReflectionUtil.getCallerClass(stackFrameIndex + 1) // +1 to accommodate the current frame
   }
 
+  override fun getStackTrace(limit: Int, vararg calleeClassNames: String): Array<StackTraceElement> {
+    return topFrames(Throwable().stackTrace, limit, arrayOf(DefaultJava11Shim::class.java.name, *calleeClassNames))
+  }
+
   override fun <K, V> createConcurrentWeakMap(hashingStrategy: HashingStrategy<in K & Any>): ConcurrentMap<K & Any, V & Any> {
     return CollectionFactory.createConcurrentWeakMap(hashingStrategy)
   }

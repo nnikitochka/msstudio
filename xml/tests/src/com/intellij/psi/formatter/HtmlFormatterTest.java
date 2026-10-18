@@ -30,6 +30,11 @@ import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.junit.jupiter.api.Test;
 
+import java.util.HashSet;
+import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
 @TestApplication
 public class HtmlFormatterTest extends XmlFormatterTestBase {
   @Override
@@ -647,6 +652,241 @@ public class HtmlFormatterTest extends XmlFormatterTestBase {
         <input type="button" value="Ok">
         <br>
         """);
+  }
+
+  @Test
+  public void testWeb434() {
+    doTextTest("""
+                 <div>
+                     <img></div>""",
+               """
+                 <div>
+                     <img>
+                 </div>""");
+    doTextTest("""
+                 <div>
+                     text<br></div>""",
+               """
+                 <div>
+                     text<br>
+                 </div>""");
+    doTextTest("<div><img></div>", "<div><img></div>");
+    doTextTest("<div>text<br>text</div>", "<div>text<br>text</div>");
+  }
+
+  @Test
+  public void testWeb434NoLineBreakAfterStartTag() {
+    doTextTest("""
+                 <div><img>
+                     <img></div>""",
+               """
+                 <div><img>
+                     <img></div>""");
+    doTextTest("""
+                 <table>
+                     <tr>
+                         <td><select name="a">
+                             <option>a</option>
+                         </select></td>
+                         <td><input type="text" id="b"
+                                    name="b"/></td>
+                     </tr>
+                 </table>""",
+               """
+                 <table>
+                     <tr>
+                         <td><select name="a">
+                             <option>a</option>
+                         </select></td>
+                         <td><input type="text" id="b"
+                                    name="b"/></td>
+                     </tr>
+                 </table>""");
+  }
+
+  @Test
+  public void testWeb434LineBreakAddedAfterStartTag() {
+    doTextTest("<div><div>a</div><img></div>",
+               """
+                 <div>
+                     <div>a</div>
+                     <img>
+                 </div>""");
+  }
+
+  @Test
+  public void testWeb434AttributesOnManyLines() {
+    doTextTest("""
+                 <div class="a"
+                      id="b"><img></div>""",
+               """
+                 <div class="a"
+                      id="b"><img></div>""");
+  }
+
+  @Test
+  public void testWeb434DontAddBreaksIfInlineContent() {
+    doTextTest("""
+                 <p>
+                     text <b>bold</b></p>""",
+               """
+                 <p>
+                     text <b>bold</b></p>""");
+  }
+
+  @Test
+  public void testWeb434KeepWhitespacesInside() {
+    doTextTest("""
+                 <pre>
+                     <b>bold</b></pre>""",
+               """
+                 <pre>
+                     <b>bold</b></pre>""");
+  }
+
+  @Test
+  public void testWeb10625() {
+    doTextTest("""
+                 <html>
+                 <body>
+                 <form action="foo">
+                     <input name="huhu"/>   </form>
+                 <a href="google.com"> <img src="logo.gif"> </a>
+
+                 <div><span></span></div>
+                 <ul>
+                     <li>
+                         <a href="#">dddd</a>   </li>
+                 </ul>
+                 </body>
+                 </html>""",
+               """
+                 <html>
+                 <body>
+                 <form action="foo">
+                     <input name="huhu"/>
+                 </form>
+                 <a href="google.com"> <img src="logo.gif"> </a>
+
+                 <div><span></span></div>
+                 <ul>
+                     <li>
+                         <a href="#">dddd</a>
+                     </li>
+                 </ul>
+                 </body>
+                 </html>""");
+  }
+
+  @Test
+  public void testWeb33900() {
+    doTextTest("""
+                 <div class="main-content no-name">
+                     <div class="card signin-card pre-shift no-name">
+                         <img class="circle-mask" src="avatar_2x.png"></div>
+                 </div>""",
+               """
+                 <div class="main-content no-name">
+                     <div class="card signin-card pre-shift no-name">
+                         <img class="circle-mask" src="avatar_2x.png">
+                     </div>
+                 </div>""");
+  }
+
+  @Test
+  public void testWeb44449() {
+    doTextTest("""
+                 <input value=1000 />
+                 <input value=1000   />
+                 <input value="1000" />
+                 <input disabled />""",
+               """
+                 <input value=1000 />
+                 <input value=1000 />
+                 <input value="1000"/>
+                 <input disabled/>""");
+  }
+
+  @Test
+  public void testWeb44449NewLineAfterLastAttribute() {
+    getHtmlSettings().HTML_NEWLINE_AFTER_LAST_ATTRIBUTE = CodeStyleSettings.HtmlTagNewLineStyle.WhenMultiline;
+    doTextTest("""
+                 <input value=1000 />
+                 <input value="1000" />""",
+               """
+                 <input value=1000 />
+                 <input value="1000"/>""");
+  }
+
+  @Test
+  public void testWeb77174DefaultTagListsHaveNoDuplicates() {
+    HtmlCodeStyleSettings settings = getHtmlSettings();
+    for (String tagList : List.of(settings.HTML_ELEMENTS_TO_INSERT_NEW_LINE_BEFORE,
+                                  settings.HTML_ELEMENTS_TO_REMOVE_NEW_LINE_BEFORE,
+                                  settings.HTML_DO_NOT_INDENT_CHILDREN_OF,
+                                  settings.HTML_KEEP_WHITESPACES_INSIDE,
+                                  settings.HTML_INLINE_ELEMENTS,
+                                  settings.HTML_DONT_ADD_BREAKS_IF_INLINE_CONTENT)) {
+      List<String> names = List.of(tagList.split(","));
+      assertEquals(new HashSet<>(names).size(), names.size(), tagList);
+    }
+  }
+
+  @Test
+  public void testWeb59303() {
+    HtmlCodeStyleSettings settings = getHtmlSettings();
+    getSettings().setDefaultRightMargin(40);
+    settings.HTML_ATTRIBUTE_WRAP = CommonCodeStyleSettings.WRAP_ON_EVERY_ITEM;
+    settings.HTML_NEWLINE_BEFORE_FIRST_ATTRIBUTE = CodeStyleSettings.HtmlTagNewLineStyle.WhenMultiline;
+    settings.HTML_NEWLINE_AFTER_LAST_ATTRIBUTE = CodeStyleSettings.HtmlTagNewLineStyle.WhenMultiline;
+    doTextTest("""
+                 <h1 id="very-long-attribute-that-would-exceed-the-max-column-width">
+                     Heading
+                 </h1>
+                 <h1 id="short">
+                     Heading
+                 </h1>""",
+               """
+                 <h1
+                         id="very-long-attribute-that-would-exceed-the-max-column-width"
+                 >
+                     Heading
+                 </h1>
+                 <h1 id="short">
+                     Heading
+                 </h1>""");
+  }
+
+  @Test
+  public void testWeb59303FirstAttributeStaysWithoutNewLineBeforeIt() {
+    HtmlCodeStyleSettings settings = getHtmlSettings();
+    getSettings().setDefaultRightMargin(40);
+    settings.HTML_ATTRIBUTE_WRAP = CommonCodeStyleSettings.WRAP_ON_EVERY_ITEM;
+    doTextTest("""
+                 <h1 id="very-long-attribute-that-would-exceed-the-max-column-width">
+                     Heading
+                 </h1>""",
+               """
+                 <h1 id="very-long-attribute-that-would-exceed-the-max-column-width">
+                     Heading
+                 </h1>""");
+  }
+
+  @Test
+  public void testWeb59303WrapAlwaysKeepsSingleAttribute() {
+    HtmlCodeStyleSettings settings = getHtmlSettings();
+    settings.HTML_ATTRIBUTE_WRAP = CommonCodeStyleSettings.WRAP_ALWAYS;
+    settings.HTML_NEWLINE_BEFORE_FIRST_ATTRIBUTE = CodeStyleSettings.HtmlTagNewLineStyle.WhenMultiline;
+    settings.HTML_NEWLINE_AFTER_LAST_ATTRIBUTE = CodeStyleSettings.HtmlTagNewLineStyle.WhenMultiline;
+    doTextTest("""
+                 <div class="a"></div>
+                 <div class="a" id="b"></div>""",
+               """
+                 <div class="a"></div>
+                 <div
+                         class="a"
+                         id="b"
+                 ></div>""");
   }
 
   @NotNull

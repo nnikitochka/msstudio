@@ -72,17 +72,15 @@ pub(crate) fn df_with_free_kib(kibibytes: &str) -> String {
 
 /// What the fake daemon answers, and what it was sent. Every field is the suite's to set.
 #[derive(Debug)]
-#[expect(
-    clippy::struct_excessive_bools,
-    reason = "a fake's script: each bool is one independent answer a suite sets"
-)]
 pub(crate) struct DaemonScript {
     /// `METHOD /path` of every request, in order.
     pub(crate) requests: Vec<String>,
     pub(crate) protocol_version: u32,
+    /// The protocol that a `/shutdown` sets, so a suite sees the retired daemon of one runner and the started daemon
+    /// of the other one on the same double.
+    pub(crate) protocol_after_shutdown: Option<u32>,
     pub(crate) boot_stamp: String,
     pub(crate) launch_digest: String,
-    pub(crate) mount_quiesced: bool,
     pub(crate) ide_running: bool,
     pub(crate) busy: bool,
     pub(crate) iteration_count: u32,
@@ -113,11 +111,10 @@ pub(crate) struct DaemonScript {
     pub(crate) close_mid_stream: bool,
     /// Holds a `/run` open until cancelled, so a suite can interrupt an iteration in flight.
     pub(crate) block: Option<CancellationToken>,
-    /// `None` answers the results XML.
+    /// The status of `/results`; `None` answers `results_xml`. The report reads the run stream and no result file, so
+    /// only the test of the control channel reads this route.
     pub(crate) results_status: Option<u16>,
     pub(crate) results_xml: Vec<u8>,
-    /// Is to `results_xml` what `run_queue` is to `run_lines`.
-    pub(crate) results_queue: VecDeque<Vec<u8>>,
 }
 
 /// The control channel's double: an axum router, routed by the wire's own route table. It serves on a loopback
@@ -153,10 +150,10 @@ impl FakeDaemon {
         let token = "fixture-token".to_owned();
         let script = Arc::new(Mutex::new(DaemonScript {
             requests: Vec::new(),
-            protocol_version: wire::PROTOCOL_VERSION,
+            protocol_version: wire::JVM_PROTOCOL_VERSION,
+            protocol_after_shutdown: None,
             boot_stamp: "boot-1".to_owned(),
             launch_digest: String::new(),
-            mount_quiesced: false,
             ide_running: false,
             busy: false,
             iteration_count: 0,
@@ -177,7 +174,6 @@ impl FakeDaemon {
             block: None,
             results_status: None,
             results_xml: Vec::new(),
-            results_queue: VecDeque::new(),
         }));
         let address = listener.local_addr().expect("a bound listener has an address");
         let app = axum::Router::new().fallback(serve).with_state(Served {
@@ -247,13 +243,15 @@ impl FakeDaemon {
             last_product_digest: String::new(),
             last_mount_digest: String::new(),
             last_plugins_digest: String::new(),
+            agent_digest: String::new(),
+            runner: None,
         }
     }
 
     /// What the guest daemon publishes for the boot poll to read, aimed at this double.
     pub(crate) fn state_file_json(&self) -> String {
         json!({
-            "protocolVersion": wire::PROTOCOL_VERSION,
+            "protocolVersion": wire::JVM_PROTOCOL_VERSION,
             "port": self.port(),
             "token": self.token,
             "pid": 7,
@@ -288,11 +286,12 @@ async fn serve(State(served): State<Served>, request: Request) -> Response {
             if let Some(code) = script.status_code {
                 return status(code).into_response();
             }
+            // The two fields of the JVM daemon that protocol 6 dropped, which the controller ignores.
             json!({
                 "protocolVersion": script.protocol_version,
                 "daemonBootStamp": script.boot_stamp,
                 "controllerLaunchDigest": script.launch_digest,
-                "mountQuiesced": script.mount_quiesced,
+                "mountQuiesced": false,
                 "productStamp": "stamp",
                 "ideRunning": script.ide_running,
                 "busy": script.busy,
@@ -311,15 +310,21 @@ async fn serve(State(served): State<Served>, request: Request) -> Response {
         Some(Route::UploadJar) => upload(&served.script, path).await,
         Some(Route::Run) => run(&served.script, body).await,
         Some(Route::Results) => {
-            let mut script = lock(&served.script);
+            let script = lock(&served.script);
             if let Some(code) = script.results_status {
                 return status(code).into_response();
             }
-            let xml = script.results_queue.pop_front().unwrap_or_else(|| script.results_xml.clone());
-            xml.into_response()
+            script.results_xml.clone().into_response()
         }
         // 200 with no body, which is all the client reads of them.
-        Some(Route::MountQuiesce | Route::MountResume | Route::IdeStop | Route::Shutdown) => StatusCode::OK.into_response(),
+        Some(Route::IdeStop) => StatusCode::OK.into_response(),
+        Some(Route::Shutdown) => {
+            let mut script = lock(&served.script);
+            if let Some(protocol) = script.protocol_after_shutdown.take() {
+                script.protocol_version = protocol;
+            }
+            StatusCode::OK.into_response()
+        }
         None => StatusCode::NOT_FOUND.into_response(),
     }
 }
@@ -422,19 +427,6 @@ pub(crate) fn run_started_record(iteration_id: &str) -> Value {
         "startedAt": "2026-08-23T12:00:00.000Z"})
 }
 
-/// A complete document whose counts agree with [`passing_run_lines`]'s summary, so the report's verdict is `passed`
-/// rather than an infrastructure mismatch.
-pub(crate) const PASSING_XML: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
-<testsuites>
-<testsuite name="com.example.MyTest" tests="1" failures="0" errors="0" skipped="0" time="1.0" timestamp="2026-08-23T12:00:01">
-<testcase classname="com.example.MyTest" name="works" time="1.0"/>
-</testsuite>
-</testsuites>
-"#;
-
-/// A complete document with no suite at all.
-pub(crate) const EMPTY_COMPLETE_XML: &str = r#"<?xml version="1.0" encoding="UTF-8"?><testsuites></testsuites>"#;
-
 /// One green iteration's stream: one test that passed.
 pub(crate) fn passing_run_lines(iteration_id: &str) -> Vec<String> {
     vec![
@@ -448,9 +440,9 @@ pub(crate) fn passing_run_lines(iteration_id: &str) -> Vec<String> {
     ]
 }
 
-/// One red iteration: its stream, and the XML that agrees with it.
-pub(crate) fn failing_run(iteration_id: &str) -> (Vec<String>, String) {
-    let lines = vec![
+/// One red iteration's stream: one test that failed.
+pub(crate) fn failing_run(iteration_id: &str) -> Vec<String> {
+    vec![
         ndjson_line(&run_started_record(iteration_id)),
         ndjson_line(
             &json!({"event": "testStarted", "timestamp": "t", "displayName": "works", "id": "t1",
@@ -461,22 +453,15 @@ pub(crate) fn failing_run(iteration_id: &str) -> (Vec<String>, String) {
             "className": "com.example.MyTest", "status": "FAILED", "durationMs": 5, "error": "boom\nstack"}),
         ),
         ndjson_line(&summary_record(iteration_id, 1, 1, 0, 0, 0, true)),
-    ];
-    let xml = concat!(
-        r#"<?xml version="1.0" encoding="UTF-8"?><testsuites>"#,
-        r#"<testsuite name="com.example.MyTest" tests="1" failures="1" errors="0" skipped="0" time="1.0" timestamp="2026-08-23T12:00:01">"#,
-        r#"<testcase classname="com.example.MyTest" name="works" time="1.0">"#,
-        "<failure message=\"boom\" type=\"AssertionError\">boom\nstack</failure>",
-        "</testcase></testsuite></testsuites>",
-    );
-    (lines, xml.to_owned())
+    ]
 }
 
 // --- the runtime-descriptor fixture ------------------------------------------------------------------------------
 
 /// The runfiles every fixture descriptor declares, with their contents.
-pub(crate) const FIXTURE_RUNFILES: [(&str, &str); 9] = [
+pub(crate) const FIXTURE_RUNFILES: [(&str, &str); 10] = [
     ("_main/hot/a.jar", "hot-a"),
+    (FIXTURE_FAKE_AGENT_JAR, "fake-agent"),
     ("_main/stable/one.jar", "stable-one"),
     ("_main/stable/two.jar", "stable-two"),
     ("_main/data/project.zip", "data-a"),
@@ -486,6 +471,10 @@ pub(crate) const FIXTURE_RUNFILES: [(&str, &str); 9] = [
     ("_main/ide/project.zip", "ide-project"),
     ("_main/plugins/bridge/lib/bridge.jar", "bridge-plugin"),
 ];
+
+/// The fake agent jar of the fixture descriptor, a lane input. The jars of the documents are the hot jar, as the
+/// flow-profiles resource jar is a hot jar of the daemon.
+pub(crate) const FIXTURE_FAKE_AGENT_JAR: &str = "_main/agent/fake-agent.jar";
 
 /// The fixture's runtime descriptor, built for an arm64 Linux guest.
 pub(crate) fn fixture_descriptor() -> Value {
@@ -521,10 +510,13 @@ pub(crate) fn fixture_descriptor_for(jbr_platform: &str) -> Value {
             "platform": jbr_platform,
         },
         "ide": {
+            "fakeAgentJar": file(FIXTURE_FAKE_AGENT_JAR),
             "flagsFile": file("_main/ide/ide.jvm-flags.txt"),
+            "laneDocuments": file("_main/hot/a.jar"),
             "plugins": [{"destination": "bridge/lib/bridge.jar", "file": file("_main/plugins/bridge/lib/bridge.jar")}],
             "projectArchive": file("_main/ide/project.zip"),
             "projectRoot": "Project",
+            "suiteDocuments": file("_main/hot/a.jar"),
         },
         "data": [file("_main/data/project.zip")],
     })
@@ -1098,18 +1090,14 @@ impl DaemonFixture {
         avl_host_sys::guest::write_init_receipt(&self.settings, &self.worker).expect("the init receipt is written");
     }
 
-    /// Makes the double answer one stream and one XML per `/run`, in order.
-    pub(crate) fn queue_runs(&self, streams: Vec<Vec<String>>, documents: &[&str]) {
-        let mut script = self.daemon.script();
-        script.run_queue = streams.into();
-        script.results_queue = documents.iter().map(|document| document.as_bytes().to_vec()).collect();
+    /// Makes the double answer one stream per `/run`, in order.
+    pub(crate) fn queue_runs(&self, streams: Vec<Vec<String>>) {
+        self.daemon.script().run_queue = streams.into();
     }
 
-    /// Scripts the double for one iteration: its stream and the XML its report reads.
-    pub(crate) fn script_run(&self, lines: Vec<String>, xml: &str) {
-        let mut script = self.daemon.script();
-        script.run_lines = lines;
-        script.results_xml = xml.as_bytes().to_vec();
+    /// Scripts the double for one iteration: the stream its report reads.
+    pub(crate) fn script_run(&self, lines: Vec<String>) {
+        self.daemon.script().run_lines = lines;
     }
 
     /// Writes a live lease on `worker` held by `holder` on `guest_os`, the way an acquisition would have.
@@ -1207,6 +1195,15 @@ impl Recorded {
             .filter(|record| record.event == kind)
             .filter_map(|record| record.data.as_ref())
             .map(|data| serde_json::from_str(data.get()).unwrap_or_else(|error| panic!("a {kind} record does not decode: {error}")))
+            .collect()
+    }
+
+    /// The message of every record of one kind, such as each note.
+    pub(crate) fn messages_of(&self, kind: Kind) -> Vec<String> {
+        lock(&self.records)
+            .iter()
+            .filter(|record| record.event == kind)
+            .map(|record| record.message.clone())
             .collect()
     }
 

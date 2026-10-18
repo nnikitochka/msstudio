@@ -5,9 +5,7 @@ use avl_host_testkit::agent::{agent_envelope, agent_reply, argv_value, run_state
 use avl_host_testkit::git::FAKE_HEAD;
 use avl_host_testkit::{answer_text, handler, refusal};
 use avl_wire::progress::{Checkout, Kind, TraceRef, VerdictTraces};
-use avl_wire::report::{
-    Failure as ReportFailure, FailureKind, FailureSource, Retrieval, RetrievedIntegrity, RetrievedXml, TraceArchive, TraceBundle, Tree,
-};
+use avl_wire::report::{Failure as ReportFailure, FailureKind, TraceArchive, TraceBundle, Tree};
 use clap::Parser;
 use pretty_assertions::assert_eq;
 use serde_json::{Value, json};
@@ -15,10 +13,7 @@ use serde_json::{Value, json};
 use super::*;
 use crate::daemon::fixture::Fixture;
 use crate::daemon::run::tests::{suite_catalog, three_lane_catalog};
-use crate::daemon::testing::{
-    EMPTY_COMPLETE_XML, PASSING_XML, PLENTIFUL_DF, Recorded, failing_run, ndjson_line, passing_run_lines, run_started_record,
-    summary_record,
-};
+use crate::daemon::testing::{PLENTIFUL_DF, Recorded, failing_run, ndjson_line, passing_run_lines, run_started_record, summary_record};
 use crate::daemon::verdict::{checkout_of, failures_of, reproduce_commands, traces_of};
 use crate::worker::lease::{LeaseCommand, command_lease};
 use crate::worker::run_marker::read_run_marker;
@@ -131,7 +126,8 @@ async fn daemon_warm_reports_the_build_identities_and_touches_no_guest() {
     assert!(!fixture.settings.worker_dir(&fixture.worker).join("host-build.log").exists());
 }
 
-// `daemon status` reports a healthy daemon's own account, and "no healthy daemon" otherwise.
+// `daemon status` reports a healthy daemon's own account and the runner that started it, and "no healthy daemon"
+// otherwise.
 #[tokio::test]
 async fn command_daemon_status_reports_the_daemons_own_account() {
     let fixture = Fixture::new().await;
@@ -144,10 +140,36 @@ async fn command_daemon_status_reports_the_daemons_own_account() {
     let state = fixture.seed_healthy_daemon(&prep);
     fixture.daemon.script().iteration_count = 4;
     let outcome = fixture.host.command_daemon(&ctx, DaemonVerb::Status, Some(&receipt)).await.unwrap();
-    assert_eq!(outcome.text, format!("daemon={}\nide=stopped\niterations=4", state.run_id));
+    assert_eq!(
+        outcome.text,
+        format!("daemon={}\nrunner=jvm\nide=stopped\niterations=4", state.run_id)
+    );
     assert_eq!(outcome.data["reachable"], json!(true));
     assert_eq!(outcome.data["daemon"]["runId"], json!(state.run_id));
+    assert_eq!(outcome.data["daemon"]["runner"], json!("jvm"));
     assert_eq!(outcome.data["status"]["iterationCount"], json!(4));
+}
+
+// `daemon status` asks a daemon in the protocol of the runner that started it, not in that of its own `--runner`. So a
+// lane daemon is reachable for a command of `--runner jvm`, which a pull script and a hand command are.
+#[tokio::test]
+async fn command_daemon_status_asks_a_lane_daemon_in_its_own_protocol() {
+    let fixture = Fixture::new().await;
+    assert_eq!(fixture.host.daemon().runner(), Runner::Jvm);
+    let receipt = fixture.lease_receipt();
+    let prep = fixture.prepared().await;
+    let mut state = fixture.seed_healthy_daemon(&prep);
+    state.runner = Some(Runner::Daemon);
+    state.write(&fixture.settings, &fixture.worker).unwrap();
+    fixture.daemon.script().protocol_version = avl_wire::daemon::PROTOCOL_VERSION;
+    let outcome = fixture
+        .host
+        .command_daemon(&Ctx::background(), DaemonVerb::Status, Some(&receipt))
+        .await
+        .unwrap();
+    assert_eq!(outcome.data["reachable"], json!(true), "{}", outcome.text);
+    assert_eq!(outcome.data["daemon"]["runner"], json!("daemon"));
+    assert!(outcome.text.contains("\nrunner=daemon\n"), "{}", outcome.text);
 }
 
 // `daemon stop` retires the state and says which run it stopped.
@@ -529,14 +551,14 @@ fn the_phase_table_names_the_slowest_guest_call_beside_the_guest_column() {
 
 // --- run's outcomes ----------------------------------------------------------------------------------------------
 
-/// A warm daemon whose stream and XML the test chooses, and the caller's receipt.
-async fn run_outcome_fixture(lines: Vec<String>, xml: &str) -> (Fixture, PathBuf) {
+/// A warm daemon whose stream the test chooses, and the caller's receipt.
+async fn run_outcome_fixture(lines: Vec<String>) -> (Fixture, PathBuf) {
     let fixture = Fixture::with_environment(&[("USER", "suite-user")]).await;
     fixture.on("df", answer_text(PLENTIFUL_DF));
     let receipt = fixture.lease_receipt();
     let prep = fixture.prepared().await;
     fixture.seed_healthy_daemon(&prep);
-    fixture.script_run(lines, xml);
+    fixture.script_run(lines);
     (fixture, receipt)
 }
 
@@ -562,7 +584,7 @@ fn details(failure: &Refusal) -> Value {
 // A `--test-env` file that cannot be read refuses the run before the plan, the build or any guest command.
 #[tokio::test]
 async fn command_run_refuses_an_unreadable_secret_before_any_work() {
-    let (fixture, receipt) = run_outcome_fixture(passing_run_lines("it-25"), PASSING_XML).await;
+    let (fixture, receipt) = run_outcome_fixture(passing_run_lines("it-25")).await;
     fixture.forget_calls();
     let missing = format!(
         "AIR_LIVE_CENTRAL_LOGIN=@{}",
@@ -579,7 +601,7 @@ async fn command_run_refuses_an_unreadable_secret_before_any_work() {
 // A green run with a secret answers its verdict, and its journal, which records every published line, holds no value.
 #[tokio::test]
 async fn command_run_with_a_secret_journals_no_value() {
-    let (fixture, receipt) = run_outcome_fixture(passing_run_lines("it-26"), PASSING_XML).await;
+    let (fixture, receipt) = run_outcome_fixture(passing_run_lines("it-26")).await;
     let secret = "central-login-export-0123456789abcdef";
     let file = fixture.settings.runtime_root.join("login");
     std::fs::write(&file, secret).unwrap();
@@ -608,7 +630,7 @@ async fn command_run_with_a_secret_journals_no_value() {
 // journal line and no answer carries them, and no host file is named.
 #[tokio::test]
 async fn command_run_hands_the_guest_the_bytes_of_its_stdin() {
-    let (fixture, receipt) = run_outcome_fixture(passing_run_lines("it-27"), PASSING_XML).await;
+    let (fixture, receipt) = run_outcome_fixture(passing_run_lines("it-27")).await;
     let export = "central-login-export-from-a-pipe-0123456789\n";
     fixture.stdin.feed(export.as_bytes());
     let (result, verdict) = run_for_verdict(
@@ -641,7 +663,7 @@ async fn command_run_hands_the_guest_the_bytes_of_its_stdin() {
 // The command line's own mistakes about stdin cost nothing: no read, no guest command, no daemon request.
 #[tokio::test]
 async fn command_run_refuses_stdin_misuse_before_any_work() {
-    let (fixture, receipt) = run_outcome_fixture(passing_run_lines("it-28"), PASSING_XML).await;
+    let (fixture, receipt) = run_outcome_fixture(passing_run_lines("it-28")).await;
     fixture.forget_calls();
     fixture.stdin.feed(b"central-login-export-from-a-pipe-0123456789");
     let twice = ["--lane", "ui", "--test-env", "FIRST=@-", "--test-env", "SECOND=@-"];
@@ -668,7 +690,7 @@ async fn command_run_refuses_stdin_misuse_before_any_work() {
 // status` and `daemon log` answer. `daemon restart` and a lease release refuse `lease_busy`, and they name the run.
 #[tokio::test]
 async fn a_run_in_flight_lets_the_reads_answer_and_refuses_the_operations() {
-    let (fixture, receipt) = run_outcome_fixture(passing_run_lines("it-30"), PASSING_XML).await;
+    let (fixture, receipt) = run_outcome_fixture(passing_run_lines("it-30")).await;
     fixture.on(
         "log",
         handler(|argv, _| {
@@ -732,7 +754,7 @@ async fn a_run_in_flight_lets_the_reads_answer_and_refuses_the_operations() {
 
 #[tokio::test]
 async fn command_run_reports_a_passed_iteration() {
-    let (fixture, receipt) = run_outcome_fixture(passing_run_lines("it-20"), PASSING_XML).await;
+    let (fixture, receipt) = run_outcome_fixture(passing_run_lines("it-20")).await;
     fixture.daemon.script().ide_running = true;
     let (result, verdict) = run_for_verdict(&fixture, &["--lane", "ui"], Some(&receipt)).await;
     let outcome = result.unwrap();
@@ -766,13 +788,6 @@ fn blank_report() -> RunReport {
         completed_at: "2026-08-23T12:00:01.000Z".to_owned(),
         summary: None,
         events: Vec::new(),
-        source: RetrievedXml {
-            guest_path: "/vm/test.xml".to_owned(),
-            retrieval: Retrieval::Unavailable,
-            integrity: RetrievedIntegrity::Missing,
-            xml: None,
-            diagnostic: None,
-        },
         evidence: Vec::new(),
         protocol_diagnostic: None,
         notes: Vec::new(),
@@ -781,7 +796,6 @@ fn blank_report() -> RunReport {
         tree: None,
         tree_error: None,
     })
-    .unwrap()
 }
 
 fn bundle(id: &str, scenario: &str, status: &str, has_video: bool) -> TraceBundle {
@@ -844,14 +858,11 @@ fn the_verdict_names_the_traces_that_did_not_pass() {
     assert_eq!(merged.directory.as_deref(), Some("/host/runs/r/traces"));
 }
 
-fn report_failure(class_name: Option<&str>, suite: Option<&str>, test_name: &str, message: &str) -> ReportFailure {
+fn report_failure(class_name: Option<&str>, test_name: &str, message: &str) -> ReportFailure {
     ReportFailure {
-        source: FailureSource::JunitXml,
-        suite: suite.map(str::to_owned),
-        suite_timestamp: None,
         class_name: class_name.map(str::to_owned),
         test_name: test_name.to_owned(),
-        kind: FailureKind::Failure,
+        kind: FailureKind::Test,
         r#type: None,
         message: message.to_owned(),
         detail: None,
@@ -862,16 +873,16 @@ fn report_failure(class_name: Option<&str>, suite: Option<&str>, test_name: &str
 }
 
 // A failure carries the trace of its scenario. The bundle names the class by the simple name and the report by the
-// FQN, and an XML failure names the test as the JUnit reporter does.
+// FQN, and the JVM daemon names a dynamic test as the JUnit reporter does.
 #[test]
 fn a_failure_carries_the_trace_of_its_scenario() {
     let class = Some("com.example.AirTest");
     let bundles = [bundle("a", "opens", "passed", false), bundle("b", "renames", "failed", false)];
     let failures = failures_of(
         &[
-            report_failure(class, None, "renames", "boom\nstack"),
-            report_failure(class, None, "[2] opens", ""),
-            report_failure(class, None, "closes", ""),
+            report_failure(class, "renames", "boom\nstack"),
+            report_failure(class, "[2] opens", ""),
+            report_failure(class, "closes", ""),
         ],
         &bundles,
     );
@@ -927,7 +938,7 @@ async fn the_verdict_states_the_tree() {
     );
     assert_eq!(with(None, None), None);
 
-    let (fixture, receipt) = run_outcome_fixture(passing_run_lines("it-27"), PASSING_XML).await;
+    let (fixture, receipt) = run_outcome_fixture(passing_run_lines("it-27")).await;
     fixture.git().status(&[" M plugins/air/a.kt", "?? plugins/air/b.kt"]);
     let (result, verdict) = run_for_verdict(&fixture, &["--lane", "ui"], Some(&receipt)).await;
     result.unwrap();
@@ -939,8 +950,7 @@ async fn the_verdict_states_the_tree() {
 
 #[tokio::test]
 async fn command_run_reports_failed_tests_at_six() {
-    let (lines, xml) = failing_run("it-21");
-    let (fixture, receipt) = run_outcome_fixture(lines, &xml).await;
+    let (fixture, receipt) = run_outcome_fixture(failing_run("it-21")).await;
     let (result, verdict) = run_for_verdict(&fixture, &["--lane", "ui"], Some(&receipt)).await;
     let failure = refusal(result);
     assert_eq!((failure.code.as_ref(), failure.exit), ("tests_failed", Exit::TESTS_FAILED));
@@ -959,14 +969,14 @@ async fn command_run_reports_failed_tests_at_six() {
 }
 
 // One command per failed class, however many of its cases failed, and none for a failure that named no class - `run`
-// takes a class or an FQN, and a suite display name is neither.
+// takes a class or an FQN.
 #[test]
 fn the_reproduce_list_is_one_per_failed_class_and_skips_an_unnamed_one() {
     let commands = reproduce_commands(&[
-        report_failure(Some("a.OneTest"), None, "first", ""),
-        report_failure(Some("a.OneTest"), None, "second", ""),
-        report_failure(None, Some("Some Suite"), "a container with no class", ""),
-        report_failure(Some("b.TwoTest"), None, "third", ""),
+        report_failure(Some("a.OneTest"), "first", ""),
+        report_failure(Some("a.OneTest"), "second", ""),
+        report_failure(None, "a container with no class", ""),
+        report_failure(Some("b.TwoTest"), "third", ""),
     ]);
     assert_eq!(commands, ["run a.OneTest", "run b.TwoTest"]);
     assert!(reproduce_commands(&[]).is_empty());
@@ -982,7 +992,7 @@ async fn command_run_reports_all_skipped_with_the_reasons() {
         ),
         ndjson_line(&summary_record("it-22", 0, 0, 0, 1, 0, false)),
     ];
-    let (fixture, receipt) = run_outcome_fixture(lines, EMPTY_COMPLETE_XML).await;
+    let (fixture, receipt) = run_outcome_fixture(lines).await;
     let (result, verdict) = run_for_verdict(&fixture, &["--lane", "ui"], Some(&receipt)).await;
     let failure = refusal(result);
     assert_eq!((failure.code.as_ref(), failure.exit), ("all_tests_skipped", Exit::TESTS_FAILED));
@@ -1000,7 +1010,7 @@ async fn command_run_reports_no_tests_discovered_at_six() {
         ndjson_line(&run_started_record("it-23")),
         ndjson_line(&summary_record("it-23", 0, 0, 0, 0, 0, false)),
     ];
-    let (fixture, receipt) = run_outcome_fixture(lines, EMPTY_COMPLETE_XML).await;
+    let (fixture, receipt) = run_outcome_fixture(lines).await;
     let (result, verdict) = run_for_verdict(&fixture, &["--lane", "ui"], Some(&receipt)).await;
     let failure = refusal(result);
     assert_eq!((failure.code.as_ref(), failure.exit), ("no_tests_discovered", Exit::TESTS_FAILED));
@@ -1028,7 +1038,7 @@ async fn command_run_names_the_suites_it_never_reached() {
         ndjson_line(&json!({"event": "watchdogExpired", "reason": "ide_intrusion",
             "deadline": "2026-08-27T12:30:00.000Z", "expiredAt": "2026-08-27T12:30:01.000Z"})),
     ];
-    let (fixture, receipt) = run_outcome_fixture(lines, EMPTY_COMPLETE_XML).await;
+    let (fixture, receipt) = run_outcome_fixture(lines).await;
     let (result, verdict) = run_for_verdict(&fixture, &["--lane", "ui"], Some(&receipt)).await;
     let failure = refusal(result);
     assert!(
@@ -1050,7 +1060,7 @@ async fn command_run_reports_a_watchdog_expiry_as_infrastructure() {
             "deadline": "2026-08-23T12:30:00.000Z", "expiredAt": "2026-08-23T12:30:01.000Z"})),
         ndjson_line(&summary_record("it-24", 1, 0, 0, 0, 0, false)),
     ];
-    let (fixture, receipt) = run_outcome_fixture(lines, EMPTY_COMPLETE_XML).await;
+    let (fixture, receipt) = run_outcome_fixture(lines).await;
     let (result, verdict) = run_for_verdict(&fixture, &["--lane", "ui"], Some(&receipt)).await;
     let failure = refusal(result);
     assert_eq!(
@@ -1070,12 +1080,12 @@ async fn command_run_reports_a_watchdog_expiry_as_infrastructure() {
 // --- a run that takes its own lease ------------------------------------------------------------------------------
 
 /// A warm daemon on the pool's first worker and every worker unleased, which is what a `run` with no receipt finds.
-async fn self_leased_fixture(lines: Vec<String>, xml: &str) -> Fixture {
+async fn self_leased_fixture(lines: Vec<String>) -> Fixture {
     let fixture = Fixture::with_environment(&[("USER", "suite-user")]).await;
     fixture.on("df", answer_text(PLENTIFUL_DF));
     let prep = fixture.prepared().await;
     fixture.seed_healthy_daemon(&prep);
-    fixture.script_run(lines, xml);
+    fixture.script_run(lines);
     fixture
 }
 
@@ -1131,7 +1141,7 @@ fn require_unleased(fixture: &Fixture) {
 // hold.
 #[tokio::test]
 async fn a_run_without_a_receipt_leases_a_worker_and_gives_it_back() {
-    let fixture = self_leased_fixture(passing_run_lines("it-40"), PASSING_XML).await;
+    let fixture = self_leased_fixture(passing_run_lines("it-40")).await;
     let (result, verdict) = run_for_verdict(&fixture, &["--lane", "ui"], None).await;
     let data = run_data(&result.unwrap().data);
     assert_eq!(data.iteration_id, "it-40");
@@ -1155,7 +1165,7 @@ async fn a_run_without_a_receipt_leases_a_worker_and_gives_it_back() {
 // with the phases and the daemon's records in between, in order.
 #[tokio::test]
 async fn a_run_keeps_a_journal_named_by_its_holder() {
-    let fixture = self_leased_fixture(passing_run_lines("it-42"), PASSING_XML).await;
+    let fixture = self_leased_fixture(passing_run_lines("it-42")).await;
     let (result, _) = run_for_verdict(&fixture, &["--lane", "ui"], None).await;
     let holder = run_data(&result.unwrap().data).lease.unwrap().holder;
     let journal = std::fs::read_to_string(fixture.settings.runtime_root.join("runs").join(&holder).join("events.ndjson"))
@@ -1194,8 +1204,7 @@ async fn a_run_keeps_a_journal_named_by_its_holder() {
 // became of it.
 #[tokio::test]
 async fn a_self_leased_run_releases_the_worker_when_the_tests_fail() {
-    let (lines, xml) = failing_run("it-41");
-    let fixture = self_leased_fixture(lines, &xml).await;
+    let fixture = self_leased_fixture(failing_run("it-41")).await;
     let (result, _) = run_for_verdict(&fixture, &["--lane", "ui"], None).await;
     let failure = refusal(result);
     assert_eq!((failure.code.as_ref(), failure.exit), ("tests_failed", Exit::TESTS_FAILED));
@@ -1209,7 +1218,7 @@ async fn a_self_leased_run_releases_the_worker_when_the_tests_fail() {
 // An iteration that ends in a refusal of its own, here a busy daemon, releases the worker too.
 #[tokio::test]
 async fn a_self_leased_run_releases_the_worker_when_the_iteration_refuses() {
-    let fixture = self_leased_fixture(Vec::new(), EMPTY_COMPLETE_XML).await;
+    let fixture = self_leased_fixture(Vec::new()).await;
     fixture.daemon.script().conflict = Some(json!({"reason": "busy"}));
     let (result, _) = run_for_verdict(&fixture, &["--lane", "ui"], None).await;
     assert_eq!(refusal(result).code, "daemon_busy");
@@ -1219,7 +1228,7 @@ async fn a_self_leased_run_releases_the_worker_when_the_iteration_refuses() {
 // A selection the controller refuses is refused before a worker is leased, so it costs the pool nothing.
 #[tokio::test]
 async fn a_self_leased_run_refuses_its_selection_before_it_leases() {
-    let fixture = self_leased_fixture(Vec::new(), EMPTY_COMPLETE_XML).await;
+    let fixture = self_leased_fixture(Vec::new()).await;
     suite_catalog(fixture.root());
     let (result, _) = run_for_verdict(&fixture, &["flow-java-to-kotlin"], None).await;
     assert_eq!(refusal(result).code, "no_affected_suite");
@@ -1231,7 +1240,7 @@ async fn a_self_leased_run_refuses_its_selection_before_it_leases() {
 // which is not true here. The refusal names the receipt that frees the worker.
 #[tokio::test]
 async fn an_interrupted_self_leased_run_keeps_its_lease_and_names_the_receipt() {
-    let fixture = self_leased_fixture(passing_run_lines("it-42"), PASSING_XML).await;
+    let fixture = self_leased_fixture(passing_run_lines("it-42")).await;
     let block = tokio_util::sync::CancellationToken::new();
     fixture.daemon.script().block = Some(block.clone());
     // The interrupt arrives once the iteration is in flight: the daemon holds the `/run` open until then.
@@ -1269,7 +1278,7 @@ async fn an_interrupted_self_leased_run_keeps_its_lease_and_names_the_receipt() 
 // the secret file is removed all the same, before the refusal is answered.
 #[tokio::test]
 async fn an_interrupted_self_leased_run_still_removes_its_secret() {
-    let fixture = self_leased_fixture(passing_run_lines("it-43"), PASSING_XML).await;
+    let fixture = self_leased_fixture(passing_run_lines("it-43")).await;
     let block = tokio_util::sync::CancellationToken::new();
     fixture.daemon.script().block = Some(block.clone());
     let interrupter = {
@@ -1318,12 +1327,13 @@ async fn an_interrupted_self_leased_run_still_removes_its_secret() {
 // Every reached lane runs on one worker, one after the other, and answers one envelope with a verdict per lane.
 #[tokio::test]
 async fn a_run_of_several_lanes_answers_one_envelope_with_a_verdict_per_lane() {
-    let (fixture, receipt) = run_outcome_fixture(Vec::new(), PASSING_XML).await;
+    let (fixture, receipt) = run_outcome_fixture(Vec::new()).await;
     three_lane_catalog(fixture.root());
-    fixture.queue_runs(
-        vec![passing_run_lines("it-60"), passing_run_lines("it-61"), passing_run_lines("it-62")],
-        &[PASSING_XML, PASSING_XML, PASSING_XML],
-    );
+    fixture.queue_runs(vec![
+        passing_run_lines("it-60"),
+        passing_run_lines("it-61"),
+        passing_run_lines("it-62"),
+    ]);
     let (result, published) = run_for_verdict(&fixture, &["flow-three-lanes"], Some(&receipt)).await;
     let data = lanes_data(&result.unwrap().data);
     assert_eq!(data.worker, fixture.worker);
@@ -1372,13 +1382,9 @@ async fn a_run_of_several_lanes_answers_one_envelope_with_a_verdict_per_lane() {
 // details.
 #[tokio::test]
 async fn a_red_lane_makes_the_whole_run_red() {
-    let (fixture, receipt) = run_outcome_fixture(Vec::new(), PASSING_XML).await;
+    let (fixture, receipt) = run_outcome_fixture(Vec::new()).await;
     three_lane_catalog(fixture.root());
-    let (red, red_xml) = failing_run("it-64");
-    fixture.queue_runs(
-        vec![passing_run_lines("it-63"), red, passing_run_lines("it-65")],
-        &[PASSING_XML, &red_xml, PASSING_XML],
-    );
+    fixture.queue_runs(vec![passing_run_lines("it-63"), failing_run("it-64"), passing_run_lines("it-65")]);
     let (result, published) = run_for_verdict(&fixture, &["flow-three-lanes"], Some(&receipt)).await;
     let failure = refusal(result);
     assert_eq!((failure.code.as_ref(), failure.exit), ("tests_failed", Exit::TESTS_FAILED));
@@ -1406,7 +1412,7 @@ async fn a_red_lane_makes_the_whole_run_red() {
 // An iteration that produced no report stops the run, and the refusal names each lane it did not reach.
 #[tokio::test]
 async fn an_iteration_with_no_report_stops_the_run() {
-    let (fixture, receipt) = run_outcome_fixture(Vec::new(), PASSING_XML).await;
+    let (fixture, receipt) = run_outcome_fixture(Vec::new()).await;
     three_lane_catalog(fixture.root());
     fixture.daemon.script().conflict = Some(json!({"reason": "busy"}));
     let (result, published) = run_for_verdict(&fixture, &["flow-three-lanes"], Some(&receipt)).await;
@@ -1436,12 +1442,13 @@ async fn an_iteration_with_no_report_stops_the_run() {
 // A self-leased run of several lanes holds one lease for every iteration, and gives it back once.
 #[tokio::test]
 async fn a_self_leased_run_of_several_lanes_holds_one_lease() {
-    let fixture = self_leased_fixture(Vec::new(), PASSING_XML).await;
+    let fixture = self_leased_fixture(Vec::new()).await;
     three_lane_catalog(fixture.root());
-    fixture.queue_runs(
-        vec![passing_run_lines("it-66"), passing_run_lines("it-67"), passing_run_lines("it-68")],
-        &[PASSING_XML, PASSING_XML, PASSING_XML],
-    );
+    fixture.queue_runs(vec![
+        passing_run_lines("it-66"),
+        passing_run_lines("it-67"),
+        passing_run_lines("it-68"),
+    ]);
     let (result, published) = run_for_verdict(&fixture, &["flow-three-lanes"], None).await;
     let data = lanes_data(&result.unwrap().data);
     assert_eq!(data.lanes.len(), 3);
@@ -1464,7 +1471,7 @@ async fn a_self_leased_run_of_several_lanes_holds_one_lease() {
 // The records a run publishes carry the kind a reader filters on.
 #[tokio::test]
 async fn a_run_publishes_its_plan_before_its_iterations() {
-    let (fixture, receipt) = run_outcome_fixture(passing_run_lines("it-70"), PASSING_XML).await;
+    let (fixture, receipt) = run_outcome_fixture(passing_run_lines("it-70")).await;
     let recorded = Recorded::start(&fixture.host.reporter);
     fixture
         .host
