@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16" role="img" aria-label="MSStudio">
+  <title>MSStudio</title>
+  <rect x="0.5" y="0.5" width="15" height="15" rx="3.5" fill="#000"/>
+  <polygon points="8,2.5 13.2,5.5 8,8.5 2.8,5.5" fill="#B6EC7C"/>
+  <polygon points="2.8,6 8,9 8,13.8 2.8,10.8" fill="#5DAE3B"/>
+  <polygon points="13.2,6 8,9 8,13.8 13.2,10.8" fill="#3F8F33"/>
+</svg>

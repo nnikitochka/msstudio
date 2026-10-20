@@ -2,9 +2,9 @@
   <version major="2027" minor="1" eap="true"/>
   <company name="MSStudio" shortName="MSStudio" url="https://msstudio.example.com"/>
   <build number="MS-__BUILD__" date="__BUILD_DATE__"/>
-  <logo url="/idea_community_logo.png"/>
-  <icon svg="/idea-ce.svg" svg-small="/idea-ce_16.svg"/>
-  <icon-eap svg="/idea-ce-eap.svg" svg-small="/idea-ce-eap_16.svg"/>
+  <logo url="/msstudio_logo.png"/>
+  <icon svg="/msstudio.svg" svg-small="/msstudio_16.svg"/>
+  <icon-eap svg="/msstudio-eap.svg" svg-small="/msstudio-eap_16.svg"/>
   <names product="MSStudio" fullname="MSStudio" script="MSStudio" motto="The IDE for Minecraft Servers"/>
 
   <essential-plugin>com.intellij.idea.customization</essential-plugin>
