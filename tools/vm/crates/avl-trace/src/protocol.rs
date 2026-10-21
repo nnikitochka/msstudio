@@ -1,10 +1,10 @@
-//! The lane protocol: what the lane's sidecar writes to the recorder, one command per line, and the acks the
-//! recorder answers with.
+//! The lane protocol: what the lane writes to the recorder, one command per line, and the acks the recorder answers
+//! with.
 //!
 //! A refusal is never a test failure. Evidence must not decide a verdict: the recorder answers a line it refuses
 //! with a negative ack and records the refusal in the bundle as an [crate::otlp::event::TRACE_ERROR] log record,
-//! and the sidecar never lets either reach a test. It acks a refused line even when its op is not an acked one,
-//! or cannot be read at all, because the lane may be waiting on it; [Ack::line] is what lets a lane that was not
+//! and the lane never lets either reach a test. The recorder acks a refused line even when its op is not an acked
+//! one, or cannot be read at all, because the lane may be waiting on it; [Ack::line] is what lets a lane that was not
 //! waiting discard that ack.
 
 use std::collections::BTreeMap;
@@ -44,7 +44,7 @@ impl Op {
     /// Four of them, and each has a reason to wait. The lane waits for the hello ack to learn whether anything
     /// will be captured, and for the scenario ack to know the bundle directory exists. It waits for a snap ack so
     /// the moment is captured before the next instruction runs, and for the done ack so the bundle is complete
-    /// before the lane moves on or the JVM exits. Everything else is fire-and-forget: a span or a call record
+    /// before the lane moves on or exits. Everything else is fire-and-forget: a span or a call record
     /// costs the scenario no time.
     pub const fn is_acked(self) -> bool {
         matches!(self, Self::Hello | Self::Scenario | Self::Snap | Self::Done)
@@ -132,15 +132,12 @@ vocabulary! {
 }
 
 vocabulary! {
-    /// What started the lane JVM. It decides where the bundles go and who cleans them up.
+    /// What started the lane. It decides where the bundles go. The owner of that root cleans it up, not the recorder.
     pub enum Launcher {
-        /// The UI-test daemon, which roots each iteration at `<iterationDir>/air-traces`.
+        /// The lane daemon, which roots each iteration at `<iterationDir>/air-traces`.
         Daemon = "daemon",
         /// A Bazel test, which roots the bundles in `$TEST_UNDECLARED_OUTPUTS_DIR/air-traces`.
         Bazel = "bazel",
-        /// A JUnit run from the IDE, rooted at `<home>/out/air-traces` and pruned to
-        /// [crate::bundle::IDE_ROOT_RETAINED_RUNS].
-        Ide = "ide",
     }
 }
 
@@ -193,15 +190,15 @@ fn validate_bridge(bridge: Option<&Bridge>, op: Op) -> Result<(), Error> {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HelloCommand {
     /// The directory bundles are written under. The lane decides it, not the recorder, because only the lane
-    /// knows which of the three roots applies; see [Launcher].
+    /// knows which root applies; see [Launcher].
     pub root: String,
     pub run_id: String,
     pub launcher: Launcher,
     /// Lets the recorder read the screen itself: the X server's root window, and on a Mac the screen ffmpeg
     /// records. Without it the recorder asks the IDE to paint its own windows and records no video.
     ///
-    /// The lane sets it only where the display belongs to the lane, which is the Linux guest's `Xvfb`, or where the
-    /// person running the lane asked for it with `-Dair.flow.trace.screen=on`. A developer's own screen shows
+    /// The lane sets it only where the display belongs to the lane, which is the Linux guest's `Xvfb`. Its descriptor
+    /// carries `-Dair.flow.trace.screen=on`, and a direct lane never sets it. A developer's own screen shows
     /// everything else they have open, and on macOS reading it needs the Screen Recording permission, whose prompt
     /// can take the keyboard focus from the IDE under test in the middle of a scenario. Evidence must not decide a
     /// verdict, so neither happens unasked.
@@ -301,7 +298,7 @@ pub struct Failure {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
     /// The printed stack trace without its header line, each line trimmed, in the order the JVM prints it: the
-    /// frame that threw first, then its callers, then every `Caused by:` section. The sidecar caps it at 200 lines.
+    /// frame that threw first, then its callers, then every `Caused by:` section. The lane caps it at 200 lines.
     /// The recorder joins it with newlines into `exception.stacktrace`, which the semantic conventions define as the
     /// runtime's own rendering, so neither end reorders it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -334,7 +331,8 @@ pub struct SnapCommand {
 pub struct CallCommand {
     /// The innermost span open when the call started, or 0 for the scenario's root.
     pub span: u32,
-    /// The request's simple class name, which is how `AirUiTestClient` names a call in a failure.
+    /// The simple class name of the bridge request, such as `Ping`. A step of a `StepSequence` is
+    /// `StepSequence step <n> of <count> (<name>)`.
     pub request: String,
     pub start_ms: i64,
     pub duration_ms: i64,
@@ -575,8 +573,8 @@ pub struct Ack {
 /// Writes a value the way every document of this crate is written: compact, one line with no trailing newline.
 ///
 /// serde_json never HTML-escapes, which matters: kotlinx.serialization and `JSON.stringify` never do either, and an
-/// expectation or a failure message full of `<`, `>` and `&` must be the same bytes in the golden transcript and in
-/// the sidecar's output that is held to it.
+/// expectation or a failure message full of `<`, `>` and `&` must be the same bytes in a golden transcript and in
+/// the output of the lane that a test compares with it.
 pub fn encode<T: Serialize + ?Sized>(value: &T) -> Result<Vec<u8>, Error> {
     serde_json::to_vec(value).map_err(|error| Error::new(format!("cannot encode a trace document: {error}")))
 }
@@ -584,8 +582,8 @@ pub fn encode<T: Serialize + ?Sized>(value: &T) -> Result<Vec<u8>, Error> {
 /// Writes one command line in its canonical form: `op` first, then the command's fields in declaration order,
 /// absent optional fields omitted, and no whitespace between tokens.
 ///
-/// The golden transcript is in exactly this form, and a test re-encodes every line of it to prove so. That is what
-/// lets the sidecar's contract test compare its output with the golden file byte for byte.
+/// The golden transcript is in exactly this form, and a test re-encodes every line of it to prove so. The lane writes
+/// each line with this function, so the golden test of the lane daemon compares its output byte for byte.
 ///
 /// A raw value keeps its bytes through serde_json. So a `program` that a lane read from a pretty-printed document
 /// would put line breaks into the line, and the recorder reads one command per line. The line is therefore compacted.

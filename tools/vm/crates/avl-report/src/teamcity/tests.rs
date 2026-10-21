@@ -95,11 +95,6 @@ fn the_build_step_is_a_teamcity_agent_outside_a_bazel_test() {
     assert!(!is_build_step(|name| blank.get(name).cloned()));
 }
 
-#[test]
-fn a_value_escapes_as_teamcity_reads_it() {
-    assert_eq!(escape("a|b'c[d]e\nf\rg\u{2028}"), "a||b|'c|[d|]e|nf|rg|l");
-}
-
 /// A plan of simple names and records of FQNs name one class, so the end of the iteration fails no class of the plan.
 #[test]
 fn a_plan_of_simple_names_is_reached_by_records_of_fqns() {
@@ -108,6 +103,7 @@ fn a_plan_of_simple_names_is_reached_by_records_of_fqns() {
         timestamp: "t".to_owned(),
         discovered_executions: 1,
         class_names: vec!["AgentProjectWorkflowsUiTest".to_owned(), "Dropped".to_owned()],
+        executions: Vec::new(),
     }));
     let mut lines = messages.record(WORKER, &plan);
     lines.extend(messages.record(

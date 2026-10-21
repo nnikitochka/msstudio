@@ -1,10 +1,8 @@
 //! The daemon control channel's wire: the state file, the HTTP routes, the run request, and the NDJSON run stream.
 //!
-//! Two far ends serve it. The guest agent's `lane-daemon` verb speaks [`PROTOCOL_VERSION`], and the JVM daemon of
-//! `plugins/air/tests/integration/uiDaemon/testSrc/AirUiDaemonProtocol.kt` speaks [`JVM_PROTOCOL_VERSION`]. The
-//! [`Runner`] of the controller names the one it starts. Two guards make it worth its own module: the version refuses
-//! a daemon this controller does not understand, and the decoder refuses a record it cannot read rather than yielding a
-//! silent zero.
+//! The guest agent's `lane-daemon` verb serves it and speaks [`PROTOCOL_VERSION`]. Two guards make it worth its own
+//! module: the version refuses a daemon this controller does not understand, and the decoder refuses a record it
+//! cannot read rather than yielding a silent zero.
 //!
 //! Two rules run through the whole file, and they are opposites on purpose:
 //!
@@ -32,31 +30,9 @@ mod tests;
 /// the two halves move together.
 pub const PROTOCOL_VERSION: u32 = 6;
 
-/// The protocol of the JVM daemon, `AIR_UI_DAEMON_PROTOCOL_VERSION` on the Kotlin side. It has the two quiesce routes
-/// and the two status fields that protocol 6 dropped. The controller never calls the routes and ignores the fields.
-/// It goes with [`Runner::Jvm`].
-pub const JVM_PROTOCOL_VERSION: u32 = 5;
-
-vocabulary! {
-    /// Which process serves the control channel in the run slot of a worker. A transition argument: the JVM daemon
-    /// stays the default until each lane runs through the verb, and then the JVM daemon and this choice go.
-    pub enum Runner {
-        /// The JVM daemon of `plugins/air/tests/integration/uiDaemon`, launched from the staged JBR with its @-file.
-        Jvm = "jvm",
-        /// The `lane-daemon` verb of the installed guest agent.
-        Daemon = "daemon",
-    }
-}
-
-impl Runner {
-    /// The protocol version that a daemon of this runner reports.
-    pub const fn protocol_version(self) -> u32 {
-        match self {
-            Self::Jvm => JVM_PROTOCOL_VERSION,
-            Self::Daemon => PROTOCOL_VERSION,
-        }
-    }
-}
+/// The daemon environment variable that names the guest directory of the run inputs of `run --test-env NAME=@FILE`.
+/// The controller sets it to a path, never to a value. A file of that directory holds a secret of one run.
+pub const RUN_SECRETS_VARIABLE: &str = "AIR_VM_RUN_SECRETS";
 
 /// The Bazel target the runtime descriptor of a macOS guest comes from.
 pub const LABEL: &str = "//plugins/air/tests/integration/ui:ui_daemon";
@@ -65,6 +41,11 @@ pub const LABEL: &str = "//plugins/air/tests/integration/ui:ui_daemon";
 /// so the lane build shares one analysis with every other Bazel command
 /// (`plugins/air/tests/integration/ui_lane_ide.bzl`).
 pub const LINUX_GUEST_LABEL: &str = "//plugins/air/tests/integration/ui:ui_daemon_linux_guest";
+
+/// The Bazel target of the runtime descriptor of a Linux guest with the CLIs of the live lane. A run that holds the live
+/// lane builds it in place of [`LINUX_GUEST_LABEL`], so a build of another lane fetches no archive of them, and no build
+/// needs an option of its own.
+pub const LINUX_GUEST_LIVE_LABEL: &str = "//plugins/air/tests/integration/ui:ui_daemon_linux_guest_live";
 
 /// The prefix of every daemon run id. Only a daemon start sends a supervisor `start` with it, so it is what lets a
 /// controller that holds no record still recognise a daemon run in the slot.
@@ -172,7 +153,7 @@ pub fn match_route(method: &str, path: &str) -> Option<Route> {
     {
         return Some(endpoint.route);
     }
-    if method == "PUT" && path.strip_prefix("/jars/").is_some_and(crate::stage::is_sha256_hex) {
+    if method == "PUT" && path.strip_prefix("/jars/").is_some_and(crate::digest::is_sha256_hex) {
         return Some(Route::UploadJar);
     }
     // One segment, so a traversal in the iteration id never reaches the results handler.
@@ -185,8 +166,8 @@ pub fn match_route(method: &str, path: &str) -> Option<Route> {
 
 // --- the bodies those routes answer with ------------------------------------------------------------------
 //
-// The Kotlin DTOs behind these carry no `@SerialName`, so every name below is a Kotlin property name spelled
-// out by hand. `AirUiDaemonProtocolTest` asserts these keys as bytes on the Kotlin side.
+// The lane daemon of the guest agent writes these bodies with the same types, so each name below is the name on both
+// ends.
 
 /// `GET /status`.
 ///
@@ -236,8 +217,8 @@ pub mod conflict {
 
 /// `POST /run`: what one iteration runs, and the inputs it runs with.
 ///
-/// The JVM daemon reads the fields up to `ide_plugins` and refuses an unknown one, so the lane-daemon fields are absent
-/// for [`Runner::Jvm`]. An empty selection is `[]` and never `null`.
+/// An empty selection is `[]` and never `null`. A field that a run does not use is absent, so a request of a run with no
+/// lane inputs, such as one in a test, stays short.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RunRequest {
@@ -247,24 +228,27 @@ pub struct RunRequest {
     pub product_stamp: String,
     /// The launch generation that the controller prepared the run for. A daemon of another generation refuses it.
     pub launch_digest: String,
-    pub hot_jars: Vec<String>,
     pub active_execution_timeout_sec: u64,
     pub progress_gap_timeout_sec: u64,
+    /// The budget of the whole run, in seconds from the request. The watchdog ends the run at it, and no instruction
+    /// waits past it. Absent sets no budget.
+    #[serde(default, deserialize_with = "crate::json::non_null", skip_serializing_if = "Option::is_none")]
+    pub run_budget_sec: Option<u64>,
     /// The context plugin files, which the daemon installs into the plugin directory of the IDE context.
     pub ide_plugins: Vec<IdePlugin>,
-    /// The catalog lane of the run, such as `ui`: the lane document `lanes/<lane>.json`. The lane daemon only.
+    /// The catalog lane of the run, such as `ui`: the lane document `lanes/<lane>.json`.
     #[serde(default, deserialize_with = "crate::json::non_null", skip_serializing_if = "Option::is_none")]
     pub lane: Option<String>,
-    /// The digests that the push stored the lane inputs under. The lane daemon only.
+    /// The digests that the push stored the lane inputs under.
     #[serde(default, deserialize_with = "crate::json::non_null", skip_serializing_if = "Option::is_none")]
     pub lane_inputs: Option<LaneInputs>,
-    /// Every suite of the lane that the catalog names, which the JVM runner runs: the suite documents and the authored
-    /// suites. The lane daemon plans each one, and a suite without a suite document ends as a failed container. The
-    /// lane daemon only. Empty plans the suite documents alone.
+    /// Every suite of the lane that the catalog names: the suite documents and the authored suites. The lane daemon
+    /// plans each one, and a suite without a suite document ends as a failed container. Empty plans the suite documents
+    /// alone.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub lane_classes: Vec<LaneClass>,
     /// The recorded sessions of the run, which the push stored as zips. The lane daemon unpacks them into the context
-    /// of the lane IDE, as [`crate::session_log`] states. The lane daemon only.
+    /// of the lane IDE, as [`crate::session_log`] states.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub session_logs: Vec<SessionLog>,
 }
@@ -329,9 +313,7 @@ pub struct LaneInputs {
     pub suite_documents: String,
 }
 
-/// Why a test or a container failed, as the lane daemon types it: the kind, the first account and the rest of it. The
-/// JVM daemon sends the `error` text of [`TestFinished`] and [`ContainerFailed`] instead. An aborted JVM test sends
-/// `message` too.
+/// Why a test or a container failed, as the lane daemon types it: the kind, the first account and the rest of it.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TypedFailure {
     /// The kind of the failure, such as `not_implemented` or the class name of an exception in the IDE.
@@ -347,6 +329,18 @@ pub struct TypedFailure {
     /// The cause chain or the stack, after the message.
     #[serde(default, deserialize_with = "crate::json::non_null", skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
+}
+
+impl TypedFailure {
+    /// The line that names the failure for a person: the first line of the message, else the kind. `None` when the
+    /// failure has neither.
+    pub fn headline(&self) -> Option<&str> {
+        self.message
+            .as_deref()
+            .and_then(|message| message.lines().next())
+            .filter(|line| !line.is_empty())
+            .or_else(|| self.kind.as_deref().filter(|kind| !kind.is_empty()))
+    }
 }
 
 /// What the daemon publishes for the controller to read over the hypervisor exec channel. The token never
@@ -461,6 +455,10 @@ pub struct PlanStarted {
     pub timestamp: String,
     pub discovered_executions: u32,
     pub class_names: Vec<String>,
+    /// Each scenario of the plan, in run order, so that a reader of a cut-off stream names each scenario that never
+    /// ran. The lane daemon writes it. An empty list is absent on the wire.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub executions: Vec<ExecutionIdentity>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -478,12 +476,10 @@ pub struct TestFinished {
     pub execution: ExecutionIdentity,
     pub status: String,
     pub duration_ms: i64,
-    #[serde(default, deserialize_with = "crate::json::non_null", skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
     #[serde(flatten)]
     pub failure: TypedFailure,
     /// The notes and the metrics of the scenario, which the lane daemon reads from the answers of its authored parts.
-    /// Absent when the scenario reported none, and from the JVM daemon.
+    /// Absent when the scenario reported none.
     #[serde(default, skip_serializing_if = "crate::report::ScenarioReport::is_empty")]
     pub report: crate::report::ScenarioReport,
 }
@@ -502,8 +498,6 @@ pub struct ContainerFailed {
     pub timestamp: String,
     #[serde(flatten)]
     pub execution: ExecutionIdentity,
-    #[serde(default, deserialize_with = "crate::json::non_null", skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
     #[serde(flatten)]
     pub failure: TypedFailure,
 }

@@ -4,7 +4,7 @@ package com.intellij.openapi.editor.impl.experimental
 import com.intellij.openapi.editor.ex.DocumentOp
 import com.intellij.openapi.editor.ex.DocumentText
 import com.intellij.openapi.editor.ex.experimental.Agent
-import com.intellij.openapi.editor.ex.experimental.DocBranch
+import com.intellij.openapi.editor.ex.experimental.DocumentBranch
 import com.intellij.openapi.editor.ex.experimental.DocMerge
 import com.intellij.openapi.editor.ex.experimental.TrimmedHistoryException
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -13,23 +13,55 @@ import org.junit.jupiter.api.Test
 import java.util.Random
 
 /**
- * A differential fuzz of [DocBranch.trimmedTo]. Every replica has a SHADOW: the same branch with the
- * same ops and no trim. A merge of two replicas must succeed exactly when the base version of each
- * one is a critical version of the history of the other. Both directions must agree. A merge that
- * succeeds must give the text of the merge of the two shadows.
+ * A differential fuzz of [DocumentBranch.trimmedTo]. Every replica has a SHADOW: the same branch with the
+ * same ops and no trim of its own. A merge of two replicas must succeed exactly when the base version
+ * of each one is a critical version of the history of the other. Both directions must agree. A merge
+ * that succeeds must give the text of the merge of the two shadows.
  *
- * The oracle reads the history of a replica from its shadow, which holds every event.
+ * The oracle reads the history of a replica from its shadow. The shadow holds every event above the
+ * base version of the start branch.
  */
 internal class DocBranchTrimFuzzTest {
 
   @Test
   fun `merges of trimmed branches match their shadows in both directions`() {
+    val start = { random: Random ->
+      DocumentBranch.createBranch(randomText(random), Agent.createAgent("start"))
+    }
+    fuzz(ROUNDS, SEED, start)
+  }
+
+  /**
+   * The same fuzz from [NEAR_LIMIT_BRANCH]. The seqs of its agent cross [INT_SEQ_LIMIT] in most rounds.
+   * So the ids, the versions, and the merges hold seqs on both sides of it.
+   */
+  @Test
+  fun `merges across the Int seq limit match their shadows in both directions`() {
+    var crossings = 0
+    fuzz(ROUNDS_NEAR_LIMIT, SEED_NEAR_LIMIT, { NEAR_LIMIT_BRANCH }) { replicas ->
+      if (replicas.nextSeqOfStart() > INT_SEQ_LIMIT) {
+        crossings++
+      }
+    }
+    assertTrue(crossings > ROUNDS_NEAR_LIMIT / 2) { "only $crossings rounds cross the limit" }
+  }
+
+  /**
+   * Runs [rounds] rounds. Each round starts from the branch that [start] gives, and draws its steps
+   * with the seed [seed] plus the round number. [afterRound] gets the replicas at the end of each round.
+   */
+  private fun fuzz(
+    rounds: Int,
+    seed: Long,
+    start: (Random) -> DocumentBranch,
+    afterRound: (Replicas) -> Unit = {},
+  ) {
     var merges = 0
     var rejections = 0
-    repeat(ROUNDS) { round ->
-      val random = Random(SEED + round)
+    repeat(rounds) { round ->
+      val random = Random(seed + round)
       try {
-        val replicas = Replicas(random)
+        val replicas = Replicas(random, start(random))
         repeat(STEPS) {
           when (replicas.step()) {
             Outcome.MERGED -> merges++
@@ -37,13 +69,14 @@ internal class DocBranchTrimFuzzTest {
             Outcome.OTHER -> {}
           }
         }
+        afterRound(replicas)
       } catch (e: Throwable) {
-        throw AssertionError("The fuzz round $round with the seed ${SEED + round} failed: ${e.message}", e)
+        throw AssertionError("The fuzz round $round with the seed ${seed + round} failed: ${e.message}", e)
       }
     }
     // The fuzz reaches both outcomes of a merge.
-    assertTrue(merges > ROUNDS) { "only $merges merges" }
-    assertTrue(rejections > ROUNDS / 4) { "only $rejections rejections" }
+    assertTrue(merges > rounds) { "only $merges merges" }
+    assertTrue(rejections > rounds / 4) { "only $rejections rejections" }
   }
 
   private enum class Outcome {
@@ -53,16 +86,23 @@ internal class DocBranchTrimFuzzTest {
   }
 
   /**
-   * The replicas of one round. Each one is a branch and its shadow.
+   * The replicas of one round. Each one is a branch and its shadow. The first replica is [start].
    */
-  private class Replicas(private val random: Random) {
-    private val actuals = ArrayList<DocBranch>()
-    private val shadows = ArrayList<DocBranch>()
+  private class Replicas(private val random: Random, start: DocumentBranch) {
+    private val actuals = ArrayList<DocumentBranch>()
+    private val shadows = ArrayList<DocumentBranch>()
 
     init {
-      val start = DocBranch.createBranch(randomText(random), Agent.createAgent("start"))
       actuals.add(start)
       shadows.add(start)
+    }
+
+    /**
+     * The next seq of the agent of the start branch, in the first replica.
+     */
+    fun nextSeqOfStart(): Long {
+      val first = actuals[0]
+      return EventGraphImpl.implOf(first.graph()).nextSeqFor(first.agent())
     }
 
     fun step(): Outcome {
@@ -148,15 +188,17 @@ internal class DocBranchTrimFuzzTest {
 
   private companion object {
     const val ROUNDS = 2000
+    const val ROUNDS_NEAR_LIMIT = 500
     const val STEPS = 40
     const val MAX_REPLICAS = 4
     const val SEED = 20261016L
+    const val SEED_NEAR_LIMIT = 20261020L
     const val ALPHABET = "abc\n"
 
     /**
      * The merge of [other] into [receiver], or `null` when it throws [TrimmedHistoryException].
      */
-    fun mergeOrNull(receiver: DocBranch, other: DocBranch): DocMerge? {
+    fun mergeOrNull(receiver: DocumentBranch, other: DocumentBranch): DocMerge? {
       return try {
         receiver.mergeWithOps(other)
       } catch (_: TrimmedHistoryException) {

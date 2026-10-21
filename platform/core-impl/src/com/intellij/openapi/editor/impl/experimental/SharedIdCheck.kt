@@ -8,7 +8,7 @@ import com.intellij.openapi.editor.ex.experimental.EventIdClashException
  * Fails when the two graphs of a merge disagree about an id they both hold.
  *
  * One (agent, seq) pair names one operation forever. A difference means two branches minted the
- * same id, which the agent contract of [com.intellij.openapi.editor.ex.experimental.DocBranch] forbids:
+ * same id, which the agent contract of [com.intellij.openapi.editor.ex.experimental.DocumentBranch] forbids:
  * a branch that edits concurrently must come from `fork(agent)`. Without this check the merge keeps
  * one operation, drops the other, and reports nothing. The two branches then disagree, and a merge
  * stops giving the same text in both directions.
@@ -45,7 +45,7 @@ internal class SharedIdCheck(private val graph: EventGraphImpl, private val othe
   /**
    * Fails when the unit ([agent], [seq]) is a different operation in the two graphs.
    */
-  private fun checkSameId(agent: Agent, seq: Int) {
+  private fun checkSameId(agent: Agent, seq: Long) {
     val lv = graph.lvOfUnit(agent, seq)
     val otherLv = other.lvOfUnit(agent, seq)
     require(lv >= 0 && otherLv >= 0) {
@@ -69,7 +69,7 @@ internal class SharedIdCheck(private val graph: EventGraphImpl, private val othe
   private fun checkNoClash(
     same: Boolean,
     agent: Agent,
-    seq: Int,
+    seq: Long,
     difference: String,
   ) {
     if (!same) {
@@ -88,7 +88,7 @@ internal class SharedIdCheck(private val graph: EventGraphImpl, private val othe
     return parentIds == otherParentIds
   }
 
-  private fun clashMessage(agent: Agent, seq: Int, difference: String): String {
+  private fun clashMessage(agent: Agent, seq: Long, difference: String): String {
     return "Two events share the id ($agent, $seq) and differ in $difference. " +
            "One agent authored both, but a branch that edits concurrently must come from fork(agent)."
   }

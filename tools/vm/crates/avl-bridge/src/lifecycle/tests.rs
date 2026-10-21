@@ -1,4 +1,3 @@
-use std::net::TcpListener;
 use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::thread;
@@ -490,10 +489,8 @@ fn a_transient_failure_is_retried_within_the_deadline() {
         started.elapsed()
     );
 
-    let port = {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        listener.local_addr().unwrap().port()
-    };
+    // A free port below the ephemeral floor, which no parallel bind of port 0 takes, so the connect is refused.
+    let port = avl_testkit::free_port_below_ephemeral_floor();
     let error = Reader::new(Client::new(&url(port), TOKEN).unwrap(), None)
         .await_ready(Duration::from_secs(1), Duration::from_millis(600))
         .unwrap_err();
@@ -526,4 +523,23 @@ fn a_refused_token_ends_the_wait_at_once() {
             "the lifecycle long poll failed: GET {EVENTS_ROUTE}?wait=0: the bridge answered HTTP 401: unsigned Air UI-test lifecycle request"
         )
     );
+}
+
+// A wait that `ended` stops ends at once with the reason, and it does not wait for its deadline. No bridge answers here,
+// as after a kill, so each poll is a transient failure.
+#[test]
+fn a_wait_whose_process_ended_ends_at_once_with_the_reason() {
+    let port = avl_testkit::free_port_below_ephemeral_floor();
+    let reader = Reader::new(Client::new(&url(port), "token").unwrap(), Some("launch-1"));
+    let mut checks = 0;
+    let started = Instant::now();
+    let error = reader
+        .await_ready_while(Duration::ZERO, Duration::from_secs(30), &mut || {
+            checks += 1;
+            (checks == 3).then(|| "its run ended with 143".to_owned())
+        })
+        .unwrap_err();
+    assert!(started.elapsed() < Duration::from_secs(10), "the wait took {:?}", started.elapsed());
+    assert_eq!(checks, 3);
+    assert_eq!(error.to_string(), "the process of the IDE ended: its run ended with 143");
 }

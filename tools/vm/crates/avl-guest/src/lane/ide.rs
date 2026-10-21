@@ -57,7 +57,7 @@ use crate::supervisor::{self, Launcher, LiveSystem};
 
 mod restart;
 
-pub(crate) use restart::Relaunch;
+pub(crate) use restart::{KillTarget, Relaunch};
 #[cfg(test)]
 mod tests;
 
@@ -95,7 +95,7 @@ const REACHABLE_WAIT: Duration = Duration::from_secs(5);
 const IDEA_PROPERTIES_FILE: &str = "idea.properties.file";
 
 /// The property of a dev distribution that names the checkout. The guest has none, so it names the empty home of the
-/// staged generation.
+/// launch inputs.
 const DEV_PROJECT_ROOT: &str = "idea.dev.project.root";
 
 /// The properties of the bridge: its port, its launch, and the project it drives, `AIR_UI_TEST_*_PROPERTY`.
@@ -312,6 +312,8 @@ pub(crate) struct LaneLaunch<'a> {
     pub product_stamp: &'a str,
     pub fake_agent_jar: &'a Path,
     pub plugins: &'a [ContextPlugin],
+    /// The live run of the iteration, for the live lane alone. The context writer seeds the lane home with it.
+    pub live: Option<&'a super::live::LiveRun>,
 }
 
 /// The IDE that the owner holds.
@@ -376,21 +378,34 @@ pub(crate) struct IdeOwner {
     held: Option<HeldIde>,
     /// The record of the lane IDE that a bare launch quit, until the bare suite ends.
     parked: Option<HeldIde>,
+    /// The held run as the target of a kill of the watchdog, see [`KillTarget`].
+    target: KillTarget,
 }
 
 impl IdeOwner {
-    pub(crate) const fn new(inputs: LaunchInputs) -> Self {
+    pub(crate) fn new(inputs: LaunchInputs) -> Self {
         Self {
             inputs,
             services: None,
             held: None,
             parked: None,
+            target: KillTarget::default(),
         }
     }
 
     /// The declared CLI runtimes that `names` name, in that order.
     pub(crate) fn runtimes_named(&self, names: &[String]) -> Result<Vec<super::context::CliRuntime>, AgentRefusal> {
         self.inputs.runtimes_named(names)
+    }
+
+    /// Every declared CLI runtime of the runtime descriptor.
+    pub(crate) fn runtimes(&self) -> &[super::context::CliRuntime] {
+        &self.inputs.runtimes
+    }
+
+    /// The paths of the context of the held IDE, or `None` when the owner holds none.
+    pub(crate) fn held_paths(&self) -> Option<IdePrepared> {
+        self.held.as_ref().map(|held| held.paths.clone())
     }
 
     /// Whether the held IDE run is live now.
@@ -410,6 +425,7 @@ impl IdeOwner {
             java: &java,
             fake_agent_jar: launch.fake_agent_jar,
             runtimes: &runtimes,
+            live: launch.live,
         };
         let ports = context.check()?;
         if let Some(other) = self.held.as_ref().map(|held| held.key.clone()).filter(|held| *held != key) {
@@ -438,6 +454,7 @@ impl IdeOwner {
             ));
             emit_launched(&adopted, records);
             self.held = Some(adopted);
+            self.publish_target();
         }
         let decision = self.decide(launch, &key);
         records.decide(&decision);
@@ -469,15 +486,14 @@ impl IdeOwner {
             "waiting up to {} s for the IDE of '{key}' to get ready",
             readiness::READY_TIMEOUT.as_secs()
         ));
-        readiness::await_ready(&bridge, &key, launch.vocabulary_digest, false, &mut |text| {
+        readiness::await_ready(&bridge, &key, launch.vocabulary_digest, &mut self.run_end(), &mut |text| {
             records.note(text);
         })?;
         Ok(decision)
     }
 
     /// Reloads the bridge plugin of the held IDE from the context plugins of `launch`, and waits until the new copy is
-    /// ready. The Junie offer belongs to the IDE start, so the gate after a reload asks nothing of it. The error is the
-    /// reason of the relaunch that follows, and the staged copy is gone then.
+    /// ready. The error is the reason of the relaunch that follows, and the staged copy is gone then.
     fn reload(&self, launch: &LaneLaunch<'_>, bridge: &Bridge, records: &mut Records<'_>) -> Result<(), String> {
         let Some(held) = &self.held else {
             return Err("a reload was decided without an IDE".to_owned());
@@ -488,7 +504,7 @@ impl IdeOwner {
             .map_err(|error| error.to_string())
             .and_then(|client| reload::reload(&client, key, held.context(), launch.plugins, &mut |text| records.note(text)))
             .and_then(|()| {
-                readiness::await_ready(bridge, key, launch.vocabulary_digest, true, &mut |text| {
+                readiness::await_ready(bridge, key, launch.vocabulary_digest, &mut self.run_end(), &mut |text| {
                     records.note(text);
                 })
                 .map_err(|refusal| format!("the reloaded bridge plugin did not get ready: {}", refusal.message))
@@ -577,7 +593,7 @@ impl IdeOwner {
         Some(HeldIde { pid: state.pid, ..held })
     }
 
-    /// The paths of the context `context`, by the layout of `ide-prepare`.
+    /// The paths of the context `context`, by the layout of a preparation.
     fn layout(&self, context: &Path) -> IdePrepared {
         let child = |name: &str| context.join(name).display().to_string();
         let unpack = context.join(wire_ide::PROJECT_DIR);
@@ -670,6 +686,7 @@ impl IdeOwner {
 
     /// Installs the plugins of `launch` into the context of `held` and starts its run.
     fn start_run(&mut self, mut held: HeldIde, launch: &LaneLaunch<'_>, records: &mut Records<'_>) -> Result<(), AgentRefusal> {
+        supervisor::reap_ended();
         let distribution: Vec<String> = self.inputs.distribution_plugins.iter().cloned().collect();
         install_plugins(Path::new(&held.paths.plugins_dir), launch.plugins, &distribution)?;
         let properties = self.launch_properties(launch, &held)?;
@@ -699,10 +716,12 @@ impl IdeOwner {
             log_dir: launched.log_dir,
         }));
         self.held = Some(held);
+        self.publish_target();
         Ok(())
     }
 
-    /// The `-D` properties of the launch of `held`, in the order of the JVM host. A later property wins. A bare IDE gets
+    /// The `-D` properties of the launch of `held`. A later property wins, in this order: the paths of the launch, the
+    /// launch properties of the lane document, the properties of the lane services, and the bridge. A bare IDE gets
     /// the launch properties of the lane document without the internal mode, and no property of a lane service.
     fn launch_properties(&self, launch: &LaneLaunch<'_>, held: &HeldIde) -> Result<BTreeMap<String, String>, AgentRefusal> {
         let services = if held.bare {
@@ -796,9 +815,23 @@ impl IdeOwner {
             readiness::READY_TIMEOUT.as_secs()
         ));
         let bridge = Bridge::new(BRIDGE_PORT, &token)?;
-        readiness::await_lifecycle_ready(&bridge, key, launch.vocabulary_digest, &mut |text| {
+        readiness::await_lifecycle_ready(&bridge, key, launch.vocabulary_digest, &mut self.run_end(), &mut |text| {
             records.note(text);
         })
+    }
+
+    /// The check of a readiness wait on the held IDE run: how the run ended, once it did. A run that the owner does not
+    /// hold, or whose state cannot be read, has not ended, so a slow read of the supervisor ends no wait.
+    pub(super) fn run_end(&self) -> impl FnMut() -> Option<String> + use<> {
+        let run = self.held.as_ref().map(|held| (held.context().to_path_buf(), held.run_id()));
+        move || {
+            let (context, run_id) = run.as_ref()?;
+            let state = supervisor::status(&LiveSystem, context, run_id).ok()?;
+            (state.phase == Phase::Finished).then(|| {
+                let exit = state.exit_code.map_or_else(String::new, |code| format!(" with {code}"));
+                format!("its run {run_id} ended{exit}")
+            })
+        }
     }
 
     /// Quits the bare IDE, and holds the record of the IDE of the lane again, so the next run relaunches it on its
@@ -820,12 +853,14 @@ impl IdeOwner {
     /// `/ide/stop` asks for it, so the next run makes a fresh context.
     pub(crate) fn quit(&mut self, records: &mut Records<'_>) -> Result<(), AgentRefusal> {
         let Some(mut held) = self.held.take() else {
+            self.publish_target();
             return Ok(());
         };
         let result = self.end_run(&mut held, records);
         if result.is_err() {
             self.held = Some(held);
         }
+        self.publish_target();
         result
     }
 
@@ -870,6 +905,8 @@ impl IdeOwner {
                 records.emit(exited(held, &state));
             }
         }
+        // The supervisor of the run ended with it, and this process is its parent, so it reaps it now.
+        supervisor::reap_ended();
         Ok(())
     }
 
@@ -887,10 +924,15 @@ pub(crate) fn fresh_context(inputs: &LaunchInputs, key: &str, document: &LaneDoc
         ide_root: inputs.ide_root.display().to_string(),
         launch_key: key.to_owned(),
         fresh: true,
+        // The project of a live lane unpacks outside the context, below no agent instruction or configuration.
         project: ProjectSource {
             archive: inputs.project_archive.display().to_string(),
             archive_root: inputs.project_root.clone(),
-            relocate_to: None,
+            relocate_to: if bare {
+                None
+            } else {
+                document.live.as_ref().map(|live| live.project_unpack_root.clone())
+            },
         },
         disabled_plugin_ids: if bare { Vec::new() } else { document.disabled_plugin_ids.clone() },
     }

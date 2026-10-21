@@ -12,8 +12,8 @@ use avl_host_sys::Ctx;
 use avl_host_sys::guest::ensure_host_paths;
 use avl_report::digest::PathDigest;
 use avl_wire::daemon::{
-    self as wire, IdePlugin, LaneClass, LaneInputs, RunEvent, RunEventKind, RunFailed, RunRequest, Runner, SessionLog, Summary,
-    WatchdogExpired, conflict,
+    self as wire, IdePlugin, LaneClass, LaneInputs, RunEvent, RunEventKind, RunFailed, RunRequest, SessionLog, Summary, WatchdogExpired,
+    conflict,
 };
 use avl_wire::progress::Event;
 use bt_junit::simple_class_name_pattern;
@@ -36,16 +36,13 @@ pub(crate) mod tests;
 
 // --- the option grammar ------------------------------------------------------------------------------------------
 
-/// The kinds of JUnit5 filter the daemon implements, and therefore the only ones `--filter` accepts.
+/// The kinds of JUnit5 filter the lane daemon applies, and therefore the only ones `--filter` accepts.
 ///
-/// Kept host-side because the alternative is a round trip: an unknown option reaches
-/// `AirUiDaemonIteration.buildFilters` as an `IllegalArgumentException` after the build, the daemon start and the
-/// jar push have all been paid for, and it surfaces as a container failure rather than as a typo. This enum has to
-/// stay in step with that `when` - it is the same six options.
+/// Kept host-side because the alternative is a round trip: an unknown option reaches `apply_filters` of the lane
+/// daemon as a refusal after the build, the daemon start and the jar push have all been paid for. This enum has to
+/// stay in step with that `match`. The documents carry no JUnit tag, so a tag is no kind.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Junit5FilterKind {
-    IncludeTag,
-    ExcludeTag,
     IncludeClassname,
     ExcludeClassname,
     IncludePackage,
@@ -53,10 +50,8 @@ pub(crate) enum Junit5FilterKind {
 }
 
 impl Junit5FilterKind {
-    /// Every kind, in the order of the daemon's `when`.
-    pub(crate) const ALL: [Self; 6] = [
-        Self::IncludeTag,
-        Self::ExcludeTag,
+    /// Every kind, in the order of the `match` of the lane daemon.
+    pub(crate) const ALL: [Self; 4] = [
         Self::IncludeClassname,
         Self::ExcludeClassname,
         Self::IncludePackage,
@@ -66,8 +61,6 @@ impl Junit5FilterKind {
     /// The option as the daemon and `--filter` spell it.
     pub(crate) const fn as_str(self) -> &'static str {
         match self {
-            Self::IncludeTag => "include-tag",
-            Self::ExcludeTag => "exclude-tag",
             Self::IncludeClassname => "include-classname",
             Self::ExcludeClassname => "exclude-classname",
             Self::IncludePackage => "include-package",
@@ -161,8 +154,8 @@ impl RunArgs {
 pub(crate) struct RunCommandArgs {
     #[command(flatten)]
     pub run: RunArgs,
-    /// A file the guest test JVM reads as AIR_VM_RUN_SECRETS/NAME; repeatable. NAME=@- reads a pipe, NAME=@FILE a host
-    /// file: a value is refused.
+    /// A file that the lane daemon reads as AIR_VM_RUN_SECRETS/NAME; repeatable. NAME=@- reads a pipe, NAME=@FILE a
+    /// host file: a value is refused.
     #[arg(long = "test-env", value_name = "NAME=@-|NAME=@FILE", value_parser = crate::lane::secrets::parse_test_env)]
     pub test_env: Vec<crate::lane::secrets::RunSecretFile>,
 }
@@ -223,7 +216,7 @@ pub(crate) struct RunSelection {
 /// A method reference or an FQN becomes a precise JUnit selector; a bare class name has no package to select by,
 /// so it travels as a class-name regex filter over a full hot-tier scan, mirroring `JUnit5BazelRunner`'s
 /// simple-name handling. [`simple_class_name_pattern`] owns that pattern.
-fn selector_to_run_request(filter: &str) -> (Vec<String>, Vec<String>) {
+pub(crate) fn selector_to_run_request(filter: &str) -> (Vec<String>, Vec<String>) {
     if filter.contains(['#', '.']) {
         return (vec![filter.to_owned()], Vec::new());
     }
@@ -259,13 +252,6 @@ pub(crate) struct LaneIteration {
     /// The lane's generated suite classes, in the answer's order; empty when `lane` is `None`.
     pub classes: Vec<String>,
     pub selection: RunSelection,
-}
-
-/// The lane's own filter list, `a;b`, with empty entries dropped.
-fn split_filters(joined: Option<&String>) -> Vec<String> {
-    joined
-        .map(|joined| joined.split(';').filter(|entry| !entry.is_empty()).map(str::to_owned).collect())
-        .unwrap_or_default()
 }
 
 /// How a `--filter`-narrowed selection names itself, so a false-green verdict says what excluded the tests.
@@ -304,8 +290,8 @@ impl Host {
 
     /// `run`'s arguments as its iterations, a watchdog policy and the fresh-IDE flag.
     ///
-    /// A flow id, a suite id and `--changed` select generated suites: per lane, the lane's tag and one class filter
-    /// per suite. Without `--lane`, the plan holds one iteration per reached lane; see
+    /// A flow id, a suite id and `--changed` select generated suites: per lane, the lane and one class filter per
+    /// suite. Without `--lane`, the plan holds one iteration per reached lane; see
     /// [`crate::lane::Reached::every_lane`].
     pub(crate) async fn plan_run(&self, ctx: &Ctx, args: &RunArgs) -> Result<RunPlan, Refusal> {
         self.plan(ctx, args, true).await
@@ -372,7 +358,7 @@ impl Host {
             let iterations = lanes
                 .into_iter()
                 .map(|affected| {
-                    let mut junit5_filters = split_filters(affected.selection.test_env.get("JB_TEST_JUNIT5_FILTERS"));
+                    let mut junit5_filters = affected.selection.junit5_filters;
                     junit5_filters.extend(extra.iter().map(ToString::to_string));
                     LaneIteration {
                         selection: RunSelection {
@@ -397,17 +383,16 @@ impl Host {
         }
 
         if let Some(lane) = lane {
-            // Every UI lane runs through this daemon: its classpath is the union of both IDE-launching targets, and
-            // the lane's agent-CLI passthroughs are already in its boot environment. What is left of a lane here is
-            // its JUnit filter.
+            // Every UI lane runs through the lane daemon, which selects the documents of the lane by its name. A lane
+            // adds no filter here, so only the filters of the command line narrow it.
             let selected = crate::lane::lane_selection(lane)?;
             if !every_lane {
                 refuse_explicit_only(&selected.label, &self.reporter.program())?;
             }
-            let mut junit5_filters = split_filters(selected.test_env.get("JB_TEST_JUNIT5_FILTERS"));
+            let mut junit5_filters = selected.junit5_filters;
             junit5_filters.extend(extra.iter().map(ToString::to_string));
             return Ok(single(RunSelection {
-                selectors: Vec::new(),
+                selectors: selected.selectors,
                 junit5_filters,
                 description: describe_selection(format!("lane {lane}"), extra),
                 lane: Some(lane.to_owned()),
@@ -423,13 +408,10 @@ impl Host {
             refuse_explicit_only(&resolved.label, &self.reporter.program())?;
         }
         let description = describe_selection(selector.to_owned(), extra);
-        let (selectors, mut junit5_filters) = match resolved.test_env.get("TESTBRIDGE_TEST_ONLY").filter(|only| !only.is_empty()) {
-            Some(only) => selector_to_run_request(only),
-            None => (Vec::new(), split_filters(resolved.test_env.get("JB_TEST_JUNIT5_FILTERS"))),
-        };
+        let mut junit5_filters = resolved.junit5_filters;
         junit5_filters.extend(extra.iter().map(ToString::to_string));
         Ok(single(RunSelection {
-            selectors,
+            selectors: resolved.selectors,
             junit5_filters,
             description,
             lane: avl_affected::ui_lane_of_label(&resolved.label).map(|lane| lane.name.to_owned()),
@@ -449,7 +431,7 @@ fn refuse_explicit_only(label: &str, program: &str) -> Result<(), Refusal> {
             format!(
                 "{name} is an explicit-only lane: each scenario spends a billed turn, so it runs once through \
                  `{program} run --lane {name}`, never through shard or flake",
-                name = lane.name
+                name = lane.name,
             ),
         )),
         _ => Ok(()),
@@ -477,7 +459,7 @@ pub(crate) fn upload_concurrency(bytes: u64) -> usize {
         .clamp(1, MAX_PARALLEL_UPLOADS)
 }
 
-/// Offers the hot tier, the context plugin files, the lane inputs and the zips of the recorded sessions by digest, and
+/// Offers the files of the build, [`PreparedBuild::pushed_files`], and the zips of the recorded sessions by digest, and
 /// uploads only what the guest does not already hold, answering how many files travelled. A digest that two files
 /// share is offered once.
 ///
@@ -492,10 +474,7 @@ pub(crate) async fn push_jars(
 ) -> Result<usize, Refusal> {
     let mut offered = HashSet::new();
     let jars: Vec<&PathDigest> = prep
-        .hot_jars
-        .iter()
-        .chain(prep.plugin_files.iter().map(|file| &file.host))
-        .chain(prep.lane_inputs.iter().map(|input| &input.host))
+        .pushed_files()
         .chain(session_logs)
         .filter(|jar| offered.insert(jar.sha256.as_str()))
         .collect();
@@ -614,59 +593,50 @@ pub(crate) struct RunExecution {
     pub protocol_failure: Option<Refusal>,
 }
 
-/// The `/run` request of `selection` for the build `prep` and the daemon of `runner`.
+/// The `/run` request of `selection` for the build `prep`.
 ///
-/// The lane daemon also gets the lane, the digests of the lane inputs, `lane_classes`, the suites of the lane that the
-/// catalog names, and `session_logs`, the recorded sessions that the push stored. It refuses a run of no lane here, before the request goes out, because it cannot choose a lane
-/// IDE for it. The `lane` field selects the documents of the lane, so the JUnit5 filter of the lane's own tag does not
-/// go to the lane daemon; every other filter does.
+/// The lane daemon gets the lane, the digests of the lane inputs, `lane_classes`, the suites of the lane that the
+/// catalog names, and `session_logs`, the recorded sessions that the push stored. A run of no lane is refused here,
+/// before the request goes out, because the lane daemon cannot choose a lane IDE for it. The `lane` field selects the
+/// documents of the lane, and the filters of the selection narrow them.
 pub(crate) fn run_request(
     prep: &PreparedBuild,
     selection: &RunSelection,
     policy: WatchdogPolicy,
-    runner: Runner,
     lane_classes: Vec<LaneClass>,
     session_logs: &[SessionLog],
 ) -> Result<RunRequest, Refusal> {
-    let mut junit5_filters = selection.junit5_filters.clone();
-    let (lane, lane_inputs, lane_classes) = match runner {
-        Runner::Jvm => (None, None, Vec::new()),
-        Runner::Daemon => {
-            let Some(lane) = &selection.lane else {
-                return Err(Refusal::new(
-                    "lane_daemon_lane_unknown",
-                    Exit::USAGE,
-                    format!(
-                        "the lane daemon runs one lane at a time, and the selection {} names none; pass --lane",
-                        selection.description
-                    ),
-                ));
-            };
-            let digest = |field: &str| {
-                prep.lane_inputs
-                    .iter()
-                    .find(|input| input.field == field)
-                    .map(|input| input.host.sha256.clone())
-                    .ok_or_else(|| Refusal::internal(format!("the descriptor names no lane input {field}")))
-            };
-            let inputs = LaneInputs {
-                fake_agent_jar: digest("fakeAgentJar")?,
-                lane_documents: digest("laneDocuments")?,
-                suite_documents: digest("suiteDocuments")?,
-            };
-            let own_tag = crate::lane::lanes::jvm_lane_filter(lane)?;
-            junit5_filters.retain(|filter| *filter != own_tag);
-            (Some(lane.clone()), Some(inputs), lane_classes)
-        }
+    let junit5_filters = selection.junit5_filters.clone();
+    let Some(lane) = &selection.lane else {
+        return Err(Refusal::new(
+            "lane_daemon_lane_unknown",
+            Exit::USAGE,
+            format!(
+                "the lane daemon runs one lane at a time, and the selection {} names none; pass --lane",
+                selection.description
+            ),
+        ));
+    };
+    let digest = |field: &str| {
+        prep.lane_inputs
+            .iter()
+            .find(|input| input.field == field)
+            .map(|input| input.host.sha256.clone())
+            .ok_or_else(|| Refusal::internal(format!("the descriptor names no lane input {field}")))
+    };
+    let lane_inputs = LaneInputs {
+        fake_agent_jar: digest("fakeAgentJar")?,
+        lane_documents: digest("laneDocuments")?,
+        suite_documents: digest("suiteDocuments")?,
     };
     Ok(RunRequest {
         selectors: selection.selectors.clone(),
         junit5_filters,
         product_stamp: prep.product_digest.clone(),
         launch_digest: prep.launch_digest.clone(),
-        hot_jars: prep.hot_jars.iter().map(|jar| jar.sha256.clone()).collect(),
         active_execution_timeout_sec: policy.active_execution.as_secs(),
         progress_gap_timeout_sec: policy.progress_gap.as_secs(),
+        run_budget_sec: None,
         ide_plugins: prep
             .plugin_files
             .iter()
@@ -675,13 +645,10 @@ pub(crate) fn run_request(
                 sha256: file.host.sha256.clone(),
             })
             .collect(),
-        lane,
-        lane_inputs,
+        lane: Some(lane.clone()),
+        lane_inputs: Some(lane_inputs),
         lane_classes,
-        session_logs: match runner {
-            Runner::Jvm => Vec::new(),
-            Runner::Daemon => session_logs.to_vec(),
-        },
+        session_logs: session_logs.to_vec(),
     })
 }
 
@@ -704,19 +671,11 @@ impl Host {
         session_logs: &[SessionLog],
         observe: &mut (dyn FnMut(&RunEvent) + Send),
     ) -> Result<RunExecution, Refusal> {
-        // The JVM runner discovers the classes of its lane by the tag, so only the lane daemon gets the catalog.
-        let lane_classes = match (self.daemon.runner(), &selection.lane) {
-            (Runner::Daemon, Some(lane)) => crate::lane::lane_classes(&self.settings, lane, &self.reporter)?,
-            _ => Vec::new(),
+        let lane_classes = match &selection.lane {
+            Some(lane) => crate::lane::lane_classes(&self.settings, lane, &self.reporter)?,
+            None => Vec::new(),
         };
-        let body = encode(&run_request(
-            prep,
-            selection,
-            policy,
-            self.daemon.runner(),
-            lane_classes,
-            session_logs,
-        )?)?;
+        let body = encode(&run_request(prep, selection, policy, lane_classes, session_logs)?)?;
         let mut watchdog = TransportWatchdog::armed(policy.progress_gap + TRANSPORT_MARGIN);
         let run_failed = |message: String| Refusal::new("daemon_run_failed", Exit::SOFTWARE, message);
         let run = wire::RUN;

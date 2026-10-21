@@ -14,6 +14,7 @@ use serde_json::{Value, json};
 use tempfile::TempDir;
 
 use super::*;
+use crate::lane::stream::Counts;
 use crate::lane::trace::tests::Recording;
 use crate::lane::watchdog::Policy;
 
@@ -101,7 +102,7 @@ struct Fake {
     client: avl_bridge::Client,
     script: Arc<Mutex<Script>>,
     pid: Arc<AtomicU32>,
-    relaunches: Mutex<Vec<(Relaunch, bool)>>,
+    relaunches: Mutex<Vec<Relaunch>>,
     context: TempDir,
     services: FakeServices,
     /// Set by the kill of the watchdog. A request that answers after it fails, as a request to a dead IDE does.
@@ -116,6 +117,9 @@ struct Fake {
     air_reloads: Mutex<Vec<Duration>>,
     /// A reload of Air fails, as one that the resident plugin refuses does.
     air_reload_fails: AtomicBool,
+    /// The Junie sessions that the live run finds, and the count of the refreshes of the live wiring.
+    leftovers: Mutex<Vec<String>>,
+    live_refreshes: AtomicU32,
 }
 
 impl Fake {
@@ -168,6 +172,8 @@ impl Fake {
             bare_launch_fails: AtomicBool::new(false),
             air_reloads: Mutex::new(Vec::new()),
             air_reload_fails: AtomicBool::new(false),
+            leftovers: Mutex::new(Vec::new()),
+            live_refreshes: AtomicU32::new(0),
         }
     }
 
@@ -253,6 +259,10 @@ impl Probes for Fake {
         self.killed.store(true, Ordering::SeqCst);
         Ok(())
     }
+
+    fn log_dir(&self) -> Option<PathBuf> {
+        None
+    }
 }
 
 impl Lane for Fake {
@@ -261,13 +271,8 @@ impl Lane for Fake {
             .post_json("/api/air/ui-test", &request.to_string(), Instant::now() + within)
     }
 
-    fn relaunch(
-        &self,
-        cause: Relaunch,
-        keep_junie_offer: bool,
-        while_down: &mut dyn FnMut(&Path) -> Result<(), String>,
-    ) -> Result<(), String> {
-        self.relaunches.lock().unwrap().push((cause, keep_junie_offer));
+    fn relaunch(&self, cause: Relaunch, while_down: &mut dyn FnMut(&Path) -> Result<(), String>) -> Result<(), String> {
+        self.relaunches.lock().unwrap().push(cause);
         let down = while_down(self.context.path());
         if !self.relaunch_keeps_pid.load(Ordering::SeqCst) {
             self.pid.fetch_add(1, Ordering::SeqCst);
@@ -328,6 +333,15 @@ impl Lane for Fake {
         }
         Ok(())
     }
+
+    fn refresh_live_wiring(&self) -> Result<(), String> {
+        self.live_refreshes.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn leftover_junie_sessions(&self) -> Result<Vec<String>, String> {
+        Ok(self.leftovers.lock().unwrap().clone())
+    }
 }
 
 /// The spec of an IDE id with these values.
@@ -352,10 +366,10 @@ fn story_document(vocabulary: &Value, profiles: &Value) -> Value {
         ],
         "restartsIde": false, "modules": [], "implementationFlows": [],
         "vocabulary": vocabulary,
-        "reset": {"flagKeys": ["air.inline.empty.state.prompt"], "offerJuniePromo": false, "laneFlags": {},
+        "reset": {"flagKeys": ["air.inline.empty.state.prompt"], "laneFlags": {},
             "agentLoginAcpAgentIds": ["acp.air-scenario-rename"]},
         "agents": {},
-        "fixtures": {"fixture": {"managedAgentStartsInstalled": false, "keepsJunieStartupOffer": true, "bridge": {
+        "fixtures": {"fixture": {"managedAgentStartsInstalled": false, "bridge": {
             "setScenarioFixture": {"type": format!("{BRIDGE}SetScenarioFixture"), "facts": {"preset": {"id": "preset-1"}}},
             "seedSessionPresets": {"type": format!("{BRIDGE}SeedSessionPresets"), "presets": [{"id": "preset-1"}],
                 "refreshAvailability": true, "timeoutMs": 30_000},
@@ -387,6 +401,8 @@ fn scenario(name: &str, instructions: &Value) -> Value {
 struct Ran {
     records: Vec<Value>,
     trace: Vec<String>,
+    /// The counts of the summary of the run.
+    counts: Counts,
     _iteration: TempDir,
 }
 
@@ -426,6 +442,8 @@ struct Setup {
     slow_step: Option<Duration>,
     margin: Duration,
     active: Duration,
+    /// The budget of the whole run, from the start of the run.
+    run_budget: Option<Duration>,
     recording: Recording,
     document: LaneDocument,
     session_logs: Vec<StagedLog>,
@@ -437,6 +455,7 @@ impl Default for Setup {
             slow_step: None,
             margin: INSTRUCTION_MARGIN,
             active: Duration::from_mins(30),
+            run_budget: None,
             recording: Recording::default(),
             document: lane_document(),
             session_logs: Vec::new(),
@@ -450,6 +469,7 @@ fn run_set(fake: &Fake, suites: &[Suite], setup: &Setup) -> Ran {
         slow_step,
         margin,
         active,
+        run_budget,
         recording,
         document,
         session_logs,
@@ -458,14 +478,15 @@ fn run_set(fake: &Fake, suites: &[Suite], setup: &Setup) -> Ran {
     let iteration = TempDir::new().unwrap();
     let trace = Trace::open(
         Box::new(recording.clone()),
-        Trace::hello(iteration.path(), "iter-golden", false, fake.recorder_bridge()),
+        Trace::hello(iteration.path(), None, "iter-golden", false, fake.recorder_bridge()),
     );
     let mut out = Vec::new();
-    {
+    let counts = {
         let stream = Stream::new(&mut out);
         let policy = Policy {
             active_execution: active,
             progress_gap: Duration::from_mins(5),
+            run_end: run_budget.map(|budget| Instant::now() + budget),
         };
         let watch = match slow_step {
             Some(budget) => Watch::new(policy).with_slow_step(budget),
@@ -481,7 +502,8 @@ fn run_set(fake: &Fake, suites: &[Suite], setup: &Setup) -> Ran {
                 .run(suites);
             watch.completed(&stream);
         });
-    }
+        stream.counts()
+    };
     let records = String::from_utf8(out)
         .unwrap()
         .lines()
@@ -496,6 +518,7 @@ fn run_set(fake: &Fake, suites: &[Suite], setup: &Setup) -> Ran {
     Ran {
         records,
         trace,
+        counts,
         _iteration: iteration,
     }
 }
@@ -792,7 +815,7 @@ fn a_dirty_reset_recycles_once_and_the_scenario_passes_on_a_new_pid() {
     let vocabulary = json!({"runnerAnswers": [], "actions": {"rename-session-select": ide(&[], &[], &[])}, "assertions": {}});
     let instructions = json!([{"action": "rename-session-select"}]);
     let ran = run(&fake, &[story(&vocabulary, &json!([scenario("renames", &instructions)]))], None);
-    assert_eq!(*fake.relaunches.lock().unwrap(), [(Relaunch::Recycle, false)]);
+    assert_eq!(*fake.relaunches.lock().unwrap(), [Relaunch::Recycle]);
     assert_eq!(ran.events("testFinished")[0]["status"], "SUCCESSFUL");
     let select = fake
         .requests()
@@ -860,8 +883,8 @@ fn resets_that_never_hold_spend_the_budget_and_skip_the_rest() {
 
 const MAX_RECYCLES_IN_TEST: usize = crate::lane::recycle::MAX_RECYCLES;
 
-// `restart-ide` performs `whileDown` while the IDE is down, keeps the Junie offer of a fixture that asks for it, states
-// the fixture again to the new IDE, and answers `whileDownReads` to the next instruction.
+// `restart-ide` performs `whileDown` while the IDE is down, states the fixture again to the new IDE, and answers
+// `whileDownReads` to the next instruction.
 #[test]
 fn a_restart_performs_while_down_and_states_the_fixture_again() {
     let fake = Fake::new(Script::default());
@@ -884,7 +907,7 @@ fn a_restart_performs_while_down_and_states_the_fixture_again() {
     ]);
     let ran = run(&fake, &[story(&vocabulary, &json!([scenario("restarts", &instructions)]))], None);
     assert_eq!(ran.events("testFinished")[0]["status"], "SUCCESSFUL", "{:?}", ran.records);
-    assert_eq!(*fake.relaunches.lock().unwrap(), [(Relaunch::Restart, true)]);
+    assert_eq!(*fake.relaunches.lock().unwrap(), [Relaunch::Restart]);
     assert_eq!(fs::read_to_string(&file).unwrap(), "<before/><after/>");
     let kinds: Vec<(u32, String)> = fake.requests();
     let restated = kinds
@@ -1027,11 +1050,10 @@ fn a_suite_with_two_cloud_agents_or_an_uncontrolled_one_is_refused_before_any_re
     }
 }
 
-// The host ids of the live lane are words of the vocabulary, and the lane daemon runs them from slice L-live on. So a
-// suite whose program runs one fails at once as one `lane_unsupported` container that names the word and the slice: no
-// scenario starts, and no request reaches the IDE.
-#[test]
-fn a_suite_that_runs_a_live_host_id_is_refused_before_any_request() {
+/// An authored suite `live-launch` of the lane `lane` whose program refreshes the live wiring before its part and hands
+/// the Junie leftovers to the reset after it, as the Junie scenario of the live suite does. Its prologue hands them over
+/// once before the first scenario.
+fn live_suite(lane: &str) -> Suite {
     let authored = json!({"side": "ide", "timeoutMs": 180_000, "restarts": 0, "answers": [], "mayAnswer": [], "takes": [],
         "mayTake": [], "params": {"part": {"type": "enum", "values": ["open"], "optional": false},
             "scenario": {"type": "enum", "values": ["generation"], "optional": false},
@@ -1039,30 +1061,100 @@ fn a_suite_that_runs_a_live_host_id_is_refused_before_any_request() {
             "timeoutMs": {"type": "int", "optional": false}}});
     let host = json!({"side": "host", "timeoutMs": 480_000, "restarts": 0, "answers": [], "mayAnswer": [], "takes": [],
         "mayTake": [], "params": {}});
-    let suite = suite_of(&json!({
-        "schemaVersion": 2, "suite": "live-launch", "lane": "UI", "testClassName": "AirLiveLaunchUiTest", "authored": true,
+    suite_of(&json!({
+        "schemaVersion": 2, "suite": "live-launch", "lane": lane, "testClassName": "AirLiveLaunchUiTest", "authored": true,
         "labels": [{"name": "testClass", "value": "com.intellij.air.integration.live.AirLiveLaunchUiTest"}],
         "restartsIde": false, "modules": [], "implementationFlows": [],
-        "vocabulary": {"runnerAnswers": [], "actions": {"authored-step": authored, "refresh-live-wiring": host}, "assertions": {}},
-        "reset": {"flagKeys": [], "offerJuniePromo": false, "laneFlags": {}, "agentLoginAcpAgentIds": []},
+        "vocabulary": {"runnerAnswers": [], "actions": {"authored-step": authored, "refresh-live-wiring": host,
+            "adopt-leftover-junie-sessions": host}, "assertions": {}},
+        "reset": {"flagKeys": [], "laneFlags": {}, "agentLoginAcpAgentIds": []},
         "fixtures": {"authored": {}},
+        "prologueHostIds": ["adopt-leftover-junie-sessions"],
         "profiles": [{"name": "the composer launches a live session", "key": "generation", "fixture": "authored", "flags": {},
-            "flagKeys": [], "requiredExecutables": [], "setups": [], "steps": [],
+            "flagKeys": [], "requiredExecutables": ["claude"], "setups": [], "steps": [],
             "program": [{"action": "refresh-live-wiring"},
                 {"action": "authored-step", "args": {"part": "open", "scenario": "generation", "suite": "live-launch",
-                    "timeoutMs": 180_000}, "uses": {"takes": [], "answers": []}}]}],
-    }));
+                    "timeoutMs": 180_000}, "uses": {"takes": [], "answers": []}},
+                {"action": "adopt-leftover-junie-sessions"}]}],
+    }))
+}
+
+/// The fixture lane document as the lane `UI_LIVE`, whose live context declares the runtimes `claude` and `junie`.
+fn live_document() -> LaneDocument {
+    let mut document = lane_document();
+    document.lane = LIVE_LANE.to_owned();
+    document.live = Some(avl_wire::program::lane::LiveContext {
+        login_input: "AIR_LIVE_CENTRAL_LOGIN".to_owned(),
+        login_source: "central login export".to_owned(),
+        central_runtime: "central".to_owned(),
+        central_port: 19516,
+        central_agents: vec!["codex".to_owned()],
+        runtimes: ["claude", "junie"]
+            .map(|name| avl_wire::program::lane::LiveRuntime {
+                name: name.to_owned(),
+                environment: BTreeMap::new(),
+            })
+            .to_vec(),
+        project_unpack_root: "/tmp/air-ui-live/project".to_owned(),
+    });
+    document
+}
+
+// Only a live run has the account that the live host ids read. So outside the live lane a suite whose program or
+// prologue runs one fails at once as one `lane_document` container that names the word: no scenario starts, and no
+// request reaches the IDE.
+#[test]
+fn a_suite_that_runs_a_live_host_id_outside_the_live_lane_is_refused_before_any_request() {
     let fake = Fake::new(Script::default());
-    let ran = run(&fake, &[suite], None);
+    let ran = run(&fake, &[live_suite("UI")], None);
     let failed = ran.events("containerFailed");
     assert_eq!(failed.len(), 1, "{failed:#?}");
-    assert_eq!(failed[0]["type"], kind::UNSUPPORTED);
+    assert_eq!(failed[0]["type"], kind::DOCUMENT);
     assert_eq!(
         failed[0]["message"],
-        "the suite 'live-launch' uses the host id 'refresh-live-wiring', which the lane daemon runs from slice L-live on"
+        "the suite 'live-launch' runs the live host id 'refresh-live-wiring' outside the live lane"
     );
     assert_eq!(ran.events("testStarted"), Vec::<&Value>::new());
     assert_eq!(fake.requests(), Vec::<(u32, String)>::new());
+}
+
+// In the live lane the prologue hands each Junie session that an earlier run left to the reset, one
+// `AdoptProviderSession` each, before the first reset. The program refreshes the live wiring before its part and hands
+// the leftovers over again after it. A scenario may drive a CLI that the live context declares.
+#[test]
+fn the_live_host_ids_refresh_the_wiring_and_hand_the_junie_leftovers_to_the_reset() {
+    let fake = Fake::new(Script::default());
+    *fake.leftovers.lock().unwrap() = vec!["left-1".to_owned(), "left-2".to_owned()];
+    let ran = run_set(
+        &fake,
+        &[live_suite("UI_LIVE")],
+        &Setup {
+            document: live_document(),
+            ..Setup::default()
+        },
+    );
+
+    assert_eq!(ran.events("containerFailed"), Vec::<&Value>::new());
+    assert_eq!(ran.events("testFinished").len(), 1);
+    let adopted: Vec<Value> = fake
+        .script
+        .lock()
+        .unwrap()
+        .requests
+        .iter()
+        .filter(|(_, request)| request["type"].as_str().is_some_and(|kind| kind.ends_with("AdoptProviderSession")))
+        .map(|(_, request)| json!([request["agentId"], request["agentSessionId"]]))
+        .collect();
+    let left = [json!(["junie", "left-1"]), json!(["junie", "left-2"])];
+    assert_eq!(adopted, [left.clone(), left].concat());
+    assert_eq!(fake.live_refreshes.load(Ordering::SeqCst), 1);
+    let kinds: Vec<String> = fake.requests().into_iter().map(|(_, kind)| kind).collect();
+    let first_adopt = kinds.iter().position(|kind| kind.ends_with("AdoptProviderSession")).unwrap();
+    let first_reset = kinds.iter().position(|kind| kind.ends_with("Reset")).unwrap();
+    assert!(
+        first_adopt < first_reset,
+        "the prologue hands the leftovers over before the first reset: {kinds:?}"
+    );
 }
 
 // An authored part is one `authored-step` with the values it takes. It answers exactly the values it declares, and its
@@ -1090,7 +1182,7 @@ fn an_authored_part_passes_its_values_and_reports_its_notes() {
         "labels": [{"name": "testClass", "value": "com.intellij.air.integration.flow.workflows.AgentWorkflowGitUiTest"}],
         "restartsIde": false, "modules": [], "implementationFlows": [],
         "vocabulary": {"runnerAnswers": [], "actions": {"authored-step": authored}, "assertions": {}},
-        "reset": {"flagKeys": [], "offerJuniePromo": false, "laneFlags": {}, "agentLoginAcpAgentIds": []},
+        "reset": {"flagKeys": [], "laneFlags": {}, "agentLoginAcpAgentIds": []},
         "fixtures": {"authored": {}},
         "profiles": [{"name": "a commit starts the workflow", "key": "commit", "method": "gitScenarios", "fixture": "authored",
             "flags": {}, "flagKeys": [], "requiredExecutables": [], "setups": [], "steps": [],
@@ -1142,7 +1234,7 @@ fn recycle_smoke() -> Suite {
         "restartsIde": true, "modules": [], "implementationFlows": [],
         "vocabulary": {"runnerAnswers": [], "actions": {"authored-step": authored,
             "recycle-through-failed-reset": host(1), "restart-ide": host(1)}, "assertions": {}},
-        "reset": {"flagKeys": [], "offerJuniePromo": false, "laneFlags": {}, "agentLoginAcpAgentIds": []},
+        "reset": {"flagKeys": [], "laneFlags": {}, "agentLoginAcpAgentIds": []},
         "fixtures": {"authored-lane-recycle-smoke": {}},
         "profiles": [{"name": "failed reset recycles one warm IDE and retries on the replacement", "key": "recycle",
             "method": "recycleSmokeScenarios", "fixture": "authored-lane-recycle-smoke", "flags": {}, "flagKeys": [],
@@ -1169,10 +1261,7 @@ fn the_recycle_proof_recycles_once_and_resets_the_replacement_on_a_new_pid() {
     let ran = run(&fake, &[recycle_smoke()], None);
     let finished = ran.events("testFinished");
     assert_eq!(finished[0]["status"], "SUCCESSFUL", "{finished:?}");
-    assert_eq!(
-        *fake.relaunches.lock().unwrap(),
-        [(Relaunch::Recycle, false), (Relaunch::Restart, false)]
-    );
+    assert_eq!(*fake.relaunches.lock().unwrap(), [Relaunch::Recycle, Relaunch::Restart]);
     let resets: Vec<u32> = fake
         .requests()
         .into_iter()
@@ -1361,7 +1450,7 @@ fn one_part_suite() -> Suite {
         "labels": [{"name": "testClass", "value": "com.intellij.air.integration.genui.AirGenUiHostUiTest"}],
         "restartsIde": false, "modules": [], "implementationFlows": [],
         "vocabulary": {"runnerAnswers": [], "actions": {"authored-step": authored}, "assertions": {}},
-        "reset": {"flagKeys": [], "offerJuniePromo": false, "laneFlags": {}, "agentLoginAcpAgentIds": []},
+        "reset": {"flagKeys": [], "laneFlags": {}, "agentLoginAcpAgentIds": []},
         "fixtures": {"authored": {}},
         "profiles": [{"name": "the theme follows the IDE", "key": "theme", "fixture": "authored", "flags": {}, "flagKeys": [],
             "requiredExecutables": [], "setups": [], "steps": [],
@@ -1393,7 +1482,9 @@ fn a_failed_part_reports_the_metrics_of_its_performance_file() {
     .unwrap();
     let ran = run(&fake, &[one_part_suite()], None);
     let finished = ran.events("testFinished");
+    // A failure without the field `aborted` is a verdict.
     assert_eq!(finished[0]["status"], "FAILED");
+    assert_eq!((ran.counts.failed, ran.counts.skipped), (1, 0));
     assert_eq!(finished[0]["message"], "the open took too long");
     assert_eq!(
         finished[0]["report"],
@@ -1410,6 +1501,53 @@ fn a_failed_part_reports_the_metrics_of_its_performance_file() {
         notes[2].ends_with("the metric open.label of air-performance.json is no number: \"x\""),
         "{notes:#?}"
     );
+}
+// A body that aborts its scenario answers a failure that the bridge marks aborted. The scenario reached no verdict,
+// so the case ends as ABORTED, and the run counts it as skipped, not as failed. The after reset still runs.
+#[test]
+fn an_authored_part_that_aborts_its_scenario_finishes_as_aborted_and_counts_as_skipped() {
+    let failure = json!({"type": "com.intellij.air.integration.bridge.AirUiTestAbortException",
+        "message": "IJAI-3115: the lane gives no AI source", "stack": [], "aborted": true});
+    let fake = Fake::new(Script {
+        failures: BTreeMap::from([("action/authored-step".to_owned(), failure)]),
+        ..Script::default()
+    });
+    let ran = run(&fake, &[one_part_suite()], None);
+    let finished = ran.events("testFinished");
+    assert_eq!(finished.len(), 1, "{:?}", ran.records);
+    assert_eq!(finished[0]["status"], "ABORTED");
+    assert_eq!(finished[0]["message"], "IJAI-3115: the lane gives no AI source");
+    assert_eq!((ran.counts.started, ran.counts.failed, ran.counts.skipped), (1, 0, 1));
+    let requests = fake.requests();
+    assert_eq!(requests.last().map(|(_, kind)| kind.as_str()), Some("Reset"), "{requests:?}");
+    let done = ran.trace.iter().find(|line| line.starts_with(r#"{"op":"done""#)).unwrap();
+    assert!(done.starts_with(r#"{"op":"done","status":"aborted""#), "{done}");
+}
+
+// No instruction waits past the budget of the run: the deadline of a part is cut to the budget left, and the IDE gets
+// the cut deadline as timeoutMs, so its body stops through its scope first.
+#[test]
+fn a_part_deadline_is_cut_to_the_budget_left() {
+    let fake = Fake::new(Script::default());
+    let ran = run_set(
+        &fake,
+        &[one_part_suite()],
+        &Setup {
+            run_budget: Some(Duration::from_secs(100)),
+            ..Setup::default()
+        },
+    );
+    assert_eq!(ran.events("testFinished")[0]["status"], "SUCCESSFUL");
+    let parts = fake.bodies("action/authored-step");
+    let timeout = parts[0]["timeoutMs"].as_u64().unwrap();
+    assert!(
+        timeout <= 100_000 && timeout > 90_000,
+        "the part of 180000 ms got timeoutMs {timeout}"
+    );
+
+    let unbounded = Fake::new(Script::default());
+    run(&unbounded, &[one_part_suite()], None);
+    assert_eq!(unbounded.bodies("action/authored-step")[0]["timeoutMs"], 180_000);
 }
 
 // A part that answered reports its own metrics, so the runner reads no performance file after it.
@@ -1438,7 +1576,7 @@ fn session_suite() -> Suite {
         "labels": [{"name": "testClass", "value": "com.intellij.air.integration.acp.AirRealSessionColdOpenUiTest"}],
         "restartsIde": false, "modules": [], "implementationFlows": [],
         "vocabulary": {"runnerAnswers": ["realSessionLogs"], "actions": {"authored-step": authored}, "assertions": {}},
-        "reset": {"flagKeys": [], "offerJuniePromo": false, "laneFlags": {}, "agentLoginAcpAgentIds": []},
+        "reset": {"flagKeys": [], "laneFlags": {}, "agentLoginAcpAgentIds": []},
         "fixtures": {"authored": {}},
         "profiles": [{"name": "every recorded session opens", "key": "cold-open", "fixture": "authored", "flags": {},
             "flagKeys": [], "requiredExecutables": [], "requiresRunnerValues": ["realSessionLogs"], "setups": [], "steps": [],
@@ -1447,8 +1585,8 @@ fn session_suite() -> Suite {
     }))
 }
 
-// A scenario that requires a runner value which the runner has not is skipped before its reset, as the JVM host aborts
-// it. No reset and no part of it reach the IDE.
+// A scenario that requires a runner value which the runner has not is skipped before its reset. No reset and no part
+// of it reach the IDE.
 #[test]
 fn a_scenario_that_requires_an_absent_runner_value_is_skipped_before_its_reset() {
     let fake = Fake::new(Script::default());
@@ -1662,7 +1800,7 @@ fn plugin_reload() -> Suite {
         "vocabulary": {"runnerAnswers": [], "actions": {"authored-step": authored,
             "reload-air": {"side": "host", "timeoutMs": 420_000, "restarts": 0, "answers": [], "mayAnswer": [],
                 "takes": [], "mayTake": [], "params": {}}}, "assertions": {}},
-        "reset": {"flagKeys": [], "offerJuniePromo": false, "laneFlags": {}, "agentLoginAcpAgentIds": []},
+        "reset": {"flagKeys": [], "laneFlags": {}, "agentLoginAcpAgentIds": []},
         "fixtures": {"authored": {}},
         "profiles": [{"name": "Air reloads and leaves no class loader", "key": "reload", "fixture": "authored",
             "flags": {}, "flagKeys": [], "requiredExecutables": [], "setups": [], "steps": [],
@@ -1781,4 +1919,96 @@ fn a_scenario_past_its_timeout_is_aborted_and_no_later_scenario_starts() {
     assert_eq!(ran.events("testStarted").len(), 1);
     let done = ran.trace.iter().find(|line| line.starts_with(r#"{"op":"done""#)).unwrap();
     assert!(done.starts_with(r#"{"op":"done","status":"aborted""#), "{done}");
+}
+
+/// Writes the Codex daemon directory of the IDE of `fake`: the ledger, two daemon records, a record that is no JSON
+/// object, and the log of one daemon. The record `older` changed an hour before the record `cd555461`.
+fn write_codex_daemons(fake: &Fake) {
+    let directory = fake.context.path().join(SYSTEM_DIR).join(CODEX_DAEMONS_DIR);
+    fs::create_dir_all(&directory).unwrap();
+    fs::write(directory.join(CODEX_LEDGER_FILE), r#"{"version":3,"generations":[]}"#).unwrap();
+    for id in ["older", "cd555461"] {
+        let record = format!(
+            r#"{{"launchId":"{id}","processIds":[],"startupConfigArgs":["-c","mcp_servers.idea.url=x"],"tcpUrl":"ws://127.0.0.1:1"}}"#
+        );
+        fs::write(directory.join(format!("{id}.json")), record).unwrap();
+    }
+    fs::write(directory.join("broken.json"), "not a record").unwrap();
+    fs::write(directory.join("cd555461.log"), "the log of a daemon").unwrap();
+    for (id, ago) in [("older", Duration::from_hours(1)), ("broken", Duration::from_hours(2))] {
+        fs::File::open(directory.join(format!("{id}.json")))
+            .unwrap()
+            .set_modified(SystemTime::now() - ago)
+            .unwrap();
+    }
+}
+
+/// The Codex files that the trace of `ran` attached, as the title and the text of each.
+fn codex_attachments(ran: &Ran) -> Vec<(String, String)> {
+    ran.trace
+        .iter()
+        .map(|line| serde_json::from_str::<Value>(line).unwrap())
+        .filter(|command| command["op"] == "attach" && command["name"].as_str().is_some_and(|name| name.starts_with("Codex daemon")))
+        .map(|command| {
+            let text = fs::read_to_string(command["file"].as_str().unwrap()).unwrap();
+            (command["name"].as_str().unwrap().to_owned(), text)
+        })
+        .collect()
+}
+
+/// Runs one scenario of one assertion against `fake`.
+fn run_one_assertion(fake: &Fake) -> Ran {
+    let vocabulary = json!({"runnerAnswers": [], "actions": {}, "assertions": {"terminal-panel-mounts": ide(&[], &[], &[])}});
+    let instructions = json!([{"assertion": "terminal-panel-mounts", "expectation": "The terminal panel mounts."}]);
+    run(fake, &[story(&vocabulary, &json!([scenario("reopens", &instructions)]))], None)
+}
+
+/// A lane whose assertion `terminal-panel-mounts` fails.
+fn failing_assertion() -> Fake {
+    let failure = json!({"type": "java.lang.AssertionError", "message": "no terminal panel", "stack": ["Air.check(Air.kt:7)"]});
+    Fake::new(Script {
+        failures: BTreeMap::from([("assertion/terminal-panel-mounts".to_owned(), failure)]),
+        ..Script::default()
+    })
+}
+
+// A failed scenario attaches the Codex daemon ledger of the IDE as it is, and then each daemon record, the newest first,
+// without its startup arguments and its URL. A record that is no JSON object is a note, and a daemon log stays out. A
+// passed scenario attaches none, and a failed scenario of an IDE with no Codex daemon directory attaches none.
+#[test]
+fn a_failed_scenario_attaches_the_codex_daemon_ledger_and_records_of_the_ide() {
+    let failing = failing_assertion();
+    write_codex_daemons(&failing);
+    let ran = run_one_assertion(&failing);
+    assert_eq!(ran.events("testFinished")[0]["status"], "FAILED");
+    let record = |id: &str| format!("{{\n  \"launchId\": \"{id}\",\n  \"processIds\": []\n}}");
+    assert_eq!(
+        codex_attachments(&ran),
+        [
+            (
+                "Codex daemon ledger.json".to_owned(),
+                r#"{"version":3,"generations":[]}"#.to_owned()
+            ),
+            ("Codex daemon cd555461.json".to_owned(), record("cd555461")),
+            ("Codex daemon older.json".to_owned(), record("older")),
+        ]
+    );
+    assert!(
+        ran.events("output").iter().any(|record| record["text"]
+            .as_str()
+            .unwrap()
+            .ends_with("broken.json: it is no JSON object, so its private fields cannot be dropped")),
+        "{:?}",
+        ran.events("output")
+    );
+
+    let passing = Fake::new(Script::default());
+    write_codex_daemons(&passing);
+    let ran = run_one_assertion(&passing);
+    assert_eq!(ran.events("testFinished")[0]["status"], "SUCCESSFUL");
+    assert!(codex_attachments(&ran).is_empty());
+
+    let ran = run_one_assertion(&failing_assertion());
+    assert_eq!(ran.events("testFinished")[0]["status"], "FAILED");
+    assert!(codex_attachments(&ran).is_empty());
 }

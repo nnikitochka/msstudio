@@ -6,7 +6,6 @@ import com.jetbrains.python.sdk.ModuleOrProject
 import com.intellij.execution.target.FullPathOnTarget
 import com.intellij.ide.SaveAndSyncHandler
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.projectRoots.Sdk
 import com.intellij.platform.eel.provider.getEelDescriptor
 import com.intellij.platform.eel.provider.toEelApi
 import com.intellij.platform.util.progress.withProgressText
@@ -51,7 +50,7 @@ internal data class UvExecutionContext<P : PathHolder>(
   val uvPath: P?,
 ) {
   override fun toString(): String =
-    "UvExecutionContext(workingDir=$workingDir, venvPath=${venvPath?.toStringForUI()}, fileSystem=$fileSystem, uvPath=${uvPath?.toStringForUI()})"
+    "UvExecutionContext(workingDir=$workingDir, venvPath=${venvPath?.toStringPossiblyMRFS()}, fileSystem=$fileSystem, uvPath=${uvPath?.toStringPossiblyMRFS()})"
 
   suspend fun createUvCli(): PyResult<UvLowLevel<P>> = validateAndCreateUvCli(uvPath, fileSystem).mapSuccess { uvCli ->
     createUvLowLevel(workingDir, uvCli, venvPath)
@@ -213,6 +212,6 @@ internal suspend fun <P : PathHolder> setupExistingEnvAndSdk(
 
 /** The SDK data of the existing uv environment of [pythonBinary]. The caller stores its dependency file. */
 internal fun uvSdkDataOf(pythonBinary: PathHolder, workingDir: Path): UvSdkAdditionalData {
-  val venvPath = pythonBinary.resolvePythonHome().toStringForExecution()
+  val venvPath = pythonBinary.resolvePythonHome().toStringOnRemoteMachine()
   return UvSdkAdditionalData(uvWorkingDirectory = workingDir, usePip = null, venvPath = venvPath, uvPath = null)
 }

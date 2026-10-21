@@ -37,10 +37,10 @@ pub const MAX_WAIT: Duration = Duration::from_secs(30);
 pub const POLL_WAIT: Duration = Duration::from_secs(1);
 
 /// The time that a poll waits for its answer past its wait. A bridge before `COMPONENTS_LOADED` reads a request and
-/// sends no answer, so this bounds what such a poll costs. It is the connect bound of the Kotlin client.
+/// sends no answer, so this bounds what such a poll costs.
 const CALL_MARGIN: Duration = Duration::from_secs(5);
 
-/// The pause before the next poll after a failed poll, the reconnect interval of the Kotlin client.
+/// The pause before the next poll after a failed poll.
 const RETRY_INTERVAL: Duration = Duration::from_millis(250);
 
 /// How far along the IDE is, as the IDE itself sees it. The Kotlin side's `AirUiTestIdePhase`.
@@ -172,6 +172,18 @@ impl Reader {
     /// A poll that fails with [Error::is_transient] restarts the dwell, and the next poll comes [RETRY_INTERVAL]
     /// later. Every other failed poll ends the wait, as a refused token does.
     pub fn await_phase(&self, phase: Phase, quiet_for: Duration, timeout: Duration) -> Result<State, WaitError> {
+        self.await_phase_while(phase, quiet_for, timeout, &mut || None)
+    }
+
+    /// [Self::await_phase], which also asks `ended` before each poll whether the process of the IDE ended. An answer
+    /// ends the wait at once with [WaitError::Ended], so a killed IDE costs no wait up to `timeout`.
+    pub fn await_phase_while(
+        &self,
+        phase: Phase,
+        quiet_for: Duration,
+        timeout: Duration,
+        ended: &mut dyn FnMut() -> Option<String>,
+    ) -> Result<State, WaitError> {
         let deadline = Instant::now() + timeout;
         let mut wait = PhaseWait::new(phase, quiet_for, self.launch.as_deref());
         loop {
@@ -180,6 +192,9 @@ impl Reader {
                 Verdict::Reached(state) => return Ok(state.clone()),
                 Verdict::Refused(refusal) => return Err(refusal),
                 Verdict::Waiting => {}
+            }
+            if let Some(reason) = ended() {
+                return Err(WaitError::Ended(reason));
             }
             let left = deadline.saturating_duration_since(now);
             if left.is_zero() {
@@ -205,6 +220,16 @@ impl Reader {
         self.await_phase(Phase::Ready, quiet_for, timeout)
     }
 
+    /// [Self::await_phase_while] for [Phase::Ready].
+    pub fn await_ready_while(
+        &self,
+        quiet_for: Duration,
+        timeout: Duration,
+        ended: &mut dyn FnMut() -> Option<String>,
+    ) -> Result<State, WaitError> {
+        self.await_phase_while(Phase::Ready, quiet_for, timeout, ended)
+    }
+
     /// [Self::poll], with a call that ends at `limit` at the latest.
     fn poll_until(&self, after: Option<u64>, wait: Duration, limit: Option<Instant>) -> Result<Snapshot, Error> {
         let wait = wait.min(MAX_WAIT);
@@ -219,8 +244,7 @@ impl Reader {
     }
 }
 
-/// The decision of one wait for a phase, as a function of the snapshots and the time. It is the port of the Kotlin
-/// side's `AirUiTestPhaseWait`.
+/// The decision of one wait for a phase, as a function of the snapshots and the time.
 ///
 /// The IDE sends a state only when it changes. So the dwell of `quiet_for` ends when time passes with no state in
 /// another phase. The dwell starts again when the reader cannot know that no such state went past: after a gap of two
@@ -358,6 +382,8 @@ pub enum WaitError {
     OtherLaunch { expected: String, state: Box<State> },
     /// The control server of the controlled agents in the IDE did not bind, so the IDE never gets ready.
     ControlBindFailed(Box<State>),
+    /// The process of the IDE ended, so it cannot reach the phase. The text says how it ended.
+    Ended(String),
     /// The deadline passed first.
     TimedOut(Box<TimedOut>),
 }
@@ -387,6 +413,7 @@ impl fmt::Display for WaitError {
                 "the lifecycle state names the launch {}, not {expected}, so the IDE of another lane answers on the port: {state}",
                 state.launch.as_deref().unwrap_or_default()
             ),
+            Self::Ended(reason) => write!(formatter, "the process of the IDE ended: {reason}"),
             Self::ControlBindFailed(state) => write!(
                 formatter,
                 "the IDE cannot reach READY, because its ACP control server did not bind; read idea.log of the IDE for the holder of the port: {state}"

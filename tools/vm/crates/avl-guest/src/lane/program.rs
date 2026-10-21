@@ -37,7 +37,8 @@ use avl_bridge::{BridgeFailure, ErrorKind};
 use avl_trace::bridge::{ATTACHMENTS_ROUTE, AttachmentKind, attachment_route, decode_attachment_list};
 use avl_trace::protocol::{self, Label, ScenarioCommand, Side as TraceSide, SnapshotPhase, SpanKind};
 use avl_wire::daemon::TypedFailure;
-use avl_wire::program::lane::{Delivery, LaneAgent, LaneDocument};
+use avl_wire::ide::SYSTEM_DIR;
+use avl_wire::program::lane::{Delivery, LIVE_LANE, LaneAgent, LaneDocument};
 use avl_wire::program::{
     HostAction, IdKind, IdSpec, Instruction, OperationProgram, ScenarioProgram, Side, SuiteFixture, SuiteProgram, SuiteReset,
 };
@@ -49,8 +50,8 @@ use serde_json::{Map, Value, json};
 
 use super::host_ids::{self, HostId, HostSide, ServiceControl};
 use super::ide::Relaunch;
-use super::readiness::request;
-use super::recycle::{Isolation, ResetPhase, never_ran};
+use super::readiness::{READY_TIMEOUT, request};
+use super::recycle::{Isolation, RecycleBudget, ResetPhase, never_ran};
 use super::session_logs::{self, StagedLog};
 use super::stream::{CaseIdentity, CaseStatus, Stream};
 use super::trace::{Trace, TraceFailure};
@@ -87,6 +88,8 @@ const INSTRUCTION_MARGIN: Duration = Duration::from_secs(10);
 
 /// The deadline of `Reset` and `ResetManagedAgents`, `AIR_UI_TEST_RESET_TIMEOUT_MS`.
 const RESET_TIMEOUT: Duration = Duration::from_mins(2);
+/// What one recycle can take: the readiness of the new IDE, the reset again, and a minute for the quit and the launch.
+const RECYCLE_NEED: Duration = Duration::from_secs(READY_TIMEOUT.as_secs() + RESET_TIMEOUT.as_secs() + 60);
 
 /// The default deadline of a bridge operation, `AIR_UI_TEST_DEFAULT_OPERATION_TIMEOUT_MS`.
 const DEFAULT_OPERATION_MS: u64 = 10_000;
@@ -108,8 +111,12 @@ const AUTHORED_STEP: &str = "authored-step";
 /// reload of Air.
 const AUTHORED_HOST_IDS: [HostAction; 3] = [HostAction::RestartIde, HostAction::RecycleThroughFailedReset, HostAction::ReloadAir];
 
-/// The host ids of the live lane, which the lane daemon runs from slice L-live on.
+/// The host ids of the live lane. A program of the live lane may run them, an authored program between its parts too.
 const LIVE_HOST_IDS: [HostAction; 2] = [HostAction::RefreshLiveWiring, HostAction::AdoptLeftoverJunieSessions];
+/// The agent id of Junie, which the session inventory of the IDE names a Junie session by.
+const JUNIE_AGENT_ID: &str = "junie";
+/// How long the IDE may take to hand one session to the reset.
+const ADOPT_TIMEOUT: Duration = Duration::from_secs(30);
 /// Where an authored part writes its artifacts in the IDE context, `AIR_AUTHORED_ARTIFACTS_DIR`.
 const AUTHORED_ARTIFACTS_DIR: &str = "air-authored-artifacts";
 
@@ -120,6 +127,19 @@ const AIR_PERFORMANCE_FILE: &str = "air-performance.json";
 const TRACE_READ: Duration = Duration::from_secs(10);
 /// How many lines of a reset failure a skip reason and a failure carry.
 const CARRIED_FAILURE_LINES: usize = 20;
+/// The directory of the Codex daemons in the system directory of the IDE. It holds the ledger [`CODEX_LEDGER_FILE`] and
+/// the record `<id>.json` of each daemon. `CodexAppServerManager` and `FileCodexAppServerLedgerStore` of the Codex
+/// provider own the layout.
+const CODEX_DAEMONS_DIR: &str = "air/codex-app-server/generations";
+/// The Codex daemon ledger in [`CODEX_DAEMONS_DIR`].
+const CODEX_LEDGER_FILE: &str = "ledger.json";
+/// The fields of a Codex daemon record that a scenario never attaches. The startup arguments can name the MCP endpoint
+/// of the IDE, and the URL is the endpoint of the daemon.
+const CODEX_PRIVATE_FIELDS: [&str; 2] = ["startupConfigArgs", "tcpUrl"];
+/// How many Codex daemon records a failed scenario attaches beside the ledger, the newest first.
+const MAX_CODEX_RECORDS: usize = 32;
+/// The largest Codex file that a failed scenario attaches.
+const MAX_CODEX_FILE_BYTES: u64 = 1024 * 1024;
 
 /// What the program runner needs from the lane IDE: the bridge, the relaunch, the lane services, and the probes of the
 /// watchdog. The lane daemon gives its IDE owner; a test gives a fake.
@@ -128,13 +148,8 @@ pub(crate) trait Lane: Probes {
     fn call(&self, request: &Value, within: Duration) -> Result<Value, avl_bridge::Error>;
 
     /// Quits the IDE, performs `while_down` on its context directory, launches it again on the same context, and waits
-    /// for readiness. With `keep_junie_offer`, the Junie offer of the new start stays open.
-    fn relaunch(
-        &self,
-        cause: Relaunch,
-        keep_junie_offer: bool,
-        while_down: &mut dyn FnMut(&Path) -> Result<(), String>,
-    ) -> Result<(), String>;
+    /// for readiness.
+    fn relaunch(&self, cause: Relaunch, while_down: &mut dyn FnMut(&Path) -> Result<(), String>) -> Result<(), String>;
 
     fn services(&self) -> &dyn ServiceControl;
 
@@ -163,6 +178,17 @@ pub(crate) trait Lane: Probes {
     /// Reloads Air in place within `within`, waits until the lifecycle names the same bridge plugin again, and pings the
     /// new copy. The IDE keeps its process.
     fn reload_air(&self, within: Duration) -> Result<(), String>;
+
+    /// Copies the Central wiring of the guest account into the lane home again when the account re-wired. Only the lane
+    /// of a live run has one.
+    fn refresh_live_wiring(&self) -> Result<(), String> {
+        Err("the lane has no live run, so it has no Central wiring to refresh".to_owned())
+    }
+
+    /// The Junie sessions of the live project that the session index of the guest account names.
+    fn leftover_junie_sessions(&self) -> Result<Vec<String>, String> {
+        Err("the lane has no live run, so it has no Junie session to hand over".to_owned())
+    }
 }
 
 /// One file that an instruction answered for the evidence of its scenario, an element of `attachments` of its answer.
@@ -224,7 +250,7 @@ pub(crate) struct Failure {
     pub stack: Vec<String>,
     /// What a later failure added: an after reset that failed too, or a recycle that failed.
     pub suppressed: Vec<String>,
-    /// The scenario reached no verdict: the watchdog ended it.
+    /// The scenario reached no verdict: the watchdog ended it, or the body aborted it.
     pub aborted: bool,
 }
 
@@ -239,7 +265,8 @@ impl Failure {
         }
     }
 
-    /// The failure of a bridge request: the failure in the IDE, or why the request got no answer.
+    /// The failure of a bridge request: the failure in the IDE, or why the request got no answer. The outermost failure
+    /// in the IDE says whether the body aborted its scenario.
     pub(crate) fn of_bridge(error: &avl_bridge::Error) -> Self {
         match error.kind() {
             ErrorKind::Failed(failure) => Self {
@@ -247,7 +274,7 @@ impl Failure {
                 message: failure.message.clone().unwrap_or_default(),
                 stack: stack_lines(failure),
                 suppressed: Vec::new(),
-                aborted: false,
+                aborted: failure.aborted,
             },
             _ => Self::runner(kind::BRIDGE, error.to_string()),
         }
@@ -486,7 +513,9 @@ impl<'r, 's> Runner<'r, 's> {
     /// Cloud emulator. It answers what the reset of each scenario sends.
     fn prologue<'p>(&self, suite: &'p SuiteProgram) -> Result<&'p SuiteReset, Failure> {
         document_fits(suite)?;
-        refuse_live_host_ids(suite)?;
+        if self.document.lane != LIVE_LANE {
+            refuse_live_host_ids(suite)?;
+        }
         self.attach_cloud_spawner(suite)?;
         let reset = suite.reset.as_ref().ok_or_else(|| {
             Failure::runner(
@@ -537,21 +566,47 @@ impl<'r, 's> Runner<'r, 's> {
             .as_deref()
             .map(|install| install_request(&suite.suite, install))
             .transpose()?;
+        // A live lane declares the runtimes of its agents in its live context.
+        let declared: Vec<&String> = self
+            .document
+            .cli_runtimes
+            .iter()
+            .chain(
+                self.document
+                    .live
+                    .iter()
+                    .flat_map(|live| live.runtimes.iter().map(|runtime| &runtime.name)),
+            )
+            .collect();
         for profile in &suite.profiles {
-            if let Some(cli) = profile
-                .required_executables
-                .iter()
-                .find(|cli| !self.document.cli_runtimes.contains(cli))
-            {
+            if let Some(cli) = profile.required_executables.iter().find(|cli| !declared.contains(cli)) {
                 return Err(Failure::runner(
                     kind::DOCUMENT,
                     format!(
-                        "the scenario '{}' drives the CLI '{cli}', and the lane declares no runtime for it; it declares {:?}",
-                        profile.name, self.document.cli_runtimes
+                        "the scenario '{}' drives the CLI '{cli}', and the lane declares no runtime for it; it declares {declared:?}",
+                        profile.name
                     ),
                 ));
             }
         }
+        let prologue: Vec<HostAction> = suite
+            .prologue_host_ids
+            .iter()
+            .map(|id| {
+                id.parse::<HostAction>()
+                    .ok()
+                    .filter(|action| LIVE_HOST_IDS.contains(action))
+                    .ok_or_else(|| {
+                        Failure::runner(
+                            kind::DOCUMENT,
+                            format!(
+                                "the suite '{}' states the prologue host id '{id}', which no prologue runs",
+                                suite.suite
+                            ),
+                        )
+                    })
+            })
+            .collect::<Result<_, _>>()?;
         self.watch.step(&format!("{} managed-agent baseline", suite.suite), || {
             self.lane
                 .services()
@@ -573,8 +628,38 @@ impl<'r, 's> Runner<'r, 's> {
                     ));
                 }
             }
+            for action in &prologue {
+                self.live_host_id(*action).map_err(|message| Failure::runner(kind::HOST, message))?;
+            }
             Ok(reset)
         })
+    }
+
+    /// Runs the live host id `action`: the refresh of the Central wiring, or the hand-over of the Junie sessions that
+    /// an earlier run left to the reset, one `AdoptProviderSession` each.
+    fn live_host_id(&self, action: HostAction) -> Result<(), String> {
+        match action {
+            HostAction::RefreshLiveWiring => self.lane.refresh_live_wiring(),
+            HostAction::AdoptLeftoverJunieSessions => {
+                let ids = self.lane.leftover_junie_sessions()?;
+                for id in &ids {
+                    self.lifecycle(
+                        "AdoptProviderSession",
+                        json!({"agentId": JUNIE_AGENT_ID, "agentSessionId": id}),
+                        ADOPT_TIMEOUT,
+                    )
+                    .map_err(|failure| failure.message)?;
+                }
+                if !ids.is_empty() {
+                    self.stream.note(format!(
+                        "handed {} Junie session(s) of the live project to the reset: {ids:?}",
+                        ids.len()
+                    ));
+                }
+                Ok(())
+            }
+            other => Err(format!("the host id '{other}' is no live host id")),
+        }
     }
 
     /// The full ids of the registry agents of the lane, sorted.
@@ -614,6 +699,7 @@ impl<'r, 's> Runner<'r, 's> {
             .and_then(|()| self.body(suite, profile, &fixture));
         if verdict.is_err() {
             self.trace().snap_failure();
+            self.attach_codex_daemons();
         }
         if !self.isolation.borrow().exhausted() && self.watch.expired().is_none() {
             let cleanup = self.traced_reset(ResetPhase::After, &profile.name, reset);
@@ -717,17 +803,32 @@ impl<'r, 's> Runner<'r, 's> {
     }
 
     /// One side's reset as a `reset` span, under the isolation that recycles the IDE when it does not hold.
+    /// `timeout_ms`, cut to what is left of the budget of the run, so no instruction waits past the end of the budget. A
+    /// cut timeout is at least one millisecond, and the watchdog ends the run at the end of the budget.
+    fn within_budget(&self, timeout_ms: u64) -> u64 {
+        self.watch.budget_left().map_or(timeout_ms, |left| {
+            timeout_ms.min(u64::try_from(left.as_millis()).unwrap_or(u64::MAX).max(1))
+        })
+    }
+
+    /// What is left of the budget of the run for a recycle, or `None` for a run with no budget.
+    fn recycle_budget(&self) -> Option<RecycleBudget> {
+        self.watch.budget_left().map(|left| RecycleBudget { left, need: RECYCLE_NEED })
+    }
+
     fn traced_reset(&self, phase: ResetPhase, scenario: &str, reset: &SuiteReset) -> Result<(), Failure> {
         let side = phase.as_str();
         let span = self
             .trace()
             .open_span(SpanKind::Reset, side, &format!("[reset] {side} {scenario}"), None);
         let outcome = self.watch.step(&format!("{side} reset of {scenario}"), || {
-            self.isolation
-                .borrow_mut()
-                .ensure_clean(phase, scenario, &mut || self.reset(phase, scenario, reset), &mut || {
-                    self.relaunch_span(Relaunch::Recycle, false, &mut |_| Ok(()))
-                })
+            self.isolation.borrow_mut().ensure_clean(
+                phase,
+                scenario,
+                self.recycle_budget(),
+                &mut || self.reset(phase, scenario, reset),
+                &mut || self.relaunch_span(Relaunch::Recycle, &mut |_| Ok(())),
+            )
         });
         self.attach_dumps();
         let failure = outcome.err().map(|failure| Failure {
@@ -745,7 +846,6 @@ impl<'r, 's> Runner<'r, 's> {
         let fields = json!({
             "flagKeys": reset.flag_keys,
             "afterScenario": phase == ResetPhase::After,
-            "offerJuniePromo": reset.offer_junie_promo,
             "laneFlags": reset.lane_flags,
             "agentLoginAcpAgentIds": reset.agent_login_acp_agent_ids,
         });
@@ -769,12 +869,7 @@ impl<'r, 's> Runner<'r, 's> {
 
     /// A relaunch of the IDE as a `restart` span with the key `restart:ide` for `restart-ide` and `restart:recycle` for a
     /// recycle, as the recorder keys them.
-    fn relaunch_span(
-        &self,
-        cause: Relaunch,
-        keep_junie_offer: bool,
-        while_down: &mut dyn FnMut(&Path) -> Result<(), String>,
-    ) -> Result<(), String> {
+    fn relaunch_span(&self, cause: Relaunch, while_down: &mut dyn FnMut(&Path) -> Result<(), String>) -> Result<(), String> {
         let id = match cause {
             Relaunch::Restart => "ide",
             Relaunch::Recycle => "recycle",
@@ -782,7 +877,7 @@ impl<'r, 's> Runner<'r, 's> {
         let span = self.trace().open_span(SpanKind::Restart, id, &format!("[restart] {id}"), None);
         self.trace().restart();
         let outcome = self.watch.step(&format!("relaunch for {id}"), || {
-            self.watch.relaunching(|| self.lane.relaunch(cause, keep_junie_offer, while_down))
+            self.watch.relaunching(|| self.lane.relaunch(cause, while_down))
         });
         let failure = outcome
             .as_ref()
@@ -942,7 +1037,7 @@ impl<'r, 's> Runner<'r, 's> {
         } else {
             fields.extend(values.request_fields(label, spec).map_err(missing)?);
         }
-        let timeout = authored_timeout(instruction).unwrap_or(spec.timeout_ms);
+        let timeout = self.within_budget(authored_timeout(instruction).unwrap_or(spec.timeout_ms));
         fields.insert("timeoutMs".to_owned(), json!(timeout));
         let request_name = request_class(id_kind, id);
         let answer = self.call(
@@ -1001,7 +1096,9 @@ impl<'r, 's> Runner<'r, 's> {
     ) -> Result<(), Failure> {
         let host = HostId::of(id_kind == IdKind::Assertion, id)
             .ok_or_else(|| Failure::runner(kind::DOCUMENT, format!("the host id '{label}' has no word of the host vocabulary")))?;
-        if suite.authored && !matches!(host, HostId::Action(action) if AUTHORED_HOST_IDS.contains(&action)) {
+        if suite.authored
+            && !matches!(host, HostId::Action(action) if AUTHORED_HOST_IDS.contains(&action) || LIVE_HOST_IDS.contains(&action))
+        {
             return Err(Failure::runner(
                 kind::DOCUMENT,
                 format!("the authored program runs '{label}', which no authored program may run"),
@@ -1017,7 +1114,7 @@ impl<'r, 's> Runner<'r, 's> {
             authored: suite.authored,
             scenario: operation,
             reset: suite.reset.as_ref(),
-            deadline: Duration::from_millis(suite.spec_of(instruction).map_or(0, |spec| spec.timeout_ms)),
+            deadline: Duration::from_millis(self.within_budget(suite.spec_of(instruction).map_or(0, |spec| spec.timeout_ms))),
         };
         host_ids::perform(host, label, &instruction.args, values, &mut side).map_err(|message| Failure::runner(kind::HOST, message))
     }
@@ -1047,6 +1144,7 @@ impl<'r, 's> Runner<'r, 's> {
             .ensure_clean(
                 ResetPhase::Before,
                 scenario,
+                self.recycle_budget(),
                 &mut || {
                     resets.set(resets.get() + 1);
                     if resets.get() == 1 {
@@ -1056,7 +1154,7 @@ impl<'r, 's> Runner<'r, 's> {
                     }
                     self.reset(ResetPhase::Before, scenario, reset)
                 },
-                &mut || self.relaunch_span(Relaunch::Recycle, false, &mut |_| Ok(())),
+                &mut || self.relaunch_span(Relaunch::Recycle, &mut |_| Ok(())),
             )
             .map_err(|failure| failure.to_string())?;
         let after = self.lane.ide_process()?;
@@ -1116,7 +1214,7 @@ impl<'r, 's> Runner<'r, 's> {
     /// Keeps the trace attachments that the IDE queued during the part `label` for the trace: the stills of its steps,
     /// and its named captures and files. The IDE forgets an entry that a fetch took, and its next list forgets the rest
     /// of this one, so the runner fetches each listed id at once. A read that fails is a note and fails no part, because
-    /// an attachment is evidence. The JVM host reads the same two routes after each part.
+    /// an attachment is evidence.
     fn collect_trace_attachments(&self, label: &str) {
         let listed = self
             .lane
@@ -1160,6 +1258,35 @@ impl<'r, 's> Runner<'r, 's> {
                         if entry.required { ", which its body named" } else { "" }
                     ));
                 }
+            }
+        }
+    }
+
+    /// Attaches the Codex daemon ledger of the IDE and its newest [`MAX_CODEX_RECORDS`] daemon records to the trace of a
+    /// failed scenario, so a failure of a Codex daemon shows the history of each daemon. A record goes without its
+    /// [`CODEX_PRIVATE_FIELDS`]. An IDE with no Codex daemon directory attaches nothing. A file that cannot be read is a
+    /// note, because an attachment is evidence.
+    fn attach_codex_daemons(&self) {
+        let Some(context) = self.lane.context_dir() else {
+            return;
+        };
+        let (files, left_out) = codex_daemon_files(&context.join(SYSTEM_DIR).join(CODEX_DAEMONS_DIR));
+        if left_out > 0 {
+            self.stream.note(format!(
+                "[attachment] the IDE holds {left_out} Codex daemon record(s) more than the {MAX_CODEX_RECORDS} that a failed \
+                 scenario attaches"
+            ));
+        }
+        for file in files {
+            let name = file.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+            match read_codex_file(&file, name != CODEX_LEDGER_FILE) {
+                Ok(bytes) => {
+                    self.trace()
+                        .attach(&format!("Codex daemon {name}"), "application/json", &bytes, "json");
+                }
+                Err(error) => self
+                    .stream
+                    .note(format!("[attachment] cannot attach the Codex file {}: {error}", file.display())),
             }
         }
     }
@@ -1431,8 +1558,7 @@ impl HostSide for RunnerHost<'_, '_, '_> {
     }
 
     fn restart_ide(&mut self, while_down: &mut dyn FnMut(&Path) -> Result<(), String>) -> Result<(), String> {
-        self.runner
-            .relaunch_span(Relaunch::Restart, self.fixture.keeps_junie_startup_offer, while_down)?;
+        self.runner.relaunch_span(Relaunch::Restart, while_down)?;
         // The restarted IDE holds no fixture facts, so a story scenario states them again.
         if !self.authored
             && let Some(bridge) = &self.fixture.bridge
@@ -1455,6 +1581,14 @@ impl HostSide for RunnerHost<'_, '_, '_> {
     fn reload_air(&mut self) -> Result<(), String> {
         self.runner.reload_air_span(self.deadline)
     }
+
+    fn refresh_live_wiring(&mut self) -> Result<(), String> {
+        self.runner.live_host_id(HostAction::RefreshLiveWiring)
+    }
+
+    fn adopt_leftover_junie_sessions(&mut self) -> Result<(), String> {
+        self.runner.live_host_id(HostAction::AdoptLeftoverJunieSessions)
+    }
 }
 
 /// The `managedAgentInstall` of the suite `suite`: the simple name of its request type, the request, and its deadline in
@@ -1475,7 +1609,7 @@ fn install_request(suite: &str, install: &RawValue) -> Result<(String, Value, Du
     Ok((name, request, Duration::from_millis(timeout)))
 }
 
-/// The extension of a file of the media type `media_type` in the bundle, as the JVM host names it.
+/// The extension of a file of the media type `media_type` in the bundle.
 fn extension_of_media_type(media_type: &str) -> &'static str {
     match media_type {
         "image/png" => "png",
@@ -1501,8 +1635,8 @@ fn document_fits(suite: &SuiteProgram) -> Result<(), Failure> {
     ))
 }
 
-/// Refuses a suite whose program runs a host id of [`LIVE_HOST_IDS`], before any request reaches the IDE. The lane
-/// daemon runs them from slice L-live on, so each scenario would fail at that id.
+/// Refuses a suite outside the live lane whose program or prologue runs a host id of [`LIVE_HOST_IDS`], before any
+/// request reaches the IDE. Only a live run has the account that those ids read.
 fn refuse_live_host_ids(suite: &SuiteProgram) -> Result<(), Failure> {
     let instructions = suite.profiles.iter().flat_map(|profile| {
         profile
@@ -1516,12 +1650,13 @@ fn refuse_live_host_ids(suite: &SuiteProgram) -> Result<(), Failure> {
         .filter_map(Instruction::id)
         .filter(|(kind, _)| *kind == IdKind::Action)
         .filter_map(|(_, id)| id.parse::<HostAction>().ok())
+        .chain(suite.prologue_host_ids.iter().filter_map(|id| id.parse::<HostAction>().ok()))
         .find(|action| LIVE_HOST_IDS.contains(action));
     match live {
         None => Ok(()),
         Some(action) => Err(Failure::runner(
-            kind::UNSUPPORTED,
-            format!("the suite '{}' uses {}", suite.suite, host_ids::live_host_id_refusal(action)),
+            kind::DOCUMENT,
+            format!("the suite '{}' runs the live host id '{action}' outside the live lane", suite.suite),
         )),
     }
 }
@@ -1539,8 +1674,9 @@ fn label_value(suite: &SuiteProgram, name: &str) -> Option<String> {
         .map(|label| label.value.clone())
 }
 
-/// The identity of the case of `profile`: the class and the factory method of the JUnit node of the JVM host.
-fn case_identity(suite: &SuiteProgram, profile: &ScenarioProgram) -> CaseIdentity {
+/// The identity of the case of `profile`: the `testClass` label of its suite as the class, and the factory method as
+/// the method.
+pub(crate) fn case_identity(suite: &SuiteProgram, profile: &ScenarioProgram) -> CaseIdentity {
     CaseIdentity {
         suite: suite.suite.clone(),
         class_name: class_label(suite),
@@ -1662,4 +1798,53 @@ pub(crate) fn suites_of(documents: Vec<(SuiteProgram, Vec<u8>)>) -> Result<Vec<S
             Ok(Suite { program, raw_profiles })
         })
         .collect()
+}
+
+/// The Codex files of the daemon directory `directory`: the ledger first, then the [`MAX_CODEX_RECORDS`] newest daemon
+/// records, and how many older records stay out. Only regular `.json` files count, so a daemon log and a link stay out.
+fn codex_daemon_files(directory: &Path) -> (Vec<PathBuf>, usize) {
+    let mut ledger = None;
+    let mut records: Vec<(SystemTime, PathBuf)> = Vec::new();
+    for entry in fs::read_dir(directory).into_iter().flatten().filter_map(Result::ok) {
+        let path = entry.path();
+        if !entry.file_type().is_ok_and(|kind| kind.is_file()) || path.extension().is_none_or(|extension| extension != "json") {
+            continue;
+        }
+        if entry.file_name() == CODEX_LEDGER_FILE {
+            ledger = Some(path);
+        } else {
+            let modified = entry.metadata().and_then(|metadata| metadata.modified()).unwrap_or(UNIX_EPOCH);
+            records.push((modified, path));
+        }
+    }
+    records.sort_by(|(left_time, left), (right_time, right)| right_time.cmp(left_time).then_with(|| left.cmp(right)));
+    let left_out = records.len().saturating_sub(MAX_CODEX_RECORDS);
+    let files = ledger
+        .into_iter()
+        .chain(records.into_iter().take(MAX_CODEX_RECORDS).map(|(_, path)| path))
+        .collect();
+    (files, left_out)
+}
+
+/// The bytes of the Codex file `file` to attach, or why it is not attached: an error, or more than
+/// [`MAX_CODEX_FILE_BYTES`]. A daemon `record` goes as its JSON object without the [`CODEX_PRIVATE_FIELDS`], and a record
+/// that is no JSON object is not attached, because its private fields cannot be dropped.
+fn read_codex_file(file: &Path, record: bool) -> Result<Vec<u8>, String> {
+    let size = fs::metadata(file).map_err(|error| error.to_string())?.len();
+    if size > MAX_CODEX_FILE_BYTES {
+        return Err(format!(
+            "it holds {size} bytes, more than the {MAX_CODEX_FILE_BYTES} that a scenario attaches"
+        ));
+    }
+    let bytes = fs::read(file).map_err(|error| error.to_string())?;
+    if !record {
+        return Ok(bytes);
+    }
+    let Ok(Value::Object(mut fields)) = serde_json::from_slice::<Value>(&bytes) else {
+        return Err("it is no JSON object, so its private fields cannot be dropped".to_owned());
+    };
+    for private in CODEX_PRIVATE_FIELDS {
+        fields.remove(private);
+    }
+    serde_json::to_vec_pretty(&Value::Object(fields)).map_err(|error| error.to_string())
 }

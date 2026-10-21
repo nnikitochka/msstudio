@@ -32,6 +32,7 @@ import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.popup.JBPopup
 import com.intellij.openapi.ui.popup.JBPopupFactory
+import com.intellij.openapi.ui.popup.PopupShowOptions
 import com.intellij.openapi.ui.popup.PopupStep
 import com.intellij.openapi.ui.popup.util.BaseListPopupStep
 import com.intellij.openapi.util.Disposer
@@ -57,6 +58,7 @@ import com.intellij.ui.components.panels.Wrapper
 import com.intellij.ui.dsl.gridLayout.GridLayout
 import com.intellij.ui.dsl.gridLayout.UnscaledGaps
 import com.intellij.ui.dsl.gridLayout.builders.RowsGridBuilder
+import com.intellij.ui.popup.PopupState
 import com.intellij.util.cancelOnDispose
 import com.intellij.util.ui.AbstractLayoutManager
 import com.intellij.util.ui.JBInsets
@@ -408,7 +410,7 @@ internal class WelcomeScreenRightTabImpl(
     val actions = models.mapIndexed { index, model ->
       val addBorder = index < models.size - 1
       when (model) {
-        is ComboBoxInfoPanelModel -> ComboBoxInfoPanelAction(model, addBorder)
+        is ComboBoxInfoPanelModel -> ComboBoxInfoPanelAction(model, addBorder, contentProvider)
 
         is ButtonInfoPanelModel -> ButtonInfoPanelAction(model, project, coroutineScope, addBorder)
       }
@@ -697,9 +699,15 @@ private class ButtonInfoPanelModel(private val model: WelcomeRightTabContentProv
 private class ComboBoxInfoPanelAction(
   private val comboModel: ComboBoxInfoPanelModel,
   private val addBorder: Boolean,
+  private val contentProvider: WelcomeRightTabContentProvider,
 ) : ExpandableComboAction(), DumbAware {
 
   private val model = comboModel.model
+
+  private val chooserState = PopupState.forPopup()
+
+  // The data context of an event knows only the target of the toolbar, which is the whole tab.
+  private var comboButton: JComponent? = null
 
   init {
     templatePresentation.text = comboModel.itemPrefix
@@ -710,6 +718,7 @@ private class ComboBoxInfoPanelAction(
     val component = super.createCustomComponent(presentation, place)
     component.isFocusable = true
     component.isRequestFocusEnabled = false
+    comboButton = component
     if (addBorder) {
       component.border = JBUI.Borders.emptyRight(16)
     }
@@ -719,13 +728,18 @@ private class ComboBoxInfoPanelAction(
   override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.EDT
 
   override fun update(e: AnActionEvent) {
-    val selectedItem = model.itemNames().getOrNull(model.currentItemIndex()) ?: ""
-    e.presentation.setText(comboModel.itemPrefix + selectedItem, false)
-    e.presentation.icon = if (model is ThemeModel) ThemeModel.getIcon() else comboModel.icon
+    e.presentation.setText(comboModel.itemPrefix + model.currentItemName(), false)
+    e.presentation.icon = if (model is ThemeModel) model.currentIcon() else comboModel.icon
   }
 
   @Suppress("SplitModeApiUsage")
-  override fun createPopup(event: AnActionEvent): JBPopup {
+  override fun createPopup(event: AnActionEvent): JBPopup? {
+    val owner = comboButton
+    if (model is ThemeModel && contentProvider.isThemeChooserPopupEnabled && owner != null) {
+      showThemeChooser(model, owner)
+      return null
+    }
+
     val step = object : BaseListPopupStep<String>(null, model.itemNames()) {
       override fun isSpeedSearchEnabled(): Boolean = true
 
@@ -741,6 +755,16 @@ private class ComboBoxInfoPanelAction(
     }
     step.defaultOptionIndex = model.currentItemIndex()
     return JBPopupFactory.getInstance().createListPopup(step)
+  }
+
+  // The base class shows a popup underneath the button, and the footer is at the bottom of the screen. So the chooser opens above it.
+  private fun showThemeChooser(themeModel: ThemeModel, owner: JComponent) {
+    if (chooserState.isShowing || chooserState.isRecentlyHidden) {
+      return
+    }
+    val popup = WelcomeScreenThemeChooserPopup(themeModel, contentProvider.getThemePreviewSample()).createPopup(owner)
+    chooserState.prepareToShow(popup)
+    popup.show(PopupShowOptions.aboveComponent(owner))
   }
 }
 

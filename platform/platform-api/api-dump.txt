@@ -1358,6 +1358,8 @@ f:com.intellij.ide.util.treeView.TreeState
 - sf:CALLBACK:com.intellij.openapi.util.Key
 - applyTo(javax.swing.JTree):V
 - applyTo(javax.swing.JTree,java.lang.Object):V
+- applyTo(javax.swing.JTree,java.lang.Object,Z):V
+- applyTo(javax.swing.JTree,Z):V
 - s:createFrom(org.jdom.Element):com.intellij.ide.util.treeView.TreeState
 - s:createOn(javax.swing.JTree):com.intellij.ide.util.treeView.TreeState
 - s:createOn(javax.swing.JTree,java.util.List,java.util.List):com.intellij.ide.util.treeView.TreeState
@@ -8264,6 +8266,18 @@ c:com.intellij.ui.components.ProgressBarLoadingDecorator
 - startLoading():V
 - startLoading(Z):V
 - stopLoading():V
+c:com.intellij.ui.components.ShimmerLabel
+- com.intellij.ui.components.JBLabel
+- <init>():V
+- <init>(java.lang.String):V
+- <init>(java.lang.String,javax.swing.Icon):V
+- <init>(java.lang.String,javax.swing.Icon,I):V
+- b:<init>(java.lang.String,javax.swing.Icon,I,I,kotlin.jvm.internal.DefaultConstructorMarker):V
+- addNotify():V
+- f:isShimmering():Z
+- p:paintComponent(java.awt.Graphics):V
+- removeNotify():V
+- f:setShimmering(Z):V
 c:com.intellij.ui.components.TextComponentEmptyText
 - com.intellij.util.ui.StatusText
 - sf:STATUS_VISIBLE_FUNCTION:java.lang.String
@@ -10285,6 +10299,7 @@ f:com.intellij.ui.tabs.TabInfo
 - f:getSideComponent():javax.swing.JComponent
 - f:getTabActionPlace():java.lang.String
 - f:getTabColor():java.awt.Color
+- f:getTabLabel():com.intellij.ui.tabs.impl.TabLabel
 - f:getTabLabelActions():com.intellij.openapi.actionSystem.ActionGroup
 - f:getTabPaneActions():com.intellij.openapi.actionSystem.ActionGroup
 - f:getText():java.lang.String

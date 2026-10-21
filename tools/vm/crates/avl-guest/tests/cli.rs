@@ -18,10 +18,21 @@ fn agent() -> PathBuf {
     std::path::absolute(path).unwrap()
 }
 
+/// The agent as a command whose environment holds no shard variable and no timeout of the Bazel test that runs this file.
+/// Bazel may split this test into shards, and `lane-run` refuses a run that Bazel splits. `lane-run` also takes the
+/// timeout of a Bazel test as its budget, and the timeout of this test is not the budget of a lane.
+fn agent_command() -> Command {
+    let mut command = Command::new(agent());
+    for name in ["TEST_TOTAL_SHARDS", "TEST_SHARD_INDEX", "TEST_SHARD_STATUS_FILE", "TEST_TIMEOUT"] {
+        command.env_remove(name);
+    }
+    command
+}
+
 /// Runs the agent with `args` and no standard input, and answers the exit code, the standard output and the
 /// standard error.
 fn answer(args: &[&str]) -> (Option<i32>, String, String) {
-    let output = Command::new(agent()).args(args).stdin(Stdio::null()).output().unwrap();
+    let output = agent_command().args(args).stdin(Stdio::null()).output().unwrap();
     let text = |bytes: Vec<u8>| String::from_utf8(bytes).unwrap();
     (output.status.code(), text(output.stdout), text(output.stderr))
 }
@@ -168,16 +179,14 @@ fn lane_runfiles(root: &std::path::Path) -> (PathBuf, PathBuf) {
     let file =
         |logical: &str| serde_json::json!({"execPath": format!("bazel-out/bin/{logical}"), "logicalPath": logical, "owner": "//test"});
     let descriptor = serde_json::json!({
-        "schemaVersion": 9,
+        "schemaVersion": avl_wire::runtime::SCHEMA_VERSION,
         "kind": "air-ui-daemon-runtime",
-        "mainClass": "com.intellij.air.integration.daemon.AirUiDaemonServer",
         "staticJvmFlags": [
             "-Dair.test.codex.runtime=${RUNFILES_ROOT}/_main/tools/codex/runtime.properties",
             "-Dair.test.pi.runtime=${RUNFILES_ROOT}/_main/tools/pi/runtime.properties",
         ],
-        "classpath": {"hot": [file("_main/hot.jar"), file("_main/documents.jar")], "stable": [file("_main/stable.jar")]},
         "devDist": {"config": file("_main/dist/ide.properties"), "fingerprint": file("_main/dist/fingerprint.txt"), "home": file("_main/dist/home")},
-        "jbr": {"directory": "jbr", "javaHomeSuffix": "", "platform": guest_platform()},
+        "jbr": {"platform": guest_platform()},
         "ide": {
             "fakeAgentJar": file("_main/agent.jar"),
             "flagsFile": file("_main/ide/flags.txt"),
@@ -232,12 +241,13 @@ fn the_lane_daemon_serves_a_run_that_logs_from_its_run_thread_and_ends_with_a_su
     let root = tempfile::tempdir().unwrap();
     let (runfiles, descriptor_path) = lane_runfiles(root.path());
 
-    let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+    // Below the ephemeral floor, so no parallel bind of port 0 takes it before the daemon binds it.
+    let port = avl_testkit::free_port_below_ephemeral_floor();
     let state_dir = root.path().join("state");
     let log = root.path().join("run.log");
     let path = |path: &std::path::Path| path.display().to_string();
     let mut daemon = Daemon(
-        Command::new(agent())
+        agent_command()
             .args(["lane-daemon", "--state-dir", &path(&state_dir), "--port", &port.to_string()])
             .args(["--launch-digest", "launch-1", "--descriptor", &path(&descriptor_path)])
             .args(["--runfiles-root", &path(&runfiles), "--ide-root", &path(&root.path().join("ide"))])
@@ -271,7 +281,7 @@ fn the_lane_daemon_serves_a_run_that_logs_from_its_run_thread_and_ends_with_a_su
     }
     let request = serde_json::json!({
         "selectors": [], "junit5Filters": [], "productStamp": "product-1", "launchDigest": "launch-1",
-        "hotJars": [], "activeExecutionTimeoutSec": 1800, "progressGapTimeoutSec": 300,
+        "activeExecutionTimeoutSec": 1800, "progressGapTimeoutSec": 300,
         "idePlugins": [
             {"destination": "air-integrationTests-bridge-plugin/lib/b.jar", "sha256": sha256(&bridge)},
             {"destination": "air-integrationTests-bridge-resident-plugin/lib/r.jar", "sha256": sha256(&resident)},
@@ -315,7 +325,8 @@ fn the_lane_daemon_serves_a_run_that_logs_from_its_run_thread_and_ends_with_a_su
 /// `lane-run --plan-only` proves a lane rule and its runfiles with no lane IDE. It stages the inputs of the runfiles,
 /// selects the documents, and writes the plan: the key of the lane IDE and the suites in run order, the suite of a bare
 /// IDE last. It launches no IDE, so no context of a launch key appears under the run directory. A selection of bare
-/// suites alone needs no lane IDE, so its plan names no lane key.
+/// suites alone needs no lane IDE, so its plan names no lane key. The JVM flags of a TeamCity UI job split the lane
+/// between its runners, and an unknown flag is refused.
 #[test]
 fn lane_run_plan_only_writes_the_plan_and_launches_no_ide() {
     let root = tempfile::tempdir().unwrap();
@@ -355,6 +366,7 @@ fn lane_run_plan_only_writes_the_plan_and_launches_no_ide() {
     assert!(whole["laneKey"].as_str().unwrap().starts_with("air-ui-"), "{whole}");
     assert_eq!(whole["productStamp"], sha256(b"product-1"));
     assert_eq!(whole["laneInputs"]["suiteDocuments"], sha256(&jar));
+    assert!(whole["cliRuntimes"].is_array(), "the plan names the declared CLI runtimes: {whole}");
     let suites: Vec<(&str, Option<&str>)> = whole["suites"]
         .as_array()
         .unwrap()
@@ -373,4 +385,163 @@ fn lane_run_plan_only_writes_the_plan_and_launches_no_ide() {
     let bare_only = plan(&["--selector", "AirStartupClassLoadingBudgetUiTest"]);
     assert_eq!(bare_only["laneKey"], serde_json::Value::Null, "{bare_only}");
     assert_eq!(bare_only["suites"].as_array().unwrap().len(), 1);
+
+    // The argv of the UI job of TeamCity build 1097187017: each of its two runners plans its own share of the lane.
+    let runner = |index: &str| {
+        let index = format!("--jvm_flag=-Didea.test.runner.index={index}");
+        let shared = plan(&[
+            "--jvm_flag=-Djava.awt.headless=false",
+            &index,
+            "--jvm_flag=-Didea.test.runners.count=2",
+            "--jvm_flag=-Didea.bucketing.season=AirPluginGuiChatTests",
+            "--jvm_flag=-Didea.tests.duration.bucketing.enabled=true",
+        ]);
+        let classes: Vec<String> = shared["suites"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|suite| suite["testClassName"].as_str().unwrap().to_owned())
+            .collect();
+        classes
+    };
+    assert_eq!(runner("0"), ["AirRenameSessionGeneratedFlowUiTest"]);
+    assert_eq!(runner("1"), ["AirStartupClassLoadingBudgetUiTest"]);
+    let mut args = vec!["lane-run", "--lane", "ui", "--plan-only", "--jvm_flag", "-Dunknown.property=1"];
+    let descriptor = path(&descriptor);
+    args.extend(["--descriptor", &descriptor]);
+    let (code, stdout, stderr) = answer(&args);
+    assert_ne!(code, Some(0), "{stdout}{stderr}");
+    assert!(
+        stderr.contains("lane_run_jvm_flag") && stderr.contains("unknown.property"),
+        "{stdout}{stderr}"
+    );
+}
+
+/// `lane-run` writes its run stream on standard output from the run thread and from the watchdog thread. The agent held
+/// the lock of standard output for its whole run, so the first record of the watchdog thread blocked inside the stream,
+/// with the lock of the stream held, and the run thread blocked at its next record. On TeamCity each lane then hung until
+/// the hard stop of its budget. Here a bare IDE that never answers its bridge holds the run thread, and the watchdog ends
+/// the run after a progress gap of 1 s, so the watchdog thread writes `watchdogExpired`. The kill of the watchdog ends
+/// the run of the IDE, and the readiness wait sees that end, so the run ends with exit 1 well before the 600 s of the
+/// gate.
+///
+/// The test runs the binary, because the stream setup of `main` decides whether a thread other than the main one can
+/// write on standard output.
+#[test]
+fn lane_run_writes_the_record_of_its_watchdog_thread_on_standard_output() {
+    use std::time::{Duration, Instant};
+    let root = tempfile::tempdir().unwrap();
+    let (runfiles, descriptor) = lane_runfiles(root.path());
+    let main = runfiles.join("_main");
+    let java_home = if cfg!(target_os = "macos") {
+        "dist/home/jbr/Contents/Home"
+    } else {
+        "dist/home/jbr"
+    };
+    // An IDE that runs and never answers its bridge, in a distribution that the launch reads.
+    put(&main.join(java_home).join("bin/java"), b"#!/bin/sh\nexec sleep 120\n", true);
+    let (product_info, vm_options) = if cfg!(target_os = "macos") {
+        ("dist/home/Resources/product-info.json", "../bin/idea64.vmoptions")
+    } else {
+        ("dist/home/product-info.json", "bin/idea64.vmoptions")
+    };
+    let launch = serde_json::json!({"launch": [{"vmOptionsFilePath": vm_options}]});
+    put(&main.join(product_info), launch.to_string().as_bytes(), false);
+    put(&main.join("dist/home/bin/idea64.vmoptions"), b"-Xmx1g\n", false);
+    put(&main.join("dist/home/bin/idea.properties"), b"", false);
+    put(&main.join("dist/home/core-classpath.txt"), b"lib/a.jar\n", false);
+    let file =
+        |logical: &str| serde_json::json!({"execPath": format!("bazel-out/bin/{logical}"), "logicalPath": logical, "owner": "//test"});
+    let mut document: serde_json::Value = serde_json::from_slice(&std::fs::read(&descriptor).unwrap()).unwrap();
+    document["ide"]["plugins"] = serde_json::json!([
+        {"destination": "air-integrationTests-bridge-plugin/lib/b.jar", "file": file("_main/bridge.jar")},
+        {"destination": "air-integrationTests-bridge-resident-plugin/lib/r.jar", "file": file("_main/resident.jar")},
+    ]);
+    document["ide"]["projectArchive"] = file("_main/project.zip");
+    put(&descriptor, document.to_string().as_bytes(), false);
+    put(&main.join("bridge.jar"), b"bridge", false);
+    put(&main.join("resident.jar"), b"resident", false);
+    put(&main.join("project.zip"), &project_zip(), false);
+    let startup = serde_json::json!({
+        "schemaVersion": 2, "suite": "startup-class-loading", "lane": "UI", "testClassName": "AirStartupClassLoadingBudgetUiTest",
+        "authored": true, "launch": {"profile": "bare", "key": "air-startup-class-loading"},
+        "restartsIde": false, "labels": [{"name": "testClass", "value": "air.AirStartupClassLoadingBudgetUiTest"}],
+        "modules": [], "implementationFlows": [], "vocabulary": {"runnerAnswers": [], "actions": {}, "assertions": {}},
+        "profiles": [{"name": "within budget", "fixture": "bare", "flags": {}, "setups": [], "steps": [], "program": []}],
+    });
+    put(
+        &main.join("documents.jar"),
+        &documents_jar(&[("startup-class-loading", startup)]),
+        false,
+    );
+    put(&main.join("agent.jar"), b"agent jar", false);
+    put(&main.join("dist/fingerprint.txt"), b"product-1", false);
+
+    let (stdout_path, stderr_path) = (root.path().join("stdout.txt"), root.path().join("stderr.txt"));
+    let path = |path: &std::path::Path| path.display().to_string();
+    let mut command = agent_command();
+    command
+        .args(["lane-run", "--lane", "ui", "--progress-gap-timeout-sec", "1"])
+        .args(["--descriptor", &path(&descriptor), "--runfiles-root", &path(&runfiles)])
+        .args(["--runtime-root", &path(&root.path().join("run"))])
+        // The JUnit XML and the hang report of this run are not the files of the Bazel test that runs this file.
+        .env_remove("XML_OUTPUT_FILE")
+        .env_remove("TEST_UNDECLARED_OUTPUTS_DIR")
+        .stdin(Stdio::null())
+        .stdout(std::fs::File::create(&stdout_path).unwrap())
+        .stderr(std::fs::File::create(&stderr_path).unwrap());
+    if cfg!(target_os = "linux") {
+        // A worker of the controller: no probe of the host, and a display for the launch.
+        command
+            .env(avl_wire::daemon::RUN_SECRETS_VARIABLE, root.path().join("secrets"))
+            .env("DISPLAY", ":0");
+    }
+    // Dropped at the end, which kills a run that did not end.
+    let mut run = Daemon(command.spawn().unwrap());
+    let read = |path: &std::path::Path| std::fs::read_to_string(path).unwrap_or_default();
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while !read(&stdout_path).contains(r#""event":"watchdogExpired""#) {
+        assert!(
+            run.0.try_wait().unwrap().is_none(),
+            "lane-run ended before its watchdog wrote\nstdout:\n{}\nstderr:\n{}",
+            read(&stdout_path),
+            read(&stderr_path)
+        );
+        assert!(
+            Instant::now() < deadline,
+            "the watchdog thread wrote no record on standard output within 60 s\nstdout:\n{}\nstderr:\n{}",
+            read(&stdout_path),
+            read(&stderr_path)
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let exit = loop {
+        if let Some(exit) = run.0.try_wait().unwrap() {
+            break exit;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "lane-run did not end after its watchdog killed the IDE\nstdout:\n{}\nstderr:\n{}",
+            read(&stdout_path),
+            read(&stderr_path)
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    };
+    let stdout = read(&stdout_path);
+    assert_eq!(exit.code(), Some(1), "stdout:\n{stdout}\nstderr:\n{}", read(&stderr_path));
+    assert!(
+        stdout.contains("the process of the IDE ended"),
+        "the bare IDE did not fail on the end of its run\nstdout:\n{stdout}"
+    );
+}
+
+/// The archive of the plain project of a lane: one directory and one file in it.
+fn project_zip() -> Vec<u8> {
+    use std::io::Write as _;
+    let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    let options = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+    writer.add_directory("plain-project/", options).unwrap();
+    writer.start_file("plain-project/README.md", options).unwrap();
+    writer.write_all(b"plain project\n").unwrap();
+    writer.finish().unwrap().into_inner()
 }

@@ -141,3 +141,221 @@ fn a_run_of_more_than_one_shard_is_refused() {
     refuse_shards(&environment(&[("TEST_TOTAL_SHARDS", "1")])).unwrap();
     refuse_shards(&environment(&[])).unwrap();
 }
+
+/// The `--jvm_flag` arguments of the UI job of TeamCity build 1097187017, for the runner with index `index`.
+fn teamcity_flags(index: u32) -> Vec<String> {
+    [
+        "-Djava.awt.headless=false".to_owned(),
+        format!("-Didea.test.runner.index={index}"),
+        "-Didea.test.runners.count=2".to_owned(),
+        "-Didea.bucketing.season=AirPluginGuiChatTests".to_owned(),
+        "-Didea.tests.duration.bucketing.enabled=true".to_owned(),
+    ]
+    .to_vec()
+}
+
+// The UI job of TeamCity passes the flags of the JUnit runner with --test_arg=--jvm_flag=<flag>. lane-run takes the
+// joined form and the two-token form, repeated, in their order.
+#[test]
+fn lane_run_takes_the_jvm_flags_of_the_teamcity_ui_job_in_both_forms() {
+    let joined: Vec<String> = teamcity_flags(0).iter().map(|flag| format!("--jvm_flag={flag}")).collect();
+    let joined: Vec<&str> = joined.iter().map(String::as_str).collect();
+    assert_eq!(args(&joined).jvm_flags, teamcity_flags(0));
+
+    let split = args(&[
+        "--jvm_flag",
+        "-Didea.test.runner.index=1",
+        "--jvm_flag",
+        "-Didea.test.runners.count=2",
+    ]);
+    assert_eq!(split.jvm_flags, ["-Didea.test.runner.index=1", "-Didea.test.runners.count=2"]);
+    assert_eq!(args(&[]).jvm_flags, Vec::<String>::new());
+}
+
+// The runner index and count of the job split the lane, and each ignored flag gives one note in the order of the
+// flags. A run without flags is the whole lane, with no note.
+#[test]
+fn the_runner_flags_split_the_lane_and_each_ignored_flag_gives_one_note() {
+    let flags = jvm_flags(&teamcity_flags(1)).unwrap();
+
+    assert_eq!(flags.split, RunnerSplit { index: 1, count: 2 });
+    assert_eq!(
+        flags.notes,
+        [
+            "lane-run ignores the JVM flag -Djava.awt.headless=false: the lane IDE runs headed on the display of the run",
+            "lane-run ignores the JVM flag -Didea.bucketing.season=AirPluginGuiChatTests: lane-run splits the lane by the \
+             order of its suites, not by duration buckets",
+            "lane-run ignores the JVM flag -Didea.tests.duration.bucketing.enabled=true: lane-run splits the lane by the \
+             order of its suites, not by duration buckets",
+        ]
+    );
+    assert_eq!(jvm_flags(&teamcity_flags(0)).unwrap().split, RunnerSplit { index: 0, count: 2 });
+    let one = ["-Didea.test.runner.index=0".to_owned(), "-Didea.test.runners.count=1".to_owned()];
+    assert_eq!(jvm_flags(&one).unwrap().split, RunnerSplit::WHOLE);
+    assert_eq!(
+        jvm_flags(&[]).unwrap(),
+        JvmFlags {
+            split: RunnerSplit::WHOLE,
+            notes: Vec::new()
+        }
+    );
+}
+
+// Another flag is refused by name, so the next flag of a job is loud. The refusal of an unknown property names it and
+// never its value. A split that is not one is refused too.
+#[test]
+fn an_unknown_jvm_flag_or_a_split_that_is_not_one_is_refused_by_name() {
+    let refusal = |flags: &[&str]| {
+        let flags: Vec<String> = flags.iter().map(|flag| (*flag).to_owned()).collect();
+        let refusal = jvm_flags(&flags).unwrap_err();
+        assert_eq!(refusal.code, JVM_FLAG_CODE, "{flags:?}");
+        refusal.message
+    };
+
+    let unknown = refusal(&["-Didea.some.token=s3cr3t-value"]);
+    assert!(
+        unknown.contains("idea.some.token") && !unknown.contains("s3cr3t-value"),
+        "{unknown}"
+    );
+    assert!(unknown.contains("idea.test.runner.index and idea.test.runners.count"), "{unknown}");
+    assert!(refusal(&["-Xmx2g"]).contains("the flag -Xmx2g is none"));
+    // Only the guest descriptor sets the screen flag. A direct lane never reads the screen of the developer.
+    assert!(refusal(&["-Dair.flow.trace.screen=on"]).contains("air.flow.trace.screen"));
+    assert!(refusal(&["-D"]).contains("takes only a -D<name>=<value> property"));
+    assert!(refusal(&["-Didea.test.runner.index=0"]).contains("needs both"));
+    assert!(refusal(&["-Didea.test.runners.count=2"]).contains("needs both"));
+    assert!(refusal(&["-Didea.test.runner.index=2", "-Didea.test.runners.count=2"]).contains("is not below the runner count 2"));
+    assert!(refusal(&["-Didea.test.runner.index=0", "-Didea.test.runners.count=0"]).contains("is not below"));
+    assert!(refusal(&["-Didea.test.runner.index=one", "-Didea.test.runners.count=2"]).contains("no whole number"));
+    assert!(
+        refusal(&[
+            "-Didea.test.runner.index=0",
+            "-Didea.test.runner.index=1",
+            "-Didea.test.runners.count=2"
+        ])
+        .contains("has two values")
+    );
+}
+
+// lane-run proves the host only where nothing proved it yet: on Linux, for a run that launches an IDE, and on a host
+// that no controller prepared. A worker of the controller names the run secrets directory. validate-guest proved the
+// display of that worker at its boot, and its lane daemon proves the shared objects of the distribution at its own
+// boot, so a run there pays nothing.
+#[test]
+fn only_a_linux_run_on_a_host_that_no_controller_prepared_probes_the_host() {
+    let host = environment(&[]);
+    let worker = environment(&[("AIR_VM_RUN_SECRETS", "/dev/shm/air-run-secrets")]);
+
+    assert!(host_probe_applies(&args(&[]), &host, true));
+    assert!(host_probe_applies(&args(&[]), &environment(&[("AIR_VM_RUN_SECRETS", " ")]), true));
+    assert!(!host_probe_applies(&args(&[]), &worker, true));
+    assert!(!host_probe_applies(&args(&["--plan-only"]), &host, true));
+    assert!(!host_probe_applies(&args(&[]), &host, false));
+}
+
+// The lane IDE opens its windows on an X display, so a host without DISPLAY is refused by name before the probe.
+#[test]
+fn a_host_without_a_display_is_refused_by_name() {
+    assert_eq!(host_display(&environment(&[("DISPLAY", ":0")])).unwrap(), ":0");
+
+    let refusal = host_display(&environment(&[("DISPLAY", "")])).unwrap_err();
+
+    assert_eq!(refusal.code, CODE_DISPLAY_MISSING);
+    assert!(refusal.message.contains("DISPLAY is unset"), "{}", refusal.message);
+    assert_eq!(host_display(&environment(&[])).unwrap_err().code, CODE_DISPLAY_MISSING);
+}
+
+// The budget of a run is the smaller of --run-budget-sec and $TEST_TIMEOUT, less the teardown reserve. A run that names
+// neither has no budget. A $TEST_TIMEOUT that is no whole number, and a budget that the reserve leaves nothing of, are
+// refused.
+#[test]
+fn the_run_budget_is_the_smaller_of_the_flag_and_test_timeout_less_the_reserve() {
+    let none = environment(&[]);
+    let reserve = TEARDOWN_RESERVE.as_secs();
+    let budget = |flags: &[&str], variables: &[(&str, &str)]| run_budget(&args(flags), &environment(variables));
+    assert_eq!(budget(&[], &[]).unwrap(), None);
+    assert_eq!(
+        budget(&["--run-budget-sec", "2700"], &[]).unwrap(),
+        Some(Duration::from_secs(2700 - reserve))
+    );
+    assert_eq!(
+        budget(&[], &[("TEST_TIMEOUT", "14400")]).unwrap(),
+        Some(Duration::from_secs(14_400 - reserve))
+    );
+    assert_eq!(
+        budget(&["--run-budget-sec", "2700"], &[("TEST_TIMEOUT", "14400")]).unwrap(),
+        Some(Duration::from_secs(2700 - reserve))
+    );
+    assert_eq!(
+        budget(&["--run-budget-sec", "2700"], &[("TEST_TIMEOUT", "900")]).unwrap(),
+        Some(Duration::from_secs(900 - reserve))
+    );
+    assert_eq!(budget(&[], &[("TEST_TIMEOUT", "an hour")]).unwrap_err().code, BUDGET_CODE);
+    let short = run_budget(&args(&["--run-budget-sec", "180"]), &none).unwrap_err();
+    assert_eq!(short.code, BUDGET_CODE);
+    assert_eq!(
+        short.message,
+        "the run budget of 180 s leaves nothing after the teardown reserve of 180 s"
+    );
+}
+
+fn expired(reason: &str, active: Option<(&str, &str)>) -> RunEvent {
+    RunEvent {
+        raw: None,
+        kind: RunEventKind::WatchdogExpired(avl_wire::daemon::WatchdogExpired {
+            reason: reason.to_owned(),
+            deadline: "2026-10-19T05:42:20.794Z".to_owned(),
+            expired_at: "2026-10-19T05:42:20.795Z".to_owned(),
+            detail: None,
+            active_execution: active.map(|(class, scenario)| avl_wire::daemon::ExecutionIdentity {
+                id: format!("[engine:lane-daemon]/[suite:s]/[scenario:{scenario}]"),
+                display_name: scenario.to_owned(),
+                class_name: Some(class.to_owned()),
+                method_name: Some("sessionToolWindowComposerScenarios".to_owned()),
+            }),
+            evidence: Vec::new(),
+        }),
+    }
+}
+
+// On a TeamCity agent, a run that its budget ended is a build problem that names the case and the budget, because a
+// muted case cannot fail the build. Another expiry, and a run off TeamCity, are no build problem.
+#[test]
+fn a_run_that_its_budget_ended_is_a_teamcity_build_problem_with_the_case_and_the_budget() {
+    let team_city = environment(&[("TEAMCITY_VERSION", "2026.1")]);
+    let budget = Some(Duration::from_secs(2520));
+    let case = Some((
+        "com.intellij.air.integration.flow.AgentSessionToolWindowComposerUiTest",
+        "the 'second' frame",
+    ));
+    assert_eq!(
+        budget_problem(&[expired("run_budget_timeout", case)], budget, &team_city).as_deref(),
+        Some(
+            "##teamcity[buildProblem description='lane-run: the lane budget of 2520 s ended the run in \
+             AgentSessionToolWindowComposerUiTest.the |'second|' frame; the scenarios after it did not run' \
+             identity='lane-run-budget']"
+        )
+    );
+    assert_eq!(
+        budget_problem(&[expired("run_budget_timeout", None)], budget, &team_city).as_deref(),
+        Some(
+            "##teamcity[buildProblem description='lane-run: the lane budget of 2520 s ended the run between two \
+             scenarios; the scenarios after it did not run' identity='lane-run-budget']"
+        )
+    );
+    assert_eq!(budget_problem(&[expired("progress_gap_timeout", case)], budget, &team_city), None);
+    assert_eq!(
+        budget_problem(&[expired("run_budget_timeout", case)], budget, &environment(&[])),
+        None
+    );
+}
+
+// The outputs directory of a Bazel test is its `TEST_UNDECLARED_OUTPUTS_DIR`. lane-run roots the trace bundles and the
+// hang report there. An empty or absent value names no directory.
+#[test]
+fn the_outputs_directory_of_a_bazel_test_is_its_variable() {
+    let outputs = |value: Option<&str>| bazel_outputs(&|name| value.filter(|_| name == "TEST_UNDECLARED_OUTPUTS_DIR").map(str::to_owned));
+    assert_eq!(outputs(Some("/testlogs/outputs")), Some(PathBuf::from("/testlogs/outputs")));
+    assert_eq!(outputs(Some("")), None);
+    assert_eq!(outputs(None), None);
+}

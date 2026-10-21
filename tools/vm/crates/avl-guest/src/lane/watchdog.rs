@@ -3,8 +3,8 @@
 //! The watchdog thread ticks each [`TICK`] while the run thread waits for the IDE:
 //! - **Deadlines.** Between scenarios the progress gap of the run request applies, during a scenario its active
 //!   execution timeout. An emergency deadline caps the whole run from the count of discovered scenarios. On expiry the
-//!   watchdog writes `watchdogExpired`, kills the IDE run with a thread dump, and marks the run expired. The run thread
-//!   sees the mark at its next instruction and starts no further scenario.
+//!   watchdog marks the run expired, kills the IDE run with a thread dump, and writes `watchdogExpired` with the files
+//!   of its evidence. The run thread sees the mark at its next instruction and starts no further scenario.
 //! - **Intruder probe.** `ModalIntruder` with a [`PROBE_TIMEOUT`] asks the IDE for a modal window that no scenario
 //!   opened. The first intrusion of a run gets one `DismissIntruder` with a [`DISMISS_TIMEOUT`]; the next one that a
 //!   tick sees expires the run as `ide_intrusion`. A relaunch holds the probe off, because no IDE answers then.
@@ -22,14 +22,16 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Condvar, Mutex, MutexGuard, PoisonError};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use avl_wire::daemon::{ExecutionIdentity, RunEventKind, SlowStep, WatchdogExpired, WatchdogState};
+use avl_wire::report::MAX_EVIDENCE_FILES;
 use jiff::Timestamp;
 
 use super::readiness::Bridge;
 use super::stream::Stream;
 use crate::clock::{now_stamp, stamp};
+use crate::supervisor::thread_dump;
 
 #[cfg(test)]
 mod tests;
@@ -38,6 +40,8 @@ mod tests;
 pub(crate) const TICK: Duration = Duration::from_secs(1);
 /// How often the watchdog writes its state while nothing else changes.
 pub(crate) const HEARTBEAT: Duration = Duration::from_mins(1);
+/// The name of the watchdog thread, which a hang report shows.
+pub(crate) const WATCHDOG_THREAD: &str = "lane-watchdog";
 /// How long the run thread may sit in one step before the IDE dumps its threads.
 pub(crate) const SLOW_STEP_BUDGET: Duration = Duration::from_secs(30);
 /// How many steps of one run get dumps.
@@ -56,10 +60,13 @@ const DUMP_MEDIA_TYPE: &str = "text/plain";
 /// How long a modal window may be unclaimed before it counts as an intruder.
 pub(crate) const INTRUDER_GRACE_MS: u64 = 3_000;
 /// What the emergency deadline adds for the kill.
-const KILL_GRACE: Duration = Duration::from_mins(1);
+pub(crate) const KILL_GRACE: Duration = Duration::from_mins(1);
 
 /// The directory of the slow-step dumps in the directory of an iteration.
 pub(crate) const SLOW_STEPS_DIR: &str = "slow-steps";
+/// The directory of the screenshots in the log directory of the IDE. With `ide.performance.screenshot=heartbeat` the
+/// IDE writes a set into `<NNN>_heartbeat` there each minute, with one PNG for each window.
+const SCREENSHOTS_DIR: &str = "screenshots";
 const MAX_SLUG_CHARS: usize = 40;
 
 /// What the watchdog asks of the IDE. Every answer may be "nothing": a probe never fails a run by itself.
@@ -72,6 +79,9 @@ pub(crate) trait Probes: Sync {
     fn diagnostic_dump(&self) -> Result<String, String>;
     /// Kills the IDE run with a thread dump first.
     fn kill(&self) -> Result<(), String>;
+    /// The log directory of the IDE run that [`Probes::kill`] ends, or `None` while no IDE run is held. The IDE writes
+    /// its heartbeat screenshots there, and the kill writes its thread dump there.
+    fn log_dir(&self) -> Option<PathBuf>;
 }
 
 /// Why the watchdog gave up on a run, the `reason` of `watchdogExpired`.
@@ -81,6 +91,8 @@ pub(crate) enum ExpiryReason {
     ProgressGap,
     Emergency,
     IdeIntrusion,
+    /// The budget of the whole run ended, see [`Policy::run_end`].
+    RunBudget,
 }
 
 impl ExpiryReason {
@@ -90,6 +102,7 @@ impl ExpiryReason {
             Self::ProgressGap => "progress_gap_timeout",
             Self::Emergency => "emergency_timeout",
             Self::IdeIntrusion => "ide_intrusion",
+            Self::RunBudget => "run_budget_timeout",
         }
     }
 }
@@ -112,11 +125,14 @@ impl Phase {
     }
 }
 
-/// The two budgets of the run request.
+/// The budgets of the run request.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Policy {
     pub active_execution: Duration,
     pub progress_gap: Duration,
+    /// The end of the budget of the whole run, from `runBudgetSec` of the request. No deadline passes it, and the
+    /// watchdog ends the run at it. `None` sets no budget.
+    pub run_end: Option<Instant>,
 }
 
 /// One expiry of the deadlines.
@@ -139,6 +155,8 @@ pub(crate) struct Deadlines {
     phase_deadline: Option<Instant>,
     emergency: Option<Instant>,
     active: Option<ExecutionIdentity>,
+    /// When the scenario in [`Self::active`] started.
+    active_since: Option<Instant>,
 }
 
 impl Deadlines {
@@ -147,9 +165,10 @@ impl Deadlines {
             policy,
             started: now,
             phase: Phase::ProgressGap,
-            phase_deadline: Some(now + policy.progress_gap),
+            phase_deadline: Some(cap(now + policy.progress_gap, policy.run_end)),
             emergency: None,
             active: None,
+            active_since: None,
         }
     }
 
@@ -158,7 +177,7 @@ impl Deadlines {
     pub(crate) fn plan_started(&mut self, count: u32, now: Instant) {
         let gaps = self.policy.progress_gap.saturating_mul(count.saturating_add(2));
         let active = self.policy.active_execution.saturating_mul(count);
-        self.emergency = Some(self.started + gaps + active + KILL_GRACE);
+        self.emergency = Some(cap(self.started + gaps + active + KILL_GRACE, self.policy.run_end));
         self.enter_gap(now);
     }
 
@@ -167,8 +186,9 @@ impl Deadlines {
             return;
         }
         self.phase = Phase::ActiveExecution;
-        self.phase_deadline = Some(now + self.policy.active_execution);
+        self.phase_deadline = Some(cap(now + self.policy.active_execution, self.policy.run_end));
         self.active = Some(identity);
+        self.active_since = Some(now);
     }
 
     pub(crate) fn execution_finished(&mut self, now: Instant) {
@@ -180,6 +200,7 @@ impl Deadlines {
         self.phase_deadline = None;
         self.emergency = None;
         self.active = None;
+        self.active_since = None;
     }
 
     fn enter_gap(&mut self, now: Instant) {
@@ -187,8 +208,9 @@ impl Deadlines {
             return;
         }
         self.phase = Phase::ProgressGap;
-        self.phase_deadline = Some(now + self.policy.progress_gap);
+        self.phase_deadline = Some(cap(now + self.policy.progress_gap, self.policy.run_end));
         self.active = None;
+        self.active_since = None;
     }
 
     /// The expiry at `now`, or `None` while every deadline holds.
@@ -203,6 +225,9 @@ impl Deadlines {
             detail: None,
             active: self.active.clone(),
         };
+        if let Some(end) = self.policy.run_end.filter(|end| now >= *end) {
+            return Some(expired(ExpiryReason::RunBudget, end));
+        }
         if let Some(emergency) = self.emergency.filter(|emergency| now >= *emergency) {
             return Some(expired(ExpiryReason::Emergency, emergency));
         }
@@ -231,6 +256,23 @@ impl Deadlines {
     }
 }
 
+/// `deadline`, or the end of the run budget when that comes first.
+fn cap(deadline: Instant, run_end: Option<Instant>) -> Instant {
+    run_end.map_or(deadline, |end| deadline.min(end))
+}
+
+/// What the run thread does now, as the watch knows it. The monitor of `lane-run` reads it without any lock that the
+/// run thread holds for longer than a field update.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct RunSnapshot {
+    /// The scenario that runs, as `<class>.<scenario>`, and for how long.
+    pub scenario: Option<(String, Duration)>,
+    /// The open steps of the run thread, outermost first and joined by ` > `, and how long the innermost one is open.
+    pub steps: Option<(String, Duration)>,
+    /// What is left of the budget of the run, when the run has one.
+    pub budget_left: Option<Duration>,
+}
+
 /// A step of the run thread that the slow-step dumps watch.
 #[derive(Clone, Debug)]
 struct OpenStep {
@@ -248,6 +290,9 @@ struct State {
     expired: Option<String>,
     /// The IDE dumps that the watchdog wrote and the run thread did not attach yet: the step and the file.
     dumps: Vec<(String, PathBuf)>,
+    /// The IDE dumps that the watchdog wrote since the phase began, oldest first: of the scenario that runs, or of the
+    /// gap between two scenarios. An expiry names them as its evidence.
+    phase_dumps: Vec<PathBuf>,
 }
 
 /// What the run thread and the watchdog thread share.
@@ -257,6 +302,8 @@ pub(crate) struct Watch {
     anchor: (Instant, Timestamp),
     /// How long a step may be open before the IDE dumps its threads, [`SLOW_STEP_BUDGET`] outside a test.
     slow_step: Duration,
+    /// How long the watchdog waits for the run thread to complete after a kill, [`KILL_GRACE`] outside a test.
+    kill_grace: Duration,
 }
 
 impl Watch {
@@ -270,11 +317,34 @@ impl Watch {
                 quiet: 0,
                 expired: None,
                 dumps: Vec::new(),
+                phase_dumps: Vec::new(),
             }),
             changed: Condvar::new(),
             anchor: (now, Timestamp::now()),
             slow_step: SLOW_STEP_BUDGET,
+            kill_grace: KILL_GRACE,
         }
+    }
+
+    /// The same watch with a kill grace of `grace`, so a test sees the end of the wait after a kill at once.
+    #[cfg(test)]
+    pub(crate) const fn with_kill_grace(mut self, grace: Duration) -> Self {
+        self.kill_grace = grace;
+        self
+    }
+
+    /// Waits at most `within` for the run thread to complete the watch, and answers whether it did.
+    fn await_completion(&self, within: Duration) -> bool {
+        let deadline = Instant::now() + within;
+        let mut state = self.lock();
+        while state.deadlines.phase != Phase::Completed {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return false;
+            }
+            state = self.changed.wait_timeout(state, left).unwrap_or_else(PoisonError::into_inner).0;
+        }
+        true
     }
 
     /// The same watch with a slow-step budget of `budget`, so a test sees the dumps of a step in a second.
@@ -288,11 +358,12 @@ impl Watch {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Changes the deadlines and writes the new state.
+    /// Changes the deadlines and writes the new state. A new phase starts with no dump of its own.
     fn transition(&self, stream: &Stream<'_>, change: impl FnOnce(&mut Deadlines, Instant)) {
         let record = {
             let mut state = self.lock();
             change(&mut state.deadlines, Instant::now());
+            state.phase_dumps.clear();
             self.changed.notify_all();
             self.record(&state.deadlines)
         };
@@ -314,6 +385,39 @@ impl Watch {
     /// Ends the watch: the watchdog thread returns at its next wake.
     pub(crate) fn completed(&self, stream: &Stream<'_>) {
         self.transition(stream, |deadlines, _| deadlines.completed());
+    }
+
+    /// What is left of the budget of the run now, or `None` for a run with no budget.
+    pub(crate) fn budget_left(&self) -> Option<Duration> {
+        self.lock()
+            .deadlines
+            .policy
+            .run_end
+            .map(|end| end.saturating_duration_since(Instant::now()))
+    }
+
+    /// What the run thread does now.
+    pub(crate) fn snapshot(&self) -> RunSnapshot {
+        let now = Instant::now();
+        let state = self.lock();
+        let deadlines = &state.deadlines;
+        let scenario = deadlines.active.as_ref().zip(deadlines.active_since).map(|(active, since)| {
+            let class = active
+                .class_name
+                .as_deref()
+                .map(avl_junit::cases::simple_class_name)
+                .unwrap_or_default();
+            (format!("{class}.{}", active.display_name), now.saturating_duration_since(since))
+        });
+        let steps = state.steps.last().map(|innermost| {
+            let path = state.steps.iter().map(|step| step.title.as_str()).collect::<Vec<_>>().join(" > ");
+            (path, now.saturating_duration_since(innermost.started))
+        });
+        RunSnapshot {
+            scenario,
+            steps,
+            budget_left: deadlines.policy.run_end.map(|end| end.saturating_duration_since(now)),
+        }
     }
 
     /// Why the watchdog ended the run, once it did.
@@ -388,7 +492,8 @@ impl Watch {
     }
 }
 
-/// The watchdog thread of a run: it returns when the watch completes, or after it expired the run.
+/// The watchdog thread of a run: it returns when the watch completes, or after it expired the run and the run thread
+/// completed or the kill grace ended.
 pub(crate) fn watch(watch: &Watch, stream: &Stream<'_>, probes: &dyn Probes, iteration_dir: &Path) {
     let mut next_heartbeat = Instant::now() + HEARTBEAT;
     let mut dismissal: Option<Option<String>> = None;
@@ -451,7 +556,9 @@ pub(crate) fn watch(watch: &Watch, stream: &Stream<'_>, probes: &dyn Probes, ite
                         .join(" > ");
                     let record = slow_step(probes, iteration_dir, dumps, &step, &path, watch.slow_step);
                     if let RunEventKind::SlowStep(SlowStep { ide_dump: Some(file), .. }) = &record {
-                        watch.lock().dumps.push((step.title.clone(), PathBuf::from(file)));
+                        let mut state = watch.lock();
+                        state.dumps.push((step.title.clone(), PathBuf::from(file)));
+                        state.phase_dumps.push(PathBuf::from(file));
                     }
                     stream.emit(&record);
                 } else if dumps == MAX_DUMPS + 1 {
@@ -487,25 +594,96 @@ pub(crate) fn ide_dump(bridge: &Bridge) -> Result<String, String> {
         .map_err(|error| error.to_string())
 }
 
-/// Writes `watchdogExpired`, marks the run expired, and kills the IDE so the run thread unwinds.
+/// Marks the run expired, kills the IDE so the run thread unwinds, writes `watchdogExpired` with the files of
+/// [`evidence`], and waits the kill grace for the run thread to complete.
+///
+/// The kill comes before the record and its log line, so an expiry ends the IDE even when the stream or the standard
+/// error blocks. A run thread that does not complete within the grace waits on something other than the IDE, and the
+/// watchdog says so.
 fn expire(watch: &Watch, stream: &Stream<'_>, probes: &dyn Probes, expiry: &Expiry) {
     let reason = format!(
         "the watchdog ended the run: {}{}",
         expiry.reason.wire(),
         expiry.detail.as_deref().map(|detail| format!(": {detail}")).unwrap_or_default()
     );
-    watch.lock().expired = Some(reason);
+    let dumps = {
+        let mut state = watch.lock();
+        state.expired = Some(reason);
+        state.phase_dumps.clone()
+    };
+    // The log directory of the run that the kill ends, before a relaunch can publish another run.
+    let log_dir = probes.log_dir();
+    let killed_since = Timestamp::now();
+    let killed = probes.kill();
     stream.emit(&RunEventKind::WatchdogExpired(WatchdogExpired {
         reason: expiry.reason.wire().to_owned(),
         deadline: watch.wire_instant(expiry.deadline),
         expired_at: watch.wire_instant(expiry.at),
         detail: expiry.detail.clone(),
         active_execution: expiry.active.clone(),
-        evidence: Vec::new(),
+        evidence: evidence(log_dir.as_deref(), killed_since, &dumps),
     }));
-    if let Err(error) = probes.kill() {
+    if let Err(error) = killed {
         stream.note(format!("the watchdog could not kill the IDE: {error}"));
     }
+    if !watch.await_completion(watch.kill_grace) {
+        stream.note(format!(
+            "the run thread did not unwind within {} ms after the watchdog killed the IDE: it waits on something \
+             other than the IDE",
+            watch.kill_grace.as_millis()
+        ));
+    }
+}
+
+/// The files that an expiry names as its evidence, [`MAX_EVIDENCE_FILES`] at most: the thread dump that the kill wrote
+/// in `log_dir` at `killed_since` or later, the newest heartbeat screenshots of the IDE in `log_dir`, and the IDE
+/// `dumps` of the slow steps of the phase, newest first.
+///
+/// The lane daemon sets the log directory of the IDE itself, so it finds these files without a request to an IDE that
+/// can hang. The dumps come last, because their `slowStep` records bring them to the controller in any case.
+fn evidence(log_dir: Option<&Path>, killed_since: Timestamp, dumps: &[PathBuf]) -> Vec<String> {
+    let kill_dump = log_dir.and_then(|directory| thread_dump::newest_since(directory, killed_since));
+    let screenshots = log_dir.map_or_else(Vec::new, newest_screenshots);
+    kill_dump
+        .into_iter()
+        .chain(screenshots)
+        .chain(dumps.iter().rev().cloned())
+        .take(MAX_EVIDENCE_FILES)
+        .map(|file| file.display().to_string())
+        .collect()
+}
+
+/// The newest screenshot set of the IDE in its log directory `log_dir`: the pictures of the subdirectory of
+/// [`SCREENSHOTS_DIR`] that changed last and holds a picture, sorted by name.
+fn newest_screenshots(log_dir: &Path) -> Vec<PathBuf> {
+    let entries = |directory: &Path| fs::read_dir(directory).into_iter().flatten().filter_map(Result::ok);
+    let mut sets: Vec<(SystemTime, PathBuf)> = entries(&log_dir.join(SCREENSHOTS_DIR))
+        .filter_map(|entry| {
+            let metadata = entry.metadata().ok().filter(fs::Metadata::is_dir)?;
+            Some((metadata.modified().ok()?, entry.path()))
+        })
+        .collect();
+    sets.sort();
+    sets.into_iter()
+        .rev()
+        .map(|(_, set)| {
+            let mut pictures: Vec<PathBuf> = entries(&set)
+                .filter(|entry| entry.metadata().is_ok_and(|metadata| metadata.is_file()))
+                .map(|entry| entry.path())
+                .filter(|file| is_picture(file))
+                .collect();
+            pictures.sort();
+            pictures
+        })
+        .find(|pictures| !pictures.is_empty())
+        .unwrap_or_default()
+}
+
+/// Whether `file` is a PNG or a JPEG by its extension.
+fn is_picture(file: &Path) -> bool {
+    file.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| ["png", "jpg", "jpeg"].iter().any(|picture| extension.eq_ignore_ascii_case(picture)))
 }
 
 /// Writes the dumps of the slow step `step`, the `ordinal`th of the run, and answers its `slowStep` record.

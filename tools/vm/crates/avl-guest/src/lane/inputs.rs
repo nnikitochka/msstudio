@@ -2,7 +2,7 @@
 //! file, the project, and the declared CLI runtimes.
 //!
 //! The lane daemon reads them once, at its boot. Every path is a guest path below the runfiles root that the controller
-//! built. The JVM daemon read the same facts from the system properties of its @-file, which the descriptor wrote.
+//! built.
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -43,7 +43,7 @@ const HOME_PATH_KEY: &str = "home.path";
 pub(crate) struct LaunchInputs {
     /// The parent of every context of the lane IDE.
     pub ide_root: PathBuf,
-    /// The empty home of the staged generation, which the IDE gets as `idea.dev.project.root`.
+    /// The empty home that the IDE gets as `idea.dev.project.root`. The boot makes it.
     pub home: PathBuf,
     /// The home of the distribution, which the `DevIdeConfig` file names.
     pub dist_home: PathBuf,
@@ -64,13 +64,17 @@ pub(crate) struct LaunchInputs {
     pub trace: TraceInputs,
 }
 
-/// The recorder of the scenario traces, as the flags of the descriptor name it.
+/// The recorder of the scenario traces, as the flags of the descriptor name it, and the root of its bundles.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct TraceInputs {
     /// The `air-trace-record` binary, or `None` when the descriptor names none or turns the trace off.
     pub recorder: Option<PathBuf>,
     /// The recorder may read the screen itself, because the display belongs to the lane.
     pub screen: bool,
+    /// The outputs directory of the Bazel test that runs `lane-run`, which Bazel keeps after the test. The bundles then
+    /// go to its `air-traces`. `None` keeps them in the directory of each iteration, where the trace pull of the
+    /// controller finds them.
+    pub bazel_outputs: Option<PathBuf>,
 }
 
 impl LaunchInputs {
@@ -167,6 +171,7 @@ fn trace_inputs(flags: &[String], runfiles_root: &Path) -> TraceInputs {
     TraceInputs {
         recorder,
         screen: flags.iter().any(|flag| flag == SCREEN_FLAG),
+        bazel_outputs: None,
     }
 }
 
@@ -285,6 +290,7 @@ fn declared_runtime(name: &str, manifest: &Path, runfiles_root: &Path) -> Result
         name: name.to_owned(),
         command,
         identity: sha256_hex(&digested),
+        version: value("version"),
     })
 }
 

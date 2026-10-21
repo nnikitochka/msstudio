@@ -90,8 +90,10 @@ open class SnapshotRangeMarkerImpl private constructor(
   override fun getTextRange(): TextRange = currentResolution()
 
   override fun isValid(): Boolean {
-    return !disposed && currentResolution().isValid && (documentOrFile is Document || (documentOrFile as VirtualFile).isValid)
+    return !disposed && isValidResolution(currentResolution()) && (documentOrFile is Document || (documentOrFile as VirtualFile).isValid)
   }
+
+  protected open fun isValidResolution(resolution: PMarkerResolution): Boolean = resolution.isValid
 
   override fun isGreedyToLeft(): Boolean = spec.isGreedyToLeft
 
@@ -155,6 +157,10 @@ open class SnapshotRangeMarkerImpl private constructor(
     cachedResolution = CachedResolution(cacheIdentity(root), resolution)
   }
 
+  /**
+   * Resolves this marker in the current root. Reuses cached offsets for the same identity or advances them across one direct edit.
+   * Traverses the tree when neither shortcut applies.
+   */
   private fun currentResolution(): PMarkerResolution {
     val root = currentRootReference().get()
     val cacheIdentity = cacheIdentity(root)
@@ -162,7 +168,13 @@ open class SnapshotRangeMarkerImpl private constructor(
     if (cached != null && cached.cacheIdentity === cacheIdentity) {
       return cached.resolution
     }
-    val resolution = SnapshotMarkerEngineImpl.resolveRangeMarker(this, root)
+    val advanced = if (cached != null && !disposed) {
+      (root as? PMarkerRootImpl)?.advanceResolution(cached.cacheIdentity, cached.resolution)
+    }
+    else {
+      null
+    }
+    val resolution = advanced ?: SnapshotMarkerEngineImpl.resolveRangeMarker(this, root)
     cachedResolution = CachedResolution(cacheIdentity, resolution)
     return resolution
   }

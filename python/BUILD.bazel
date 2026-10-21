@@ -22,7 +22,10 @@ content_module_jar(module = ":python-pydev")
 filegroup(
     name = "dev_dist_resources",
     srcs = glob(
-        ["helpers/pydev/**"],
+        [
+            "bundledPyiStubs/**",
+            "helpers/pydev/**",
+        ],
     ),
     visibility = ["//visibility:public"],
 )
@@ -187,6 +190,8 @@ jvm_library(
         "//plugins/hg4idea:vcs-hg",
         "//plugins/svn4idea:vcs-svn",
         "//plugins/git4idea/backend",
+        "//plugins/git4idea/rpc.backend",
+        "//platform/vcs-impl/backend",
         "//plugins/git4idea/shared",
         "//plugins/git4idea/frontend",
         "//plugins/git-features-trainer:vcs-git-featuresTrainer",
@@ -246,6 +251,8 @@ jvm_library(
         "//plugins/hg4idea:vcs-hg_test_lib",
         "//plugins/svn4idea:vcs-svn_test_lib",
         "//plugins/git4idea/backend:backend_test_lib",
+        "//plugins/git4idea/rpc.backend:rpc.backend_test_lib",
+        "//platform/vcs-impl/backend:backend_test_lib",
         "//plugins/git4idea/shared:shared_test_lib",
         "//plugins/git4idea/frontend:frontend_test_lib",
         "//plugins/git-features-trainer:vcs-git-featuresTrainer_test_lib",
@@ -297,6 +304,43 @@ exports_files(
     visibility = ["//visibility:public"],
 )
 ### auto-generated section `iml intellij.pycharm.community.main` end
+
+### auto-generated section `build intellij.python.bundledPyiStubs` start
+jvm_library(
+    name = "python-bundledPyiStubs",
+    srcs = glob(
+        [],
+        allow_empty = True,
+    ),
+    module_name = "intellij.python.bundledPyiStubs",
+    resource_strip_prefix = "bundledPyiStubs",
+    resources = glob(
+        ["bundledPyiStubs/**/*"],
+    ),
+    visibility = ["//visibility:public"],
+)
+
+jvm_library(
+    name = "python-bundledPyiStubs_test_lib",
+    testonly = True,
+    srcs = glob(
+        [],
+        allow_empty = True,
+    ),
+    module_name = "intellij.python.bundledPyiStubs",
+    visibility = ["//visibility:public"],
+    runtime_deps = [":python-bundledPyiStubs"],
+)
+### auto-generated section `build intellij.python.bundledPyiStubs` end
+
+### auto-generated section `iml intellij.python.bundledPyiStubs` start
+exports_files(
+    [
+        "intellij.python.bundledPyiStubs.iml",
+    ],
+    visibility = ["//visibility:public"],
+)
+### auto-generated section `iml intellij.python.bundledPyiStubs` end
 
 ### auto-generated section `build intellij.python.commonTests` start
 jvm_library(
@@ -408,8 +452,6 @@ jvm_library(
     resource_strip_prefix = "pluginResources",
     resources = glob(
         ["pluginResources/**/*"],
-        allow_empty = True,
-        exclude = ["pluginResources/**/icon-robots.txt"],
     ),
     visibility = ["//visibility:public"],
     exports = [

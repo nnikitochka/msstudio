@@ -36,7 +36,7 @@ const ENGINE: &str = "[engine:lane-daemon]";
 pub(crate) enum CaseStatus {
     Successful,
     Failed,
-    /// The scenario started and reached no verdict: the watchdog ended it.
+    /// The scenario started and reached no verdict: the watchdog ended it, or the body aborted it.
     Aborted,
 }
 
@@ -54,7 +54,7 @@ impl CaseStatus {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct CaseIdentity {
     pub suite: String,
-    /// The `testClass` label of the suite: the class of the JUnit node of the JVM host.
+    /// The `testClass` label of the suite, which the case names as its class.
     pub class_name: String,
     pub method_name: Option<String>,
     pub name: String,
@@ -196,7 +196,6 @@ impl<'a> Stream<'a> {
             execution: case.execution(),
             status: status.wire().to_owned(),
             duration_ms: i64::try_from(duration.as_millis()).unwrap_or(i64::MAX),
-            error: None,
             failure: failure.unwrap_or_default(),
             report,
         }));
@@ -229,7 +228,6 @@ impl<'a> Stream<'a> {
                 class_name: Some(class_name.to_owned()),
                 method_name: None,
             },
-            error: None,
             failure,
         }));
     }

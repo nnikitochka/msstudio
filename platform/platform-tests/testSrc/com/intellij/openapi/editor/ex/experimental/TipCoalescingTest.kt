@@ -344,7 +344,7 @@ class TipCoalescingTest {
 
   @Test
   fun `typing in a branch costs one run per burst`() {
-    var branch = DocBranch.createBranch("", U)
+    var branch = DocumentBranch.createBranch("", U)
     for ((offset, char) in "hello\nworld".withIndex()) {
       branch = branch.applyOp(insertOp(offset, char.toString()))
     }
@@ -366,7 +366,7 @@ class TipCoalescingTest {
    */
   @Test
   fun `typing after a merge extends the run that starts at the merge point`() {
-    val base = DocBranch.createBranch("ab", agent("base"))
+    val base = DocumentBranch.createBranch("ab", agent("base"))
     val left = base.fork(U).applyOp(insertOp(0, "L"))
     val right = base.fork(V).applyOp(insertOp(2, "R"))
     var merged = left.merge(right)
@@ -386,7 +386,7 @@ class TipCoalescingTest {
 
   @Test
   fun `concurrent typing bursts merge and converge`() {
-    val base = DocBranch.createBranch("0123456789", agent("base"))
+    val base = DocumentBranch.createBranch("0123456789", agent("base"))
     var left = base.fork(agent("left"))
     var right = base.fork(agent("right"))
     for ((i, char) in "abc".withIndex()) {
@@ -411,7 +411,7 @@ class TipCoalescingTest {
   private class History(origin: EventGraph = EventGraph.createGraph()) {
     private var graph = origin
     private val text = StringBuilder()
-    private val nextSeqs = HashMap<Agent, Int>()
+    private val nextSeqs = HashMap<Agent, Long>()
     private val past = ArrayList<Pair<Version, String>>()
 
     fun graph(): EventGraph {
@@ -468,8 +468,8 @@ class TipCoalescingTest {
       }
     }
 
-    private fun takeSeqs(agent: Agent, count: Int): Int {
-      val seq = nextSeqs[agent] ?: 0
+    private fun takeSeqs(agent: Agent, count: Int): Long {
+      val seq = nextSeqs[agent] ?: 0L
       nextSeqs[agent] = seq + count
       return seq
     }

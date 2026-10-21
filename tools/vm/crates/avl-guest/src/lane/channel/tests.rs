@@ -11,6 +11,8 @@ use tempfile::TempDir;
 
 use super::*;
 use crate::lane::services::testing::{Answer, call};
+use crate::linux::validate::SHARED_OBJECT_UNRESOLVED_CODE;
+use crate::step::tests_support::Transcript;
 
 const LAUNCH_DIGEST: &str = "launch-1";
 
@@ -38,23 +40,27 @@ struct Booted {
     state: StateFile,
 }
 
+fn daemon_args(root: &Path) -> LaneDaemonArgs {
+    LaneDaemonArgs {
+        state_dir: root.join("state"),
+        port: 1,
+        bind: Ipv4Addr::LOCALHOST.into(),
+        launch_digest: LAUNCH_DIGEST.to_owned(),
+        descriptor: root.join("ui_daemon.runtime.json"),
+        runfiles_root: root.join("runfiles"),
+        ide_root: root.join("ide"),
+        home: root.join("home"),
+    }
+}
+
 fn booted() -> Booted {
     let root = TempDir::new().unwrap();
     let state_dir = root.path().join("state");
     fs::create_dir_all(state_dir.join("jars")).unwrap();
     fs::write(state_dir.join("jars").join("stale"), "from the previous boot").unwrap();
     fs::write(state_dir.join(STATE_FILE), "{}").unwrap();
-    let args = LaneDaemonArgs {
-        state_dir: state_dir.clone(),
-        port: 1,
-        bind: Ipv4Addr::LOCALHOST.into(),
-        launch_digest: LAUNCH_DIGEST.to_owned(),
-        descriptor: root.path().join("ui_daemon.runtime.json"),
-        runfiles_root: root.path().join("runfiles"),
-        ide_root: root.path().join("ide"),
-        home: root.path().join("home"),
-    };
-    let daemon = Arc::new(boot(&args, inputs(root.path())).unwrap());
+    let args = daemon_args(root.path());
+    let daemon = Arc::new(boot(&args, inputs(root.path()), &|_| None).unwrap());
     assert!(
         !state_dir.join(STATE_FILE).exists(),
         "the boot removes the state file of the previous daemon"
@@ -72,6 +78,66 @@ fn booted() -> Booted {
     }
 }
 
+/// The boot makes each directory of the daemon and of the lane IDE, readable only by this account: the home, the IDE
+/// root, and the scratch and outputs directories that the run environment names. The controller makes none of them.
+/// A directory that exists keeps its mode, as the scratch directory of a Bazel test does.
+#[test]
+fn the_boot_makes_the_directories_of_the_run_readable_only_by_its_account() {
+    let root = TempDir::new().unwrap();
+    let scratch = root.path().join("tmp/run-1");
+    fs::create_dir_all(&scratch).unwrap();
+    fs::set_permissions(&scratch, fs::Permissions::from_mode(0o755)).unwrap();
+    let outputs = scratch.join("outputs");
+    let environment = [
+        ("TEST_TMPDIR", scratch.display().to_string()),
+        ("TEST_UNDECLARED_OUTPUTS_DIR", outputs.display().to_string()),
+    ];
+    let variable = |name: &str| environment.iter().find(|(key, _)| *key == name).map(|(_, value)| value.clone());
+    let args = daemon_args(root.path());
+    boot(&args, inputs(root.path()), &variable).unwrap();
+
+    let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
+    for directory in [&args.home, &args.ide_root, &outputs, &args.state_dir.join("jars")] {
+        assert_eq!(mode(directory), 0o700, "{}", directory.display());
+    }
+    assert_eq!(mode(&scratch), 0o755, "the boot changed the mode of a directory that exists");
+}
+
+// On a Linux guest the boot of the lane daemon runs `ldd` over each shared object of the distribution. A library that
+// the guest does not have refuses the boot with the code of the sweep, and the refusal names the object and the
+// library. A library that the guest has passes. On a macOS guest the boot runs no `ldd`.
+#[test]
+fn the_boot_on_a_linux_guest_refuses_a_distribution_whose_library_is_missing() {
+    let root = TempDir::new().unwrap();
+    let inputs = inputs(root.path());
+    let skiko = inputs.dist_home.join("lib/libskiko-linux-arm64.so");
+    fs::create_dir_all(skiko.parent().unwrap()).unwrap();
+    fs::write(&skiko, "\x7fELF").unwrap();
+    fs::write(inputs.dist_home.join("lib/app.jar"), "not a shared object").unwrap();
+    let ldd = format!("ldd {}", skiko.display());
+    let mut guest = Transcript::default();
+    guest.answers.insert(ldd.clone(), "\tlibEGL.so.1 => not found\n".to_owned());
+
+    let refusal = prove_shared_objects(&inputs, &mut guest, true).unwrap_err();
+
+    assert_eq!(refusal.code, SHARED_OBJECT_UNRESOLVED_CODE);
+    assert!(
+        refusal.message.contains(&format!("{} needs libEGL.so.1", skiko.display())),
+        "{}",
+        refusal.message
+    );
+    assert_eq!(guest.lines(), std::slice::from_ref(&ldd));
+
+    guest
+        .answers
+        .insert(ldd, "\tlibEGL.so.1 => /lib/aarch64-linux-gnu/libEGL.so.1 (0x0000ffff)\n".to_owned());
+    prove_shared_objects(&inputs, &mut guest, true).unwrap();
+
+    let mut macos = Transcript::default();
+    prove_shared_objects(&inputs, &mut macos, false).unwrap();
+    assert!(macos.steps.is_empty(), "{:?}", macos.lines());
+}
+
 impl Booted {
     fn call(&self, method: &str, target: &str, body: &[u8]) -> Answer {
         call(self.channel.address(), method, target, &[(TOKEN_HEADER, &self.state.token)], body)
@@ -85,7 +151,7 @@ impl Booted {
 fn run_request(launch_digest: &str) -> Vec<u8> {
     json!({
         "selectors": [], "junit5Filters": [], "productStamp": "product-1", "launchDigest": launch_digest,
-        "hotJars": [], "activeExecutionTimeoutSec": 1800, "progressGapTimeoutSec": 300, "idePlugins": [],
+        "activeExecutionTimeoutSec": 1800, "progressGapTimeoutSec": 300, "idePlugins": [],
     })
     .to_string()
     .into_bytes()
@@ -222,4 +288,46 @@ fn a_shutdown_wakes_the_verb_and_refuses_later_runs() {
     booted.daemon.await_shutdown();
     let refused = booted.call("POST", "/run", &run_request(LAUNCH_DIGEST));
     assert_eq!((refused.status, refused.json()), (409, json!({ "reason": "shutting-down" })));
+}
+
+// lane-run notes each JVM flag that it ignores. The notes follow the start of the run, before the run fails or a suite
+// starts, and a split changes nothing of that order.
+#[test]
+fn the_notes_of_a_lane_run_follow_the_start_of_the_run() {
+    let booted = booted();
+    let request: RunRequest = serde_json::from_slice(&run_request(LAUNCH_DIGEST)).unwrap();
+    let notes = ["lane-run ignores the JVM flag -Djava.awt.headless=false: the lane IDE runs headed".to_owned()];
+    let mut out = Vec::new();
+    iteration::run_split(
+        &booted.daemon,
+        &request,
+        iteration::RunnerSplit { index: 1, count: 2 },
+        &notes,
+        &mut out,
+    );
+
+    let decoded = NdjsonDecoder::default().push(&out);
+    assert_eq!(decoded.failure, None);
+    let kinds: Vec<String> = decoded
+        .events
+        .iter()
+        .map(|event| match &event.kind {
+            RunEventKind::RunStarted(_) => "runStarted".to_owned(),
+            RunEventKind::Output(output) => format!("output: {}", output.text),
+            RunEventKind::RunFailed(_) => "runFailed".to_owned(),
+            RunEventKind::WatchdogState(_) => "watchdogState".to_owned(),
+            RunEventKind::Summary(_) => "summary".to_owned(),
+            other => panic!("an unexpected record {other:?}"),
+        })
+        .collect();
+    assert_eq!(
+        kinds,
+        [
+            "runStarted",
+            "output: lane-run ignores the JVM flag -Djava.awt.headless=false: the lane IDE runs headed",
+            "runFailed",
+            "watchdogState",
+            "summary"
+        ]
+    );
 }

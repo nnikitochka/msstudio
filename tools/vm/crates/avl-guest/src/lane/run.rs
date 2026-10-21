@@ -10,22 +10,31 @@
 //! With `--plan-only` it stops before the IDE: it stages the inputs and selects the documents as a run does, and it
 //! writes the [`RunPlan`] on standard output. So a host proves a lane rule and its runfiles without a lane IDE.
 
+use std::collections::BTreeMap;
 use std::fs::{self, File};
 use std::io::{self, Write};
 use std::net::{IpAddr, Ipv4Addr};
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
-use avl_wire::daemon::{IdePlugin, LaneInputs, RunEventKind, RunRequest, SessionLog, decode_run_event};
+use avl_junit::cases::simple_class_name;
+use avl_junit::teamcity;
+use avl_wire::daemon::{IdePlugin, LaneInputs, RUN_SECRETS_VARIABLE, RunEvent, RunEventKind, RunRequest, SessionLog, decode_run_event};
 use avl_wire::runtime::{self, RuntimeFile};
 use avl_wire::session_log;
 use serde::Serialize;
 
 use super::channel::{self, BOOT_CODE, log};
-use super::inputs::{self, guest_platform};
-use super::iteration;
+use super::inputs::{self, LaunchInputs, guest_platform};
+use super::iteration::{self, RunnerSplit};
+use super::monitor::{self, BUDGET_PROBLEM, LiveStop, MONITOR_THREAD, Monitor, MonitorPaths};
 use super::package::sha256_hex;
-use crate::cli::{LaneDaemonArgs, LaneRunArgs};
+use super::watchdog::{ExpiryReason, KILL_GRACE};
+use crate::cli::{LaneDaemonArgs, LaneRunArgs, ValidateGuestArgs};
+use crate::ide::launch::CODE_DISPLAY_MISSING;
+use crate::linux::validate::GuestValidator;
 use crate::reply::{AgentRefusal, AgentRefusalExt};
+use crate::step::SystemRunner;
 
 #[cfg(test)]
 mod tests;
@@ -46,10 +55,101 @@ const TEST_FILTER_VARIABLE: &str = "TESTBRIDGE_TEST_ONLY";
 const JUNIT5_FILTERS_VARIABLE: &str = "JB_TEST_JUNIT5_FILTERS";
 /// The variable of the shard count of a Bazel test.
 const TOTAL_SHARDS_VARIABLE: &str = "TEST_TOTAL_SHARDS";
+/// The variable of the timeout of a Bazel test, in seconds. Bazel ends the test at it.
+const TEST_TIMEOUT_VARIABLE: &str = "TEST_TIMEOUT";
+/// The variable of the outputs directory of a Bazel test, which Bazel keeps after the test.
+const OUTPUTS_VARIABLE: &str = "TEST_UNDECLARED_OUTPUTS_DIR";
+/// What the budget of a run leaves for its end: the kill grace of the watchdog, the hard stop with its JUnit XML and the
+/// cancel of the IDE with a thread dump, and the kill delay of Bazel.
+pub(crate) const TEARDOWN_RESERVE: Duration = Duration::from_mins(3);
+/// The refusal code of a budget that a run cannot keep.
+pub(crate) const BUDGET_CODE: &str = "lane_run_budget";
 /// The refusal code of a run that Bazel splits into shards.
 pub(crate) const SHARDED_CODE: &str = "lane_run_sharded";
 /// The refusal code of a recorded session that the variable names and that cannot be packed.
 pub(crate) const SESSION_LOG_CODE: &str = "lane_session_log";
+/// The refusal code of a `--jvm_flag` that lane-run does not take.
+pub(crate) const JVM_FLAG_CODE: &str = "lane_run_jvm_flag";
+/// The JVM property of the index of a runner of a TeamCity UI job, from 0.
+const RUNNER_INDEX_PROPERTY: &str = "idea.test.runner.index";
+/// The JVM property of the count of the runners of a TeamCity UI job.
+const RUNNERS_COUNT_PROPERTY: &str = "idea.test.runners.count";
+/// Why lane-run ignores a bucketing property of the JUnit runner.
+const BUCKETING_IGNORED: &str = "lane-run splits the lane by the order of its suites, not by duration buckets";
+/// The JVM properties that lane-run ignores, each with the reason that its note gives.
+const IGNORED_PROPERTIES: [(&str, &str); 3] = [
+    ("java.awt.headless", "the lane IDE runs headed on the display of the run"),
+    ("idea.bucketing.season", BUCKETING_IGNORED),
+    ("idea.tests.duration.bucketing.enabled", BUCKETING_IGNORED),
+];
+
+/// What the `--jvm_flag` arguments of a run ask for: the share of this runner of the lane, and one note for each flag
+/// that lane-run ignores.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct JvmFlags {
+    pub split: RunnerSplit,
+    pub notes: Vec<String>,
+}
+
+/// Reads the `--jvm_flag` arguments that the UI job of TeamCity passes to the JUnit runner. The runner index and count
+/// give the split. Each ignored property gives a note. A flag that is no `-D` property, another property, a property
+/// with two values, and an index and a count that do not make a split are refused. The refusal of another flag names
+/// it and never its value.
+pub(crate) fn jvm_flags(flags: &[String]) -> Result<JvmFlags, AgentRefusal> {
+    let refused = |message: String| AgentRefusal::refused(JVM_FLAG_CODE, message);
+    let mut properties: BTreeMap<&str, &str> = BTreeMap::new();
+    let mut notes = Vec::new();
+    for flag in flags {
+        let Some(property) = flag.strip_prefix("-D").filter(|property| !property.is_empty()) else {
+            let name = flag.split('=').next().unwrap_or_default();
+            return Err(refused(format!(
+                "lane-run takes only a -D<name>=<value> property as --jvm_flag, and the flag {name} is none"
+            )));
+        };
+        let (name, value) = property.split_once('=').unwrap_or((property, ""));
+        if let Some((_, reason)) = IGNORED_PROPERTIES.iter().find(|(ignored, _)| *ignored == name) {
+            notes.push(format!("lane-run ignores the JVM flag {flag}: {reason}"));
+            continue;
+        }
+        if name != RUNNER_INDEX_PROPERTY && name != RUNNERS_COUNT_PROPERTY {
+            return Err(refused(format!(
+                "lane-run does not take the JVM property {name}: it takes {RUNNER_INDEX_PROPERTY} and \
+                 {RUNNERS_COUNT_PROPERTY}, and it ignores {}",
+                IGNORED_PROPERTIES.map(|(ignored, _)| ignored).join(", ")
+            )));
+        }
+        if properties.insert(name, value).is_some_and(|earlier| earlier != value) {
+            return Err(refused(format!("the JVM property {name} has two values")));
+        }
+    }
+    let number = |name: &str| -> Result<Option<u32>, AgentRefusal> {
+        properties
+            .get(name)
+            .map(|value| {
+                value
+                    .parse::<u32>()
+                    .map_err(|error| refused(format!("the JVM property {name} is no whole number: {value} ({error})")))
+            })
+            .transpose()
+    };
+    let split = match (number(RUNNER_INDEX_PROPERTY)?, number(RUNNERS_COUNT_PROPERTY)?) {
+        (None, None) => RunnerSplit::WHOLE,
+        (Some(index), Some(count)) if index < count => RunnerSplit { index, count },
+        (Some(index), Some(count)) => {
+            return Err(refused(format!(
+                "the runner index {index} of {RUNNER_INDEX_PROPERTY} is not below the runner count {count} of \
+                 {RUNNERS_COUNT_PROPERTY}"
+            )));
+        }
+        (Some(_), None) | (None, Some(_)) => {
+            return Err(refused(format!(
+                "a split of the lane needs both {RUNNER_INDEX_PROPERTY} and {RUNNERS_COUNT_PROPERTY}, and the run names \
+                 one of them"
+            )));
+        }
+    };
+    Ok(JvmFlags { split, notes })
+}
 
 /// Packs each recorded session that [`session_log::VARIABLE`] names into the jar store, as the controller pushes them
 /// to a guest. The zip leaves the run directory once the store holds it.
@@ -82,7 +182,11 @@ pub(crate) fn session_logs(
 /// Runs one iteration of `args`, and answers the exit status: 0 for a green run, 1 for any other. `variable` reads the
 /// environment.
 pub(crate) fn run(args: &LaneRunArgs, variable: &dyn Fn(&str) -> Option<String>) -> Result<u8, AgentRefusal> {
+    let started = Instant::now();
+    let flags = jvm_flags(&args.jvm_flags)?;
     refuse_shards(variable)?;
+    // A plan launches no IDE, so it spends no budget.
+    let budget = if args.plan_only { None } else { run_budget(args, variable)? };
     let root = runtime_root(args, variable)?;
     let runfiles_root = args
         .runfiles_root
@@ -98,10 +202,6 @@ pub(crate) fn run(args: &LaneRunArgs, variable: &dyn Fn(&str) -> Option<String>)
         ide_root: root.join("ide"),
         home: root.join("home"),
     };
-    for directory in [&daemon_args.state_dir, &daemon_args.ide_root, &daemon_args.home] {
-        fs::create_dir_all(directory)
-            .map_err(|error| AgentRefusal::failure(BOOT_CODE, format!("cannot create {}: {error}", directory.display())))?;
-    }
     let content = fs::read(&args.descriptor).map_err(|error| {
         AgentRefusal::failure(
             BOOT_CODE,
@@ -110,7 +210,14 @@ pub(crate) fn run(args: &LaneRunArgs, variable: &dyn Fn(&str) -> Option<String>)
     })?;
     let descriptor = runtime::parse_runtime_descriptor(&content, &args.descriptor, guest_platform())
         .map_err(|error| AgentRefusal::refused(error.code, error.message))?;
-    let daemon = channel::boot(&daemon_args, inputs::from_descriptor(&descriptor, &daemon_args)?)?;
+    let mut launch_inputs = inputs::from_descriptor(&descriptor, &daemon_args)?;
+    launch_inputs.trace.bazel_outputs = bazel_outputs(variable);
+    let jcmd = launch_inputs.jcmd();
+    let mut notes = flags.notes;
+    if host_probe_applies(args, variable, cfg!(target_os = "linux")) {
+        notes.extend(probe_host(&launch_inputs, variable)?);
+    }
+    let daemon = channel::boot(&daemon_args, launch_inputs, variable)?;
     let runfile = |file: &RuntimeFile| runtime::runtime_file_path(&runfiles_root, file);
     let lane_inputs = LaneInputs {
         fake_agent_jar: daemon.store_file(&runfile(&descriptor.ide.fake_agent_jar))?,
@@ -138,9 +245,10 @@ pub(crate) fn run(args: &LaneRunArgs, variable: &dyn Fn(&str) -> Option<String>)
         junit5_filters: junit5_filters(args, variable),
         product_stamp,
         launch_digest: LAUNCH_DIGEST.to_owned(),
-        hot_jars: Vec::new(),
         active_execution_timeout_sec: args.active_execution_timeout_sec,
         progress_gap_timeout_sec: args.progress_gap_timeout_sec,
+        // What the staging left of the budget, so the watchdog ends the run at the end of the budget of the process.
+        run_budget_sec: budget.map(|budget| budget.saturating_sub(started.elapsed()).as_secs()),
         ide_plugins,
         lane: Some(args.lane.clone()),
         lane_inputs: Some(lane_inputs),
@@ -148,7 +256,7 @@ pub(crate) fn run(args: &LaneRunArgs, variable: &dyn Fn(&str) -> Option<String>)
         session_logs: session_logs(&daemon, &root, variable)?,
     };
     if args.plan_only {
-        let plan = plan(&daemon, &request)?;
+        let plan = plan(&daemon, &request, flags.split)?;
         let mut out = io::stdout().lock();
         serde_json::to_writer_pretty(&mut out, &plan)
             .map_err(io::Error::from)
@@ -159,17 +267,101 @@ pub(crate) fn run(args: &LaneRunArgs, variable: &dyn Fn(&str) -> Option<String>)
     let stream_path = root.join(STREAM_FILE);
     let stream = File::create(&stream_path)
         .map_err(|error| AgentRefusal::failure(BOOT_CODE, format!("cannot create {}: {error}", stream_path.display())))?;
-    let xml = iteration::run(&daemon, &request, &mut Tee(stream, io::stdout()));
-    let written = write_xml(&root, &xml, variable);
-    let finished = daemon.finish();
+    let monitor = Monitor::new(
+        &daemon,
+        MonitorPaths {
+            stream: stream_path.clone(),
+            xml: xml_files(&root, variable),
+            ide_root: daemon_args.ide_root,
+            report: bazel_outputs(variable).map(|directory| directory.join(monitor::REPORT_FILE)),
+        },
+        budget,
+        budget.map(|budget| started + budget + KILL_GRACE),
+        teamcity::is_team_city(variable),
+    );
+    let (written, finished) = std::thread::scope(|scope| {
+        // Named, so a hang report tells the monitor from the run thread.
+        if let Err(error) = std::thread::Builder::new()
+            .name(MONITOR_THREAD.to_owned())
+            .spawn_scoped(scope, || monitor.watch(&LiveStop { jcmd }))
+        {
+            log(&format!(
+                "cannot start the monitor, so the run has no hang report and no hard stop: {error}"
+            ));
+        }
+        let xml = iteration::run_split(&daemon, &request, flags.split, &notes, &mut Tee(stream, io::stdout()));
+        monitor.run_returned();
+        let written = write_xml(&root, &xml, variable);
+        let finished = daemon.finish();
+        monitor.end();
+        (written, finished)
+    });
     if let Err(refusal) = &finished {
         log(&format!("the IDE did not quit: {}: {}", refusal.code, refusal.message));
     }
     let stream = fs::read(&stream_path)
         .map_err(|error| AgentRefusal::failure(BOOT_CODE, format!("cannot read {}: {error}", stream_path.display())))?;
+    if let Some(problem) = budget_problem(&monitor::decode_stream(&stream), budget, variable) {
+        println!("{problem}");
+    }
     let green = is_green(&stream) && finished.is_ok();
     written?;
     Ok(u8::from(!green))
+}
+
+/// The TeamCity build problem of a run that its budget ended, on a TeamCity agent: the case that ran and the budget. A
+/// muted case is no failure of the build, so the case that the budget cut off cannot leave the build green.
+pub(crate) fn budget_problem(events: &[RunEvent], budget: Option<Duration>, variable: &dyn Fn(&str) -> Option<String>) -> Option<String> {
+    if !teamcity::is_team_city(variable) {
+        return None;
+    }
+    let expired = events.iter().find_map(|event| match &event.kind {
+        RunEventKind::WatchdogExpired(expired) if expired.reason == ExpiryReason::RunBudget.wire() => Some(expired),
+        _ => None,
+    })?;
+    let budget = budget.map_or_else(
+        || "its budget".to_owned(),
+        |budget| format!("the lane budget of {} s", budget.as_secs()),
+    );
+    let case = expired.active_execution.as_ref().map_or_else(
+        || "between two scenarios".to_owned(),
+        |execution| {
+            let class = execution.class_name.as_deref().map(simple_class_name).unwrap_or_default();
+            format!("in {class}.{}", execution.display_name)
+        },
+    );
+    Some(teamcity::build_problem(
+        &format!("lane-run: {budget} ended the run {case}; the scenarios after it did not run"),
+        BUDGET_PROBLEM,
+    ))
+}
+
+/// Whether lane-run proves the host before the lane IDE starts: on Linux, for a run that launches an IDE, on a host that
+/// no controller prepared, such as a TeamCity agent or a developer host. The controller names the run secrets
+/// directory for its workers alone. `validate-guest` proved the display of such a worker at its boot, and the lane
+/// daemon of the worker proves the shared objects of its distribution at its own boot. So a run there pays nothing.
+pub(crate) fn host_probe_applies(args: &LaneRunArgs, variable: &dyn Fn(&str) -> Option<String>, linux: bool) -> bool {
+    linux && !args.plan_only && variable(RUN_SECRETS_VARIABLE).is_none_or(|value| value.trim().is_empty())
+}
+
+/// The X display of the host, `DISPLAY`, refused by name when it is unset, because the lane IDE opens its windows on it.
+pub(crate) fn host_display(variable: &dyn Fn(&str) -> Option<String>) -> Result<String, AgentRefusal> {
+    variable("DISPLAY").filter(|display| !display.trim().is_empty()).ok_or_else(|| {
+        AgentRefusal::refused(
+            CODE_DISPLAY_MISSING,
+            "this host cannot run the lane IDE: DISPLAY is unset, and the lane IDE opens its windows on an X display \
+             with a window manager; start Xvfb and a window manager such as fluxbox, and export DISPLAY",
+        )
+    })
+}
+
+/// Proves the host before the lane IDE starts, with the distribution of `inputs` as the root of the shared objects,
+/// and answers the notes of the probe.
+fn probe_host(inputs: &LaunchInputs, variable: &dyn Fn(&str) -> Option<String>) -> Result<Vec<String>, AgentRefusal> {
+    let probe = ValidateGuestArgs {
+        display: host_display(variable)?,
+    };
+    GuestValidator::new(&probe, SystemRunner).probe_host(&inputs.dist_home)
 }
 
 /// The refusal code of a plan whose documents do not select.
@@ -186,6 +378,9 @@ pub(crate) struct RunPlan {
     /// The digests of the lane inputs in the jar store.
     pub lane_inputs: LaneInputs,
     pub context_plugin_files: usize,
+    /// The names of the declared CLI runtimes of the descriptor, sorted. The descriptor of the live lane adds `central`,
+    /// `claude` and `junie`.
+    pub cli_runtimes: Vec<String>,
     /// The suites of the shared IDE, then the suites of a bare IDE, as the program runner runs them.
     pub suites: Vec<PlannedSuite>,
 }
@@ -202,19 +397,22 @@ pub(crate) struct PlannedSuite {
     pub bare_launch_key: Option<String>,
 }
 
-/// The plan of `request`: the selection of a run, and the key of the IDE that the run would launch.
-pub(crate) fn plan(daemon: &channel::Daemon, request: &RunRequest) -> Result<RunPlan, AgentRefusal> {
+/// The plan of `request` for the share `split`: the selection of a run, and the key of the IDE that the run would
+/// launch.
+pub(crate) fn plan(daemon: &channel::Daemon, request: &RunRequest, split: RunnerSplit) -> Result<RunPlan, AgentRefusal> {
     let refused = |message: String| AgentRefusal::refused(PLAN_CODE, message);
     let (Some(lane), Some(lane_inputs)) = (&request.lane, &request.lane_inputs) else {
         return Err(refused("the run request names no lane and no lane inputs".to_owned()));
     };
-    let selection = iteration::selection_of(daemon, lane, lane_inputs, request).map_err(refused)?;
+    let selection = iteration::selection_of(daemon, lane, lane_inputs, request, split).map_err(refused)?;
     let shared = selection.suites.iter().any(|suite| suite.program.launch.is_none());
     let lane_key = if shared {
         Some(iteration::lane_key(daemon, &selection, &request.product_stamp).map_err(refused)?)
     } else {
         None
     };
+    let mut cli_runtimes: Vec<String> = daemon.with_ide(|owner| owner.runtimes().iter().map(|runtime| runtime.name.clone()).collect());
+    cli_runtimes.sort();
     let (bare, shared): (Vec<_>, Vec<_>) = selection.suites.iter().partition(|suite| suite.program.launch.is_some());
     let suites = shared
         .into_iter()
@@ -232,16 +430,48 @@ pub(crate) fn plan(daemon: &channel::Daemon, request: &RunRequest) -> Result<Run
         product_stamp: request.product_stamp.clone(),
         lane_inputs: lane_inputs.clone(),
         context_plugin_files: request.ide_plugins.len(),
+        cli_runtimes,
         suites,
     })
 }
 
 /// Writes `xml` into the run directory `root`, and to the file that `$JB_XML_OUTPUT_FILE` or `$XML_OUTPUT_FILE` names.
 /// Bazel and `bt` count the cases of that file, so a write that fails fails the run.
-pub(crate) fn write_xml(root: &Path, xml: &str, variable: &dyn Fn(&str) -> Option<String>) -> Result<(), AgentRefusal> {
+/// The files of the JUnit XML of a run: the one in the run directory `root`, and the XML file of a Bazel test.
+pub(crate) fn xml_files(root: &Path, variable: &dyn Fn(&str) -> Option<String>) -> Vec<PathBuf> {
     let mut files = vec![root.join(XML_FILE)];
     files.extend(avl_junit::destination(variable).map(PathBuf::from));
-    for file in files {
+    files
+}
+
+/// The budget of the run: the smaller of `--run-budget-sec` and `$TEST_TIMEOUT`, less [`TEARDOWN_RESERVE`], or `None`
+/// when neither names one. A `$TEST_TIMEOUT` that is no whole number of seconds is refused, and so is a budget that the
+/// reserve leaves nothing of.
+pub(crate) fn run_budget(args: &LaneRunArgs, variable: &dyn Fn(&str) -> Option<String>) -> Result<Option<Duration>, AgentRefusal> {
+    let refused = |message: String| AgentRefusal::refused(BUDGET_CODE, message);
+    let timeout = variable(TEST_TIMEOUT_VARIABLE)
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| {
+            value
+                .trim()
+                .parse::<u64>()
+                .map_err(|error| refused(format!("${TEST_TIMEOUT_VARIABLE} is no whole number of seconds: {value} ({error})")))
+        })
+        .transpose()?;
+    let Some(seconds) = [args.run_budget_sec, timeout].into_iter().flatten().min() else {
+        return Ok(None);
+    };
+    match Duration::from_secs(seconds).checked_sub(TEARDOWN_RESERVE) {
+        Some(budget) if !budget.is_zero() => Ok(Some(budget)),
+        _ => Err(refused(format!(
+            "the run budget of {seconds} s leaves nothing after the teardown reserve of {} s",
+            TEARDOWN_RESERVE.as_secs()
+        ))),
+    }
+}
+
+pub(crate) fn write_xml(root: &Path, xml: &str, variable: &dyn Fn(&str) -> Option<String>) -> Result<(), AgentRefusal> {
+    for file in xml_files(root, variable) {
         if let Some(parent) = file.parent() {
             fs::create_dir_all(parent)
                 .map_err(|error| AgentRefusal::failure(BOOT_CODE, format!("cannot create {}: {error}", parent.display())))?;
@@ -265,6 +495,14 @@ pub(crate) fn refuse_shards(variable: &dyn Fn(&str) -> Option<String>) -> Result
         )),
         _ => Ok(()),
     }
+}
+
+/// The outputs directory of the Bazel test, `$TEST_UNDECLARED_OUTPUTS_DIR`, which Bazel keeps after the test. The trace
+/// bundles and the hang report go there. An empty value names no directory.
+pub(crate) fn bazel_outputs(variable: &dyn Fn(&str) -> Option<String>) -> Option<PathBuf> {
+    variable(OUTPUTS_VARIABLE)
+        .filter(|directory| !directory.is_empty())
+        .map(PathBuf::from)
 }
 
 /// The run directory: `--runtime-root`, then `$AIR_LANE_RUNTIME_ROOT`, then `$TEST_TMPDIR/air-lane`.

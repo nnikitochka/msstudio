@@ -1,7 +1,6 @@
 <idea-plugin visibility="internal" package="com.intellij.platform.ide.nonModalWelcomeScreen">
   <!-- region Generated dependencies - run `Generate Product Layouts` to regenerate -->
   <dependencies>
-    <module name="fleet.rhizomedb"/>
     <module name="intellij.libraries.kotlinx.serialization.core"/>
     <module name="intellij.libraries.opentelemetry"/>
     <module name="intellij.platform.analysis"/>
@@ -15,7 +14,6 @@
     <module name="intellij.platform.ide.impl"/>
     <module name="intellij.platform.ide.progress"/>
     <module name="intellij.platform.ide.rpc"/>
-    <module name="intellij.platform.kernel"/>
     <module name="intellij.platform.lang.core"/>
     <module name="intellij.platform.lang.impl"/>
     <module name="intellij.platform.project"/>
@@ -83,7 +81,5 @@
             icon="AllIcons.FileTypes.Text"/>
 
     <action id="WelcomeMarkdownNewFile" class="com.intellij.platform.ide.nonModalWelcomeScreen.actions.MarkdownNewFileAction" icon="AllIcons.FileTypes.Markdown"/>
-    <action id="NewJavaFile" class="com.intellij.platform.ide.nonModalWelcomeScreen.actions.NewJavaFileAction" icon="AllIcons.FileTypes.Java"/>
-    <action id="NewKotlinFile" class="com.intellij.platform.ide.nonModalWelcomeScreen.actions.NewKotlinFileAction" icon="AllIcons.Language.Kotlin"/>
   </actions>
 </idea-plugin>

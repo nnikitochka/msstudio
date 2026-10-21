@@ -28,10 +28,11 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use avl_wire::ide::{ADVANCED_SETTINGS_FILE, IdePrepared, NO_README_SETTINGS};
-use avl_wire::program::lane::{Delivery, FAKE_AGENT_JAR_TOKEN, JAVA_TOKEN, LaneAgent, LaneDocument, Requirement};
+use avl_wire::program::lane::{Delivery, FAKE_AGENT_JAR_TOKEN, JAVA_TOKEN, LIVE_LANE, LaneAgent, LaneDocument, Requirement};
 use serde::Serialize;
 
 use super::identity::{BRIDGE_TOKEN_PURPOSE, LANE_SERVICES_PURPOSE, LaneIdentity, terminal_login_key};
+use super::live::LiveRun;
 use super::package::sha256_hex;
 use super::services::codex;
 use crate::reply::{AgentRefusal, AgentRefusalExt};
@@ -81,16 +82,13 @@ pub(crate) const ACP_JSON: &str = ".jetbrains/acp.json";
 /// The Codex configuration below the home of the context.
 pub(crate) const CODEX_CONFIG: &str = ".codex/config.toml";
 
-/// The identity of the JetBrains Cloud emulator that the lane document states, `AirJetBrainsCloudEmulator.IDENTITY`.
+/// The identity of the JetBrains Cloud emulator that the lane document states.
 pub(crate) const CLOUD_IDENTITY: &str = "jba-jcp-emulator-1";
 
-/// The lane of the live agents, which runs with credentials of the host. The lane daemon launches no live lane.
-const LIVE_LANE: &str = "UI_LIVE";
-
-/// The branch of the repository that the project of a Cloud lane becomes, `AirCloudGitRemote.BRANCH`.
+/// The branch of the repository that the project of a Cloud lane becomes.
 pub(crate) const CLOUD_BRANCH: &str = "main";
 
-/// The author of the one commit of that repository, and no signature, as `AirCloudGitRemote` runs `git`.
+/// The author of the one commit of that repository, and no signature.
 const CLOUD_GIT_CONFIG: [&str; 6] = [
     "-c",
     "user.name=Air Lane",
@@ -115,9 +113,9 @@ const DEFAULT_PROJECT_DIRECTORY: &str = "{{defaultProjectDirectory}}";
 /// The placeholder of the trusted project paths: one `<entry>` line each, every line ended by a line feed.
 const TRUSTED_PATH_ENTRIES: &str = "{{trustedPathEntries}}";
 
-/// Each option file of a new context by its name, in write order, as its template. These are the bytes of
-/// `AirIdeLaunchDefaults.OPTION_FILE_TEMPLATES`, and a test holds both digests to one value. The last one keeps the
-/// project from opening its README, so every IDE that the daemon launches starts with an empty editor area.
+/// Each option file of a new context by its name, in write order, as its template. A test pins their digest, which the
+/// config key reads. The last one keeps the project from opening its README, so every IDE that the daemon launches
+/// starts with an empty editor area.
 pub(crate) const OPTION_FILE_TEMPLATES: [(&str, &str); 6] = [
     (GENERAL_SETTINGS_FILE, include_str!("context/options/ide.general.xml")),
     ("ide.general.local.xml", include_str!("context/options/ide.general.local.xml")),
@@ -137,18 +135,22 @@ pub(crate) fn option_files_digest() -> String {
     sha256_hex(text.as_bytes())
 }
 
-/// The identity of the Codex mock model that the lane document states, `AirLaneCodexModel.IDENTITY`.
+/// The identity of the Codex mock model that the lane document states, `SERVICE_IDENTITIES.codexModel` of
+/// `flowFixtures.ts`.
 pub(crate) fn codex_identity() -> String {
     format!("mock-responses port={} reply={}", codex::PORT, codex::REPLY)
 }
 
-/// One declared CLI runtime: the launcher name, the command that runs it, and the identity of its declared inputs.
+/// One declared CLI runtime: the launcher name, the command that runs it, the identity of its declared inputs, and the
+/// version that its manifest states.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct CliRuntime {
     pub name: String,
     /// The interpreter, when the runtime has one, then the entry point. Each one is an absolute guest path.
     pub command: Vec<String>,
     pub identity: String,
+    /// The `version` of the manifest, which the live lane pins the release track of the Central CLI to.
+    pub version: Option<String>,
 }
 
 /// The ports of the lane services of one lane. A service that the lane does not run has none.
@@ -208,6 +210,8 @@ pub(crate) struct LaneContext<'a> {
     pub fake_agent_jar: &'a Path,
     /// The declared CLI runtimes. Their names are the `cliRuntimes` of the document.
     pub runtimes: &'a [CliRuntime],
+    /// The live run of the iteration, for the live lane alone.
+    pub live: Option<&'a LiveRun>,
 }
 
 impl LaneContext<'_> {
@@ -215,10 +219,17 @@ impl LaneContext<'_> {
     /// services of the lane.
     pub(crate) fn check(&self) -> Result<ServicePorts, AgentRefusal> {
         let document = self.document;
-        if document.lane == LIVE_LANE {
+        let live = document.lane == LIVE_LANE;
+        if live && self.live.is_none() {
             return Err(refused(
-                "the lane daemon launches no live lane: the lane UI_LIVE needs the credentials of the host",
+                "the lane UI_LIVE launches only in a live run, which the lane daemon of a Linux guest starts with its Central login",
             ));
+        }
+        if !live && self.live.is_some() {
+            return Err(AgentRefusal::internal(format!(
+                "a live run reached the context of the lane {}",
+                document.lane
+            )));
         }
         let declared: BTreeSet<&str> = document.cli_runtimes.iter().map(String::as_str).collect();
         let given: BTreeSet<&str> = self.runtimes.iter().map(|runtime| runtime.name.as_str()).collect();
@@ -232,10 +243,11 @@ impl LaneContext<'_> {
         if let Some(runtime) = self.runtimes.iter().find(|runtime| runtime.command.is_empty()) {
             return Err(refused(format!("the CLI runtime '{}' has no command", runtime.name)));
         }
-        let served = BTreeMap::from([
-            ("codexModel".to_owned(), codex_identity()),
-            ("jetBrainsCloud".to_owned(), CLOUD_IDENTITY.to_owned()),
-        ]);
+        // A live lane runs the real Codex on the Central proxy, so it gets no Codex mock model.
+        let mut served = BTreeMap::from([("jetBrainsCloud".to_owned(), CLOUD_IDENTITY.to_owned())]);
+        if !live {
+            served.insert("codexModel".to_owned(), codex_identity());
+        }
         if document.services != served {
             return Err(refused(format!(
                 "the lane document of {} states the services {:?}, and the lane daemon serves {served:?}",
@@ -262,7 +274,7 @@ impl LaneContext<'_> {
             registry: (!document.registry_agents.is_empty()).then(|| self.identity.registry_port()),
             cloud: self.identity.cloud_port(),
             feedback: requires_feedback.then(|| self.identity.feedback_port()),
-            codex: Some(codex::PORT),
+            codex: (!live).then_some(codex::PORT),
         })
     }
 
@@ -293,11 +305,14 @@ impl LaneContext<'_> {
             write_file(&home.join(ACP_JSON), acp_json.as_bytes())?;
         }
         for runtime in self.runtimes {
-            write_launcher(&Path::new(&paths.bin_dir).join(&runtime.name), &runtime.command)?;
+            write_launcher(&Path::new(&paths.bin_dir).join(&runtime.name), &runtime.command, &BTreeMap::new())?;
         }
         if let Some(port) = ports.codex {
             let real_project = real_path(project)?;
             write_file(&home.join(CODEX_CONFIG), codex_config(&real_project, port).as_bytes())?;
+        }
+        if let Some(live) = self.live {
+            live.seed(paths)?;
         }
         Ok(ports)
     }
@@ -340,8 +355,8 @@ impl LaneContext<'_> {
     }
 
     /// `acp.json` with one `agent_servers` entry for each local agent, in document order, or `None` for a lane without
-    /// one. The tokens of an entry resolve to the staged `java` and to the jar copy. A controlled agent also gets the
-    /// control environment of its owner.
+    /// one. The tokens of an entry resolve to the `java` of the distribution's JBR and to the jar copy. A controlled
+    /// agent also gets the control environment of its owner.
     fn acp_json(&self, jar: &Path) -> Option<String> {
         let entries: Vec<String> = self
             .document
@@ -473,9 +488,9 @@ fn codex_config(project: &Path, port: u16) -> String {
 }
 
 /// Makes `project` a Git repository with one commit on [CLOUD_BRANCH], and gives it the `origin` `<name>-origin.git`
-/// beside it: a bare repository that holds the commit. This is `AirCloudGitRemote.prepare` of the test process. A Cloud
-/// launch reads the URL and the remote branch from Git, and `git ls-remote` proves the branch. The emulated spawner
-/// never clones the URL, so the bare repository is the whole remote. A project that is a repository already stays.
+/// beside it: a bare repository that holds the commit. A Cloud launch reads the URL and the remote branch from Git, and
+/// `git ls-remote` proves the branch. The emulated spawner never clones the URL, so the bare repository is the whole
+/// remote. A project that is a repository already stays.
 fn prepare_cloud_remote(project: &Path) -> Result<(), AgentRefusal> {
     if project.join(".git").symlink_metadata().is_ok() {
         return Ok(());
@@ -515,13 +530,15 @@ fn git(directory: &Path, arguments: &[&str]) -> Result<(), AgentRefusal> {
     )))
 }
 
-/// A launcher that runs `command` with the arguments of the launcher, executable by the owner.
-fn write_launcher(file: &Path, command: &[String]) -> Result<(), AgentRefusal> {
-    let quoted: Vec<String> = command
+/// A launcher that exports `environment` and runs `command` with the arguments of the launcher, executable by the owner.
+/// The lane IDE inherits no variable, so a variable that a CLI needs is an export of its launcher.
+pub(super) fn write_launcher(file: &Path, command: &[String], environment: &BTreeMap<String, String>) -> Result<(), AgentRefusal> {
+    let quoted: Vec<String> = command.iter().map(|argument| shell_quote(argument)).collect();
+    let exports: String = environment
         .iter()
-        .map(|argument| format!("'{}'", argument.replace('\'', "'\"'\"'")))
+        .map(|(name, value)| format!("export {name}={}\n", shell_quote(value)))
         .collect();
-    write_file(file, format!("#!/bin/sh\nexec {} \"$@\"\n", quoted.join(" ")).as_bytes())?;
+    write_file(file, format!("#!/bin/sh\n{exports}exec {} \"$@\"\n", quoted.join(" ")).as_bytes())?;
     let mode = fs::metadata(file)
         .map_err(|error| write_failure(format!("cannot read {}: {error}", file.display())))?
         .permissions()
@@ -530,12 +547,17 @@ fn write_launcher(file: &Path, command: &[String]) -> Result<(), AgentRefusal> {
         .map_err(|error| write_failure(format!("cannot make {} executable: {error}", file.display())))
 }
 
+/// `text` as one word of a POSIX shell: in single quotes, with each single quote of it closed, quoted and reopened.
+pub(super) fn shell_quote(text: &str) -> String {
+    format!("'{}'", text.replace('\'', "'\"'\"'"))
+}
+
 /// The real path of `path`, as the IDE resolves it.
 #[expect(
     clippy::disallowed_methods,
     reason = "the guest agent runs on Linux and macOS only, and the trusted paths name the real path that the IDE resolves"
 )]
-fn real_path(path: &Path) -> Result<PathBuf, AgentRefusal> {
+pub(super) fn real_path(path: &Path) -> Result<PathBuf, AgentRefusal> {
     fs::canonicalize(path).map_err(|error| write_failure(format!("cannot resolve {}: {error}", path.display())))
 }
 
@@ -560,7 +582,7 @@ fn xml_attribute(text: &str) -> String {
         .replace('"', "&quot;")
 }
 
-fn create_dirs(directory: &Path) -> Result<(), AgentRefusal> {
+pub(super) fn create_dirs(directory: &Path) -> Result<(), AgentRefusal> {
     fs::create_dir_all(directory).map_err(|error| write_failure(format!("cannot create {}: {error}", directory.display())))
 }
 
@@ -582,7 +604,7 @@ fn write_file(file: &Path, bytes: &[u8]) -> Result<(), AgentRefusal> {
 }
 
 /// Replaces `file` with a new file that only this account can read, so no earlier mode survives.
-fn write_private(file: &Path, bytes: &[u8]) -> Result<(), AgentRefusal> {
+pub(super) fn write_private(file: &Path, bytes: &[u8]) -> Result<(), AgentRefusal> {
     remove_file_if_present(file)?;
     OpenOptions::new()
         .write(true)

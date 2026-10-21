@@ -2,7 +2,7 @@
   <!-- region Generated dependencies - run `Generate Product Layouts` to regenerate -->
   <dependencies>
     <module name="fleet.andel"/>
-    <module name="fleet.rhizomedb"/>
+    <module name="fleet.rpc"/>
     <module name="fleet.util.core"/>
     <module name="intellij.libraries.aalto.xml"/>
     <module name="intellij.libraries.asm"/>
@@ -87,7 +87,6 @@
     <module name="intellij.platform.indexing"/>
     <module name="intellij.platform.instanceContainer"/>
     <module name="intellij.platform.jbr"/>
-    <module name="intellij.platform.kernel"/>
     <module name="intellij.platform.lang"/>
     <module name="intellij.platform.lang.core"/>
     <module name="intellij.platform.locking.impl"/>
@@ -494,7 +493,7 @@
     />
     <registryKey
       key="ide.welcome.screen.recent.project.vcs.actions"
-      defaultValue="false"
+      defaultValue="true"
       description="Show the VCS actions icon and menu for a recent version control project on the welcome screen"
       restartRequired="true"
     />
@@ -542,6 +541,11 @@
       key="ea.diagnostic.endpoint.public.key"
       defaultValue=""
       description="Pinned public key for the ITN error reporting endpoint. Required when ea.diagnostic.endpoint is set. Accepts Base64-encoded SubjectPublicKeyInfo bytes or PEM text"
+    />
+    <registryKey
+      key="ea.diagnostic.max.request.size.mb"
+      defaultValue="50"
+      description="The size limit, in MiB, of the gzipped body of an error report. A report over the limit skips its JFR snapshot. The report listener rejects a body over 100 MiB"
     />
     <registryKey
       key="ea.auto.report.allowed"

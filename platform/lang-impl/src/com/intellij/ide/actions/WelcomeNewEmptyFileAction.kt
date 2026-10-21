@@ -11,11 +11,11 @@ import com.intellij.ide.trustedProjects.TrustedProjectsLocator
 import com.intellij.ide.ui.WindowFocusFrontendService
 import com.intellij.ide.util.DeleteHandler
 import com.intellij.ide.welcomeScreen.WelcomeUtils
-import com.intellij.idea.ActionsBundle
 import com.intellij.internal.statistic.eventLog.events.EventPair
 import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
+import com.intellij.openapi.actionSystem.DataKey
 import com.intellij.openapi.actionSystem.impl.FusAwareAction
 import com.intellij.openapi.application.ApplicationBundle
 import com.intellij.openapi.application.ApplicationManager
@@ -26,7 +26,6 @@ import com.intellij.openapi.fileChooser.FileSaverDescriptor
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.ex.IdeDocumentHistory
-import com.intellij.openapi.fileEditor.impl.EditorWindow
 import com.intellij.openapi.fileEditor.impl.FileEditorManagerImpl
 import com.intellij.openapi.fileEditor.impl.NonProjectFileWritingAccessExtension
 import com.intellij.openapi.fileEditor.impl.NonProjectFileWritingAccessProvider
@@ -49,6 +48,15 @@ import com.intellij.util.containers.toArray
 import org.jetbrains.annotations.ApiStatus
 import java.nio.file.Path
 
+/**
+ * The extension of the new Home file.
+ * [WelcomeNewEmptyFileAction] uses it when the data context has no [CommonDataKeys.LANGUAGE].
+ * For example, the language plugin is disabled.
+ */
+@ApiStatus.Internal
+@JvmField
+val WELCOME_NEW_FILE_EXTENSION: DataKey<String> = DataKey.create("WelcomeNewFileExtension")
+
 internal class WelcomeNewEmptyFileAction : DumbAwareAction(), FusAwareAction {
   override fun getActionUpdateThread() = ActionUpdateThread.BGT
 
@@ -64,7 +72,7 @@ internal class WelcomeNewEmptyFileAction : DumbAwareAction(), FusAwareAction {
     context.filePrefix = "Untitled"
     context.language = CommonDataKeys.LANGUAGE.getData(e.dataContext)
     if (context.language == null) {
-      context.fileExtension = "txt"
+      context.fileExtension = WELCOME_NEW_FILE_EXTENSION.getData(e.dataContext) ?: "txt"
     }
     else {
       context.prepareText = false
@@ -115,43 +123,6 @@ internal class WelcomeNonProjectFileWritingAccessExtension(private val project: 
       return false
     }
     return WelcomeFilesRootType.Util.instance.containsFile(file) || FileEditorManager.getInstance(project).isFileOpen(file)
-  }
-}
-
-@ApiStatus.Internal
-class WelcomeSaveFileAction : DumbAwareAction() {
-  override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
-
-  override fun update(event: AnActionEvent) {
-    val project = event.project
-    event.presentation.isEnabledAndVisible = project != null && isWelcomeFile(project, event)
-    event.presentation.text = ActionsBundle.message("action.WelcomeSaveFileAction.text")
-  }
-
-  override fun actionPerformed(event: AnActionEvent) {
-    val project = event.project ?: return
-    val file = getFile(project, event) ?: return
-    saveWelcomeFileAs(project, file, true)
-  }
-
-  @ApiStatus.Internal
-  fun isWelcomeFile(project: Project, event: AnActionEvent): Boolean = getFile(project, event) != null
-
-  private fun getFile(project: Project, event: AnActionEvent): VirtualFile? {
-    if (!WelcomeUtils.isWelcomeProject(project)) {
-      return null
-    }
-    val document = event.getData(CommonDataKeys.EDITOR)?.document
-    val file = if (document == null) {
-      event.getData(EditorWindow.DATA_KEY)?.getContextFile() ?: return null
-    }
-    else {
-      FileDocumentManager.getInstance().getFile(document) ?: return null
-    }
-    if (!WelcomeFilesRootType.Util.instance.containsFile(file)) {
-      return null
-    }
-    return file
   }
 }
 

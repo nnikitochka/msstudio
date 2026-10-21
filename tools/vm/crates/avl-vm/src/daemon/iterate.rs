@@ -10,10 +10,9 @@ use avl_base::fs::create_private_dir;
 use avl_base::{Exit, Refusal, Scope};
 use avl_host_sys::Ctx;
 use avl_report::report::{self as run_report, Input};
-use avl_wire::daemon::{self as wire, RunEvent, RunEventKind, Runner};
+use avl_wire::daemon::{self as wire, RunEvent, RunEventKind};
 use avl_wire::progress::{Decision, Event, IterationReported, Phase, Subject};
 use avl_wire::report::{EvidenceArtifact, RunReport, safe_evidence_paths};
-use avl_wire::session_log;
 use jiff::Timestamp;
 use serde::Serialize;
 use serde_json::json;
@@ -23,7 +22,6 @@ use crate::daemon::build::{PreparedBuild, lane_inputs_note, plugin_directories_n
 use crate::daemon::host::{Host, WatchdogPolicy};
 use crate::daemon::run::{RunExecution, RunSelection, push_jars};
 use crate::daemon::session_logs;
-use crate::daemon::stage::short;
 use crate::daemon::state::HostState;
 use crate::daemon::traces::TraceSync;
 use crate::lane::ide::{IdeRetention, gc_guest_ides, gc_note, running_guest_ides};
@@ -103,7 +101,6 @@ impl IdeAction {
 pub(crate) struct DaemonDigests<'a> {
     pub launch: &'a str,
     pub mount: &'a str,
-    pub runtime: &'a str,
     /// The context plugin identity. Empty in a record that predates it, which reads as unknown.
     pub plugins: &'a str,
 }
@@ -113,8 +110,7 @@ pub(crate) struct DaemonDigests<'a> {
 pub(crate) struct HealthyDaemon<'a> {
     pub recorded: DaemonDigests<'a>,
     pub ide_running: bool,
-    /// The guest agent of a lane daemon, or `None` when the run does not know it: the JVM daemon runs, or the record of
-    /// the daemon names no agent.
+    /// The guest agent of a lane daemon, or `None` when the run does not know it: the record of the daemon names no agent.
     pub agent: Option<AgentDigests<'a>>,
 }
 
@@ -142,6 +138,10 @@ pub(crate) const AGENT_REINSTALLED: &str = "the guest agent was reinstalled unde
 /// The reason of the restart of a lane daemon whose start agent is not the guest agent that the build made.
 pub(crate) const AGENT_BUILT: &str = "the guest agent of the build changed";
 
+/// The reason of the restart of a daemon of another launch digest. A static flag of the runtime descriptor, a boot
+/// setting of the controller or the daemon environment changed.
+pub(crate) const LAUNCH_CHANGED: &str = "the launch of the daemon changed";
+
 /// What an iteration does with the daemon before it runs: the answer of [`decide_daemon_action`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum DaemonAction {
@@ -152,11 +152,6 @@ pub(crate) enum DaemonAction {
     /// `--fresh-ide`, or a healthy daemon whose IDE is not running: the run launches the IDE again, after a stop of the
     /// running one when there is one.
     Relaunch { stop_ide: bool },
-    /// Only the context plugins changed, and the JVM daemon runs. The controller pushes their files with the hot tier,
-    /// and the run relaunches the IDE on the same context. No share is refreshed and no context is made again. The lane
-    /// daemon gets [`Self::Reuse`] instead: it compares the digest of each plugin directory itself, and it reloads the
-    /// bridge plugin when only that directory changed.
-    RelaunchForPlugins,
     /// A daemon is started: `verb` is `restart` or `start`, and `reason` names the axis that moved. `keep_ide` is true
     /// for a restart: the healthy daemon had an IDE that the new one can attach to.
     Start {
@@ -169,21 +164,16 @@ pub(crate) enum DaemonAction {
 /// The daemon decision of one iteration: values in, a decision out, no I/O.
 ///
 /// A healthy daemon of this launch serves the iteration: after a refresh of the shares when the mount digest moved,
-/// after an IDE stop for `--fresh-ide`, after a launch of the IDE when the daemon holds none, after a relaunch on the
-/// same context when only the context plugins moved and `runner` is the JVM daemon, or as it is. A lane daemon whose
-/// guest agent was reinstalled under it is restarted instead, so the code of the daemon is the code of the install.
+/// after an IDE stop for `--fresh-ide`, after a launch of the IDE when the daemon holds none, or as it is. The lane
+/// daemon compares the digest of each context plugin directory itself, and it reloads the bridge plugin when only that
+/// directory changed. A lane daemon whose guest agent was reinstalled under it is restarted instead, so the code of the daemon is the code of the install.
 /// Any other daemon is started, and the decision names which axis moved, because "restart the daemon" alone cannot
-/// say whether the next start will restage gigabytes or only re-exec a JVM. A restart keeps the IDE of the build's
-/// product. A start without a healthy daemon keeps no IDE, because no daemon can show that the IDE still answers.
+/// say which input of the daemon changed. A restart keeps the IDE of the build's product. A start without a healthy
+/// daemon keeps no IDE, because no daemon can show that the IDE still answers.
 ///
 /// A lane daemon whose start agent is not the agent of the build is restarted, and that restart keeps no IDE. The
 /// context writer is part of the guest agent, so the new daemon makes a fresh context and writes its files.
-pub(crate) fn decide_daemon_action(
-    healthy: Option<HealthyDaemon<'_>>,
-    build: DaemonDigests<'_>,
-    fresh_ide: bool,
-    runner: Runner,
-) -> DaemonAction {
+pub(crate) fn decide_daemon_action(healthy: Option<HealthyDaemon<'_>>, build: DaemonDigests<'_>, fresh_ide: bool) -> DaemonAction {
     let Some(HealthyDaemon {
         recorded,
         ide_running,
@@ -196,7 +186,6 @@ pub(crate) fn decide_daemon_action(
             keep_ide: false,
         };
     };
-    let agent = agent.filter(|_| runner == Runner::Daemon);
     let built_moved = agent.is_some_and(|agent| agent.moved(agent.built));
     if recorded.launch == build.launch {
         return if built_moved {
@@ -217,30 +206,14 @@ pub(crate) fn decide_daemon_action(
             DaemonAction::Relaunch { stop_ide: ide_running }
         } else if !ide_running {
             DaemonAction::Relaunch { stop_ide: false }
-        } else if runner == Runner::Jvm && !recorded.plugins.is_empty() && recorded.plugins != build.plugins {
-            DaemonAction::RelaunchForPlugins
         } else {
             DaemonAction::Reuse
         };
     }
-    let reason = if recorded.runtime == build.runtime {
-        "the controller boot settings changed"
-    } else {
-        "the stable runtime or JBR changed"
-    };
     DaemonAction::Start {
         verb: "restart",
-        reason,
+        reason: LAUNCH_CHANGED,
         keep_ide: !built_moved,
-    }
-}
-
-/// The note of an iteration that reuses the IDE, which says whether a test jar changed.
-pub(crate) const fn reuse_reason(pushed: usize) -> &'static str {
-    if pushed == 0 {
-        "no daemon input and no test jar changed"
-    } else {
-        "the daemon inputs did not change"
     }
 }
 
@@ -307,7 +280,6 @@ impl HostState {
         DaemonDigests {
             launch: &self.launch_digest,
             mount: &self.last_mount_digest,
-            runtime: &self.runtime_digest,
             plugins: &self.last_plugins_digest,
         }
     }
@@ -319,7 +291,6 @@ impl PreparedBuild {
         DaemonDigests {
             launch: &self.launch_digest,
             mount: &self.mount_digest,
-            runtime: &self.runtime_digest,
             plugins: &self.plugins_digest,
         }
     }
@@ -490,32 +461,14 @@ impl Host {
         let (mut state, ide_action) = self.prepare_daemon(ctx, lease, prep, fresh_ide, recreated, &scope).await?;
         attempt.ide_action = ide_action;
 
-        // A worker that never needed a restart would otherwise run unbounded until a lane died of `ENOSPC`
-        // mid-staging: the free-space check is reached through the stager, which only a start calls. One `df`
-        // against a 200 s lane is free, and this is also where per-iteration retention lands - before the run,
-        // never after it, because the evidence pull below reads out of exactly these trees and the current launch is
-        // the newest thing in them.
+        // A worker that never needed a restart would otherwise run unbounded until a lane died of `ENOSPC`. The
+        // `free-space` phase of a start is the only other free-space check, and a warm iteration starts no daemon.
+        // One `df` against a 200 s lane is free.
         let channel = self.channel(worker);
-        self.require_guest_free_space(&self.guest(ctx, channel.as_ref()), Some(&scope))
-            .await?;
+        self.require_guest_free_space(&self.guest(ctx, channel.as_ref())).await?;
 
         // The lane daemon decides about its IDE itself, and its `decision` record reaches the journal as one.
-        let runner = self.daemon.runner();
-        let packed = match runner {
-            Runner::Daemon => session_logs::pack(&self.environment, &self.settings.runtime_root)?,
-            Runner::Jvm => {
-                if self.environment.get(session_log::VARIABLE).is_some() {
-                    self.reporter.note(
-                        format!(
-                            "{} is set, and the JVM runner stages no recorded session; run with --runner daemon",
-                            session_log::VARIABLE
-                        ),
-                        Some(&scope),
-                    );
-                }
-                session_logs::Packed::default()
-            }
-        };
+        let packed = session_logs::pack(&self.environment, &self.settings.runtime_root)?;
         let push_started = Instant::now();
         let pushed = push_jars(ctx, &self.daemon, &state, prep, &packed.files).await?;
         let push_ms = push_started.elapsed().as_secs_f64() * 1000.0;
@@ -525,17 +478,12 @@ impl Host {
             self.reporter
                 .note(format!("recorded sessions: {}", labels.join(", ")), Some(&scope));
         }
-        if ide_action == IdeAction::Reuse && runner == Runner::Jvm {
-            self.decide(Subject::Ide, "reuse", reuse_reason(pushed), &scope);
-        }
         if let Some(reason) = jar_push_reason(pushed) {
             self.decide(Subject::Jars, "push", &reason, &scope);
         }
         self.reporter.note(lane_inputs_note(&prep.lane_inputs), Some(&scope));
         self.reporter.note(plugin_directories_note(&prep.plugin_directories), Some(&scope));
-        if runner == Runner::Daemon
-            && let Some(lane) = &selection.lane
-        {
+        if let Some(lane) = &selection.lane {
             self.publish_performance_plan(prep, lane, &scope);
         }
         if !secrets.is_empty() {
@@ -572,7 +520,6 @@ impl Host {
                 let execution = execution?;
                 let run_ms = run_started.elapsed().as_secs_f64() * 1000.0;
                 if ide_action == IdeAction::Reuse
-                    && runner == Runner::Daemon
                     && let Some(decided) = IdeAction::of_lane_daemon(&execution.events)
                 {
                     attempt.ide_action = decided;
@@ -580,8 +527,6 @@ impl Host {
                 attempt.timing = timing_line(prep, pushed, push_ms, attempt.ide_action, run_ms);
                 // Kept on the attempt from here on: the events are its evidence whatever fails next.
                 let execution = attempt.execution.insert(execution);
-                // The daemon answered this run in the protocol of its runner, so the record names that runner from here on.
-                state.runner = Some(runner);
                 state.last_product_digest = prep.product_digest.clone();
                 state.last_mount_digest = prep.mount_digest.clone();
                 state.last_plugins_digest = prep.plugins_digest.clone();
@@ -605,7 +550,7 @@ impl Host {
             return Err(Refusal::internal("an iteration was reported without its stream"));
         };
         let (archives, traces_error) = traces.finish(self, ctx, pulls).await;
-        let drift = prep.hot_jar_drift();
+        let drift = prep.pushed_file_drift();
         if let Some(drift) = &drift {
             self.reporter.note(drift.clone(), Some(&scope));
         }
@@ -671,18 +616,17 @@ impl Host {
             Some(state) => self.daemon.status(ctx, state).await?,
             None => None,
         };
-        let runner = self.daemon.runner();
         let (installed_agent, built_agent) = match (&recorded, &status) {
             (Some(state), Some(_)) => (
-                self.installed_agent(ctx, state, runner, scope).await,
-                self.built_agent(ctx, state, runner, scope).await,
+                self.installed_agent(ctx, state, scope).await,
+                self.built_agent(ctx, state, scope).await,
             ),
             _ => (None, None),
         };
         let healthy = recorded.as_ref().zip(status.as_ref()).map(|(state, status)| HealthyDaemon {
             recorded: state.daemon_digests(),
             ide_running: status.ide_running,
-            agent: (runner == Runner::Daemon && !state.agent_digest.is_empty()).then(|| AgentDigests {
+            agent: (!state.agent_digest.is_empty()).then(|| AgentDigests {
                 started: &state.agent_digest,
                 installed: installed_agent.as_deref(),
                 built: built_agent.as_deref(),
@@ -691,7 +635,7 @@ impl Host {
         if status.is_none() && !recreated {
             self.manager.require_ready(ctx, lease).await?;
         }
-        let action = decide_daemon_action(healthy, prep.daemon_digests(), fresh_ide, runner);
+        let action = decide_daemon_action(healthy, prep.daemon_digests(), fresh_ide);
         let state = match (action, recorded) {
             (DaemonAction::Start { verb, reason, keep_ide }, _) => {
                 self.decide(Subject::Daemon, verb, reason, scope);
@@ -734,21 +678,17 @@ impl Host {
                 }
                 IdeAction::Relaunch
             }
-            DaemonAction::RelaunchForPlugins => {
-                self.decide(Subject::Ide, "relaunch", "the bridge plugin changed", scope);
-                IdeAction::Relaunch
-            }
             DaemonAction::Reuse | DaemonAction::Start { .. } => IdeAction::Reuse,
         };
         Ok((state, ide_action))
     }
 
-    /// The digest of the guest agent that the guest of the healthy daemon `state` holds, when `runner` is the lane daemon
-    /// and the record names the agent of its start. Otherwise the run does not ask the guest. One `contract` exec of the
+    /// The digest of the guest agent that the guest of the healthy daemon `state` holds, when the record names the agent
+    /// of its start. Otherwise the run does not ask the guest. One `contract` exec of the
     /// agent path answers, about 0.1 s. A digest that moved is a note of the run stream with both digests, and so is a
     /// guest that does not say: then the daemon stays.
-    pub(crate) async fn installed_agent(&self, ctx: &Ctx, state: &HostState, runner: Runner, scope: &Scope) -> Option<String> {
-        if runner != Runner::Daemon || state.agent_digest.is_empty() {
+    pub(crate) async fn installed_agent(&self, ctx: &Ctx, state: &HostState, scope: &Scope) -> Option<String> {
+        if state.agent_digest.is_empty() {
             return None;
         }
         let channel = self.channel(&state.worker);
@@ -782,11 +722,11 @@ impl Host {
         }
     }
 
-    /// The digest of the guest agent that the build of this checkout made, when `runner` is the lane daemon and the
-    /// record of the healthy daemon `state` names the agent of its start. Otherwise the run reads nothing. A digest that
+    /// The digest of the guest agent that the build of this checkout made, when the record of the healthy daemon `state`
+    /// names the agent of its start. Otherwise the run reads nothing. A digest that
     /// moved is a note of the run stream with both digests, and so is an agent that cannot be read: then the daemon stays.
-    pub(crate) async fn built_agent(&self, ctx: &Ctx, state: &HostState, runner: Runner, scope: &Scope) -> Option<String> {
-        if runner != Runner::Daemon || state.agent_digest.is_empty() {
+    pub(crate) async fn built_agent(&self, ctx: &Ctx, state: &HostState, scope: &Scope) -> Option<String> {
+        if state.agent_digest.is_empty() {
             return None;
         }
         let channel = self.channel(&state.worker);
@@ -868,8 +808,8 @@ impl Host {
     /// `/ide/stop` makes the daemon quit and forget its IDE, and `ide-gc --stop-all` cancels every other IDE run of the
     /// worker, such as one that outlived an earlier daemon. The guest agent owns each IDE process. So the refresh starts
     /// only when the supervisor reports every IDE run finished: an IDE that runs from a share makes its unmount busy.
-    /// The controller holds the lease, so no run starts in between, and the next run launches the IDE again. Both
-    /// runners serve `/ide/stop`, so the remount needs no route of its own.
+    /// The controller holds the lease, so no run starts in between, and the next run launches the IDE again. The lane
+    /// daemon serves `/ide/stop`, so the remount needs no route of its own.
     ///
     /// [`Manager::refresh_shares`]: crate::worker::worker::Manager::refresh_shares
     async fn remount_around(&self, ctx: &Ctx, worker: &str, scope: &Scope, state: &HostState, prep: &PreparedBuild) -> Result<(), Refusal> {
@@ -1008,4 +948,9 @@ pub(crate) fn evidence_name(guest_path: &str) -> String {
             }
         })
         .collect()
+}
+
+/// The first twelve characters of a digest, the way notes name a guest agent.
+fn short(digest: &str) -> &str {
+    digest.get(..12).unwrap_or(digest)
 }

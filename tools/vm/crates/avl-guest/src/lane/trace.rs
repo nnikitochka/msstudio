@@ -2,7 +2,8 @@
 //! [`avl_trace::protocol`].
 //!
 //! The lane daemon starts the recorder once per iteration, with no argument, and roots its bundles at
-//! `<iterationDir>/air-traces` as the JVM daemon did. It sends `hello`, then per scenario `scenario`, the spans, one
+//! `<iterationDir>/air-traces`. Under a Bazel test, `lane-run` roots them at `$TEST_UNDECLARED_OUTPUTS_DIR/air-traces`
+//! instead, so Bazel keeps them. It sends `hello`, then per scenario `scenario`, the spans, one
 //! `call` per bridge request, the snapshots, the attachments and `done`. Its standard input reaching EOF ends the
 //! session, so the recorder finishes a truncated bundle when the lane daemon dies.
 //!
@@ -101,6 +102,15 @@ pub(crate) trait Transport: Send {
     fn close(&mut self);
 }
 
+/// The recorders that this process runs, by pid. The monitor of `lane-run` kills them at the hard stop, because the run
+/// thread that owns them is then the thread that does not return.
+static RUNNING_RECORDERS: Mutex<Vec<u32>> = Mutex::new(Vec::new());
+
+/// The pids of the recorders that this process runs now.
+pub(crate) fn running_recorders() -> Vec<u32> {
+    RUNNING_RECORDERS.lock().unwrap_or_else(PoisonError::into_inner).clone()
+}
+
 /// The `air-trace-record` process, over its standard input and output.
 ///
 /// No pipe write happens on the run thread: a recorder that stopped reading would block it in the kernel. One thread
@@ -127,6 +137,7 @@ impl RecorderProcess {
             let _ = child.kill();
             return Err("the recorder has no pipes".to_owned());
         };
+        RUNNING_RECORDERS.lock().unwrap_or_else(PoisonError::into_inner).push(child.id());
         let (lines, pending) = mpsc::sync_channel::<Vec<u8>>(MAX_PENDING_LINES);
         let writing_since = Arc::new(Mutex::new(None));
         {
@@ -178,6 +189,24 @@ impl RecorderProcess {
             queued: 0,
             gone: None,
         })
+    }
+
+    /// Waits [`EXIT_GRACE`] for the recorder to exit after EOF, and kills it after that.
+    fn await_exit(&mut self) {
+        let deadline = Instant::now() + EXIT_GRACE;
+        loop {
+            match self.child.try_wait() {
+                Ok(Some(_)) => return,
+                Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(100)),
+                _ => break,
+            }
+        }
+        log(&format!(
+            "the recorder did not exit within {} s of EOF; killing it",
+            EXIT_GRACE.as_secs()
+        ));
+        let _ = self.child.kill();
+        let _ = self.child.wait();
     }
 
     fn gone_because(&mut self, reason: String) -> String {
@@ -233,20 +262,12 @@ impl Transport for RecorderProcess {
         self.gone_because("the recorder's input is closed".to_owned());
         // EOF: the input thread ends when the queue closes, and then drops the pipe.
         self.lines = None;
-        let deadline = Instant::now() + EXIT_GRACE;
-        loop {
-            match self.child.try_wait() {
-                Ok(Some(_)) => return,
-                Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(100)),
-                _ => break,
-            }
-        }
-        log(&format!(
-            "the recorder did not exit within {} s of EOF; killing it",
-            EXIT_GRACE.as_secs()
-        ));
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        self.await_exit();
+        let pid = self.child.id();
+        RUNNING_RECORDERS
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .retain(|running| *running != pid);
     }
 }
 
@@ -265,7 +286,8 @@ pub(crate) struct TraceFailure {
     pub message: Option<String>,
     /// The stack lines, each `at <frame>` or `Caused by: <type>: <message>`, without the header line.
     pub stack: Vec<String>,
-    /// A failure that did not reach a verdict: a scenario that never ran, or a step the watchdog ended.
+    /// A failure that did not reach a verdict: a scenario that never ran, a step the watchdog ended, or a body that
+    /// aborted its scenario.
     pub aborted: bool,
 }
 
@@ -384,12 +406,21 @@ impl Trace {
         trace
     }
 
-    /// The `hello` of the iteration directory `iteration_dir`, whose run id is `run_id`.
-    pub(crate) fn hello(iteration_dir: &Path, run_id: &str, screen: bool, bridge: Option<Bridge>) -> HelloCommand {
+    /// The `hello` of the iteration directory `iteration_dir`, whose run id is `run_id`. The root is the `air-traces` of
+    /// `bazel_outputs` with the launcher `bazel` when a Bazel test names its outputs directory, else the `air-traces` of
+    /// the iteration directory with the launcher `daemon`.
+    pub(crate) fn hello(
+        iteration_dir: &Path,
+        bazel_outputs: Option<&Path>,
+        run_id: &str,
+        screen: bool,
+        bridge: Option<Bridge>,
+    ) -> HelloCommand {
+        let (parent, launcher) = bazel_outputs.map_or((iteration_dir, Launcher::Daemon), |outputs| (outputs, Launcher::Bazel));
         HelloCommand {
-            root: iteration_dir.join(ROOT_DIR_NAME).display().to_string(),
+            root: parent.join(ROOT_DIR_NAME).display().to_string(),
             run_id: run_id.to_owned(),
-            launcher: Launcher::Daemon,
+            launcher,
             screen,
             bridge,
         }

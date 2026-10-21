@@ -1076,6 +1076,26 @@ public abstract class KotlinFirInlineTestGenerated extends AbstractKotlinFirInli
                 runTest("testData/inline/inlineVariableOrProperty/SeparateInitializerInTry.kt");
             }
 
+            @TestMetadata("SuperCallInSameClass.kt")
+            public void testSuperCallInSameClass() throws Exception {
+                runTest("testData/inline/inlineVariableOrProperty/SuperCallInSameClass.kt");
+            }
+
+            @TestMetadata("SuperCallInSubclass.kt")
+            public void testSuperCallInSubclass() throws Exception {
+                runTest("testData/inline/inlineVariableOrProperty/SuperCallInSubclass.kt");
+            }
+
+            @TestMetadata("SuperCallOnOtherInstance.kt")
+            public void testSuperCallOnOtherInstance() throws Exception {
+                runTest("testData/inline/inlineVariableOrProperty/SuperCallOnOtherInstance.kt");
+            }
+
+            @TestMetadata("SuperCallOutsideClass.kt")
+            public void testSuperCallOutsideClass() throws Exception {
+                runTest("testData/inline/inlineVariableOrProperty/SuperCallOutsideClass.kt");
+            }
+
             @TestMetadata("thisQualificationInsideExtensionFunction.kt")
             public void testThisQualificationInsideExtensionFunction() throws Exception {
                 runTest("testData/inline/inlineVariableOrProperty/thisQualificationInsideExtensionFunction.kt");
@@ -2459,9 +2479,34 @@ public abstract class KotlinFirInlineTestGenerated extends AbstractKotlinFirInli
                 runTest("testData/inline/namedFunction/nameConflictTwice2.kt");
             }
 
+            @TestMetadata("namedArgumentBeforeVararg.kt")
+            public void testNamedArgumentBeforeVararg() throws Exception {
+                runTest("testData/inline/namedFunction/namedArgumentBeforeVararg.kt");
+            }
+
+            @TestMetadata("namedArgumentToSingleVararg.kt")
+            public void testNamedArgumentToSingleVararg() throws Exception {
+                runTest("testData/inline/namedFunction/namedArgumentToSingleVararg.kt");
+            }
+
+            @TestMetadata("namedArgumentToVararg.kt")
+            public void testNamedArgumentToVararg() throws Exception {
+                runTest("testData/inline/namedFunction/namedArgumentToVararg.kt");
+            }
+
+            @TestMetadata("namedArgumentToVarargWithSpread.kt")
+            public void testNamedArgumentToVarargWithSpread() throws Exception {
+                runTest("testData/inline/namedFunction/namedArgumentToVarargWithSpread.kt");
+            }
+
             @TestMetadata("namedArguments.kt")
             public void testNamedArguments() throws Exception {
                 runTest("testData/inline/namedFunction/namedArguments.kt");
+            }
+
+            @TestMetadata("namedArgumentsInSeveralCalls.kt")
+            public void testNamedArgumentsInSeveralCalls() throws Exception {
+                runTest("testData/inline/namedFunction/namedArgumentsInSeveralCalls.kt");
             }
 
             @TestMetadata("nested.kt")
@@ -2674,6 +2719,61 @@ public abstract class KotlinFirInlineTestGenerated extends AbstractKotlinFirInli
                 runTest("testData/inline/namedFunction/smartCastInThis.kt");
             }
 
+            @TestMetadata("superCallDispatch.kt")
+            public void testSuperCallDispatch() throws Exception {
+                runTest("testData/inline/namedFunction/superCallDispatch.kt");
+            }
+
+            @TestMetadata("superCallInAnonymousObject.kt")
+            public void testSuperCallInAnonymousObject() throws Exception {
+                runTest("testData/inline/namedFunction/superCallInAnonymousObject.kt");
+            }
+
+            @TestMetadata("superCallInCompanionObject.kt")
+            public void testSuperCallInCompanionObject() throws Exception {
+                runTest("testData/inline/namedFunction/superCallInCompanionObject.kt");
+            }
+
+            @TestMetadata("superCallInReceiverLambda.kt")
+            public void testSuperCallInReceiverLambda() throws Exception {
+                runTest("testData/inline/namedFunction/superCallInReceiverLambda.kt");
+            }
+
+            @TestMetadata("superCallInSameClass.kt")
+            public void testSuperCallInSameClass() throws Exception {
+                runTest("testData/inline/namedFunction/superCallInSameClass.kt");
+            }
+
+            @TestMetadata("superCallInSubclass.kt")
+            public void testSuperCallInSubclass() throws Exception {
+                runTest("testData/inline/namedFunction/superCallInSubclass.kt");
+            }
+
+            @TestMetadata("superCallOnImplicitOtherInstance.kt")
+            public void testSuperCallOnImplicitOtherInstance() throws Exception {
+                runTest("testData/inline/namedFunction/superCallOnImplicitOtherInstance.kt");
+            }
+
+            @TestMetadata("superCallOnOtherInstance.kt")
+            public void testSuperCallOnOtherInstance() throws Exception {
+                runTest("testData/inline/namedFunction/superCallOnOtherInstance.kt");
+            }
+
+            @TestMetadata("superCallOutsideClass.kt")
+            public void testSuperCallOutsideClass() throws Exception {
+                runTest("testData/inline/namedFunction/superCallOutsideClass.kt");
+            }
+
+            @TestMetadata("superCallQualifiedDispatch.kt")
+            public void testSuperCallQualifiedDispatch() throws Exception {
+                runTest("testData/inline/namedFunction/superCallQualifiedDispatch.kt");
+            }
+
+            @TestMetadata("superCallQualifiedOutsideClass.kt")
+            public void testSuperCallQualifiedOutsideClass() throws Exception {
+                runTest("testData/inline/namedFunction/superCallQualifiedOutsideClass.kt");
+            }
+
             @TestMetadata("thisAsArgument.kt")
             public void testThisAsArgument() throws Exception {
                 runTest("testData/inline/namedFunction/thisAsArgument.kt");
@@ -2737,6 +2837,16 @@ public abstract class KotlinFirInlineTestGenerated extends AbstractKotlinFirInli
             @TestMetadata("UnitReturnType4.kt")
             public void testUnitReturnType4() throws Exception {
                 runTest("testData/inline/namedFunction/UnitReturnType4.kt");
+            }
+
+            @TestMetadata("unresolvedCallAfterNamedCall.kt")
+            public void testUnresolvedCallAfterNamedCall() throws Exception {
+                runTest("testData/inline/namedFunction/unresolvedCallAfterNamedCall.kt");
+            }
+
+            @TestMetadata("unresolvedCallBeforeNamedCall.kt")
+            public void testUnresolvedCallBeforeNamedCall() throws Exception {
+                runTest("testData/inline/namedFunction/unresolvedCallBeforeNamedCall.kt");
             }
 
             @TestMetadata("unresolvedReference.kt")

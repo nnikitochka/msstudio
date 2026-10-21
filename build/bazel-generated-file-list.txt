@@ -711,7 +711,6 @@ notebooks/visualization/testFramework
 platform/analysis-api
 platform/analysis-impl
 platform/backend
-platform/backend/baseline
 platform/backend/observation
 platform/backend/workspace
 platform/backend/workspace.impl
@@ -881,15 +880,11 @@ platform/jewel/samples/showcase
 platform/jewel/samples/standalone
 platform/jewel/ui
 platform/jewel/ui-tests
-platform/kernel/backend
-platform/kernel/backend/baseline
-platform/kernel/intellij.platform.kernel.impl
 platform/kernel/klogger
 platform/kernel/rpc
 platform/kernel/rpc.backend
 platform/kernel/rpc.lite
 platform/kernel/rpc.tests
-platform/kernel/shared
 platform/lang-api
 platform/lang-core
 platform/lang-impl
@@ -936,7 +931,6 @@ platform/platform-frontend
 platform/platform-impl
 platform/platform-impl/bootstrap
 platform/platform-impl/bootstrap/eel
-platform/platform-impl/bootstrap/kernel
 platform/platform-impl/codeinsight-inline
 platform/platform-impl/color-picker
 platform/platform-impl/concurrency
@@ -1158,6 +1152,7 @@ platform/vcs-api
 platform/vcs-api/shared
 platform/vcs-api/vcs-api-core
 platform/vcs-impl
+platform/vcs-impl/backend
 platform/vcs-impl/debugger
 platform/vcs-impl/exec
 platform/vcs-impl/frontend
@@ -1315,6 +1310,7 @@ plugins/git4idea/hosting
 plugins/git4idea/intellij.vcs.git.coverage
 plugins/git4idea/localHistory
 plugins/git4idea/performanceTesting
+plugins/git4idea/rpc.backend
 plugins/git4idea/rt
 plugins/git4idea/shared
 plugins/git4idea/terminal
@@ -2058,7 +2054,6 @@ uast/uast-common-ide
 uast/uast-java
 uast/uast-java-ide
 uast/uast-tests
-updater
 xml/dom-impl
 xml/dom-openapi
 xml/dom-tests
