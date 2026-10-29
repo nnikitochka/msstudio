@@ -2,7 +2,7 @@ package com.intellij.grazie.remote
 
 import com.intellij.grazie.GrazieConfig
 import com.intellij.grazie.GrazieDynamic
-import com.intellij.grazie.GrazieTestBase
+import com.intellij.grazie.GrazieTestFixture
 import com.intellij.grazie.jlanguage.Lang
 import com.intellij.openapi.util.Disposer
 import com.intellij.testFramework.TemporaryDirectory
@@ -21,7 +21,7 @@ abstract class BundleInfoTestCase: BasePlatformTestCase() {
 
   override fun setUp() {
     super.setUp()
-    GrazieTestBase.maskSaxParserFactory(testRootDisposable)
+    GrazieTestFixture.maskSaxParserFactory(testRootDisposable)
     Disposer.register(testRootDisposable) { GrazieConfig.update { GrazieConfig.State() } }
   }
 
@@ -57,12 +57,13 @@ abstract class BundleInfoTestCase: BasePlatformTestCase() {
   }
 
   private fun downloadLanguages(descriptor: RemoteLangDescriptor): Path {
+    val outputDir = temporaryDirectory.createDir()
     val downloaderService = DownloadableFileService.getInstance()
     val descriptors = listOf(descriptor)
       .map { downloaderService.createFileDescription(it.url, it.storageDescriptor) }
     downloaderService
       .createDownloader(descriptors, "Downloading ${descriptor.iso}")
-      .download(GrazieDynamic.dynamicFolder.toFile())
-    return GrazieDynamic.dynamicFolder.resolve(descriptor.storageDescriptor)
+      .download(outputDir.toFile())
+    return outputDir.resolve(descriptor.storageDescriptor)
   }
 }

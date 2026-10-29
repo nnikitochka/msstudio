@@ -63,6 +63,7 @@ import com.intellij.execution.process.ProcessOutputTypes;
 import com.intellij.execution.runners.ExecutionUtil;
 import com.intellij.idea.ActionsBundle;
 import com.intellij.java.debugger.impl.shared.engine.NodeRendererId;
+import com.intellij.notification.NotificationType;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ApplicationNamesInfo;
@@ -107,6 +108,7 @@ import com.intellij.util.containers.DisposableWrapperList;
 import com.intellij.util.lang.JavaVersion;
 import com.intellij.util.system.OS;
 import com.intellij.util.ui.UIUtil;
+import com.intellij.xdebugger.DapMode;
 import com.intellij.xdebugger.XDebugSession;
 import com.intellij.xdebugger.XDebuggerBundle;
 import com.intellij.xdebugger.XDebuggerManager;
@@ -1965,11 +1967,14 @@ public abstract class DebugProcessImpl extends UserDataHolderBase implements Deb
 
   /**
    * Loads and initializes a class by its qualified name in the given evaluation context and using the specified class loader.
+   * The evaluation context must allow class loading.
    */
   public ReferenceType loadClass(@NotNull EvaluationContextImpl evaluationContext, String qName, ClassLoaderReference classLoader)
     throws InvocationException, ClassNotLoadedException, IncompatibleThreadStateException, InvalidTypeException, EvaluateException {
 
     DebuggerManagerThreadImpl.assertIsManagerThread();
+    LOG.assertTrue(evaluationContext.isAutoLoadClasses(), "Class loading is disabled: " + qName);
+
     qName = reformatArrayName(qName);
     VirtualMachineProxyImpl virtualMachine = getCurrentVm(evaluationContext.getSuspendContext());
     ClassType classClassType = (ClassType)ContainerUtil.getFirstItem(virtualMachine.classesByName(CommonClassNames.JAVA_LANG_CLASS));
@@ -2707,8 +2712,7 @@ public abstract class DebugProcessImpl extends UserDataHolderBase implements Deb
       }
 
       if (myStackFrame.isBottom()) {
-        DebuggerInvocationUtil.invokeLaterAnyModality(project, () -> Messages.showMessageDialog(project, JavaDebuggerBundle
-          .message("error.pop.bottom.stackframe"), XDebuggerBundle.message("xdebugger.reset.frame.title"), Messages.getErrorIcon()));
+        showError(JavaDebuggerBundle.message("error.pop.bottom.stackframe"));
         return;
       }
 
@@ -2727,6 +2731,13 @@ public abstract class DebugProcessImpl extends UserDataHolderBase implements Deb
     }
 
     private void showError(@NlsContexts.DialogMessage String message) {
+      // A DAP server cannot show a modal dialog: it relays the "Debugger messages" notification to the client
+      if (DapMode.isDap()) {
+        XDebuggerManagerImpl.getNotificationGroup()
+          .createNotification(XDebuggerBundle.message("xdebugger.reset.frame.title"), message, NotificationType.ERROR)
+          .notify(project);
+        return;
+      }
       DebuggerInvocationUtil.invokeLaterAnyModality(project, () ->
         Messages.showMessageDialog(project, message,
                                    XDebuggerBundle.message("xdebugger.reset.frame.title"), Messages.getErrorIcon()));

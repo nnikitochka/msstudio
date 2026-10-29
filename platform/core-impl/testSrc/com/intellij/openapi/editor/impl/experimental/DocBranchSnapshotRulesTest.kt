@@ -3,10 +3,10 @@ package com.intellij.openapi.editor.impl.experimental
 
 import com.intellij.openapi.editor.ex.DocumentModState
 import com.intellij.openapi.editor.ex.DocumentOp
+import com.intellij.openapi.editor.ex.DocumentOp.Companion.cleanLinesOp
 import com.intellij.openapi.editor.ex.DocumentOp.Companion.deleteOp
 import com.intellij.openapi.editor.ex.DocumentOp.Companion.insertOp
 import com.intellij.openapi.editor.ex.DocumentOp.Companion.modStampOp
-import com.intellij.openapi.editor.ex.DocumentOp.Companion.unmodifiedLinesOp
 import com.intellij.openapi.editor.ex.DocumentSnapshot
 import com.intellij.openapi.editor.ex.DocumentText
 import com.intellij.openapi.editor.ex.experimental.Agent
@@ -48,15 +48,8 @@ internal class DocBranchSnapshotRulesTest {
   @Test
   fun `a clear of an untouched text keeps the instance`() {
     for (value in values("a\nb\nc")) {
-      val clear = unmodifiedLinesOp(0, Int.MAX_VALUE, IntArray(0))
+      val clear = cleanLinesOp(0, Int.MAX_VALUE, IntArray(0))
       assertTrue(value.isSameAs(value.applyOp(clear)), value.kind)
-    }
-  }
-
-  @Test
-  fun `dumpState lists the line intervals`() {
-    for (value in values("ab\ncd")) {
-      assertEquals("intervals:\n0: 0-2, 1: 3-5", value.dumpState(), value.kind)
     }
   }
 
@@ -103,8 +96,6 @@ internal class DocBranchSnapshotRulesTest {
 
     fun modState(): DocumentModState
 
-    fun dumpState(): String
-
     fun isSameAs(other: Value): Boolean
   }
 
@@ -121,10 +112,6 @@ internal class DocBranchSnapshotRulesTest {
 
     override fun modState(): DocumentModState {
       return snapshot.modState()
-    }
-
-    override fun dumpState(): String {
-      return snapshot.dumpState()
     }
 
     override fun isSameAs(other: Value): Boolean {
@@ -145,10 +132,6 @@ internal class DocBranchSnapshotRulesTest {
 
     override fun modState(): DocumentModState {
       return branch.modState()
-    }
-
-    override fun dumpState(): String {
-      return branch.dumpState()
     }
 
     override fun isSameAs(other: Value): Boolean {

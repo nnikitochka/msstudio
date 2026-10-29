@@ -26,6 +26,7 @@ jvm_library(
         "//plugins/gradle/completion/kotlin",
         "//plugins/gradle",
         "//plugins/kotlin/gradle/scripting",
+        "//platform/main/intellij.platform.monolith.main:monolith-main",
     ],
 )
 
@@ -48,6 +49,7 @@ jvm_library(
         "//plugins/kotlin:kotlin-plugin-community-main_test_lib",
         "//platform/ide-core:ide-core_test_lib",
         "//plugins/kotlin/gradle/scripting:scripting_test_lib",
+        "//platform/main/intellij.platform.monolith.main:monolith-main_test_lib",
     ],
     deps = [
         # do not sort,
@@ -114,6 +116,8 @@ jvm_library(
         "//libraries/junit6:junit6_test_lib",
         "//libraries/junit6-params",
         "//libraries/junit6-params:junit6-params_test_lib",
+        "//platform/scratch/plugin",
+        "//platform/scratch/plugin:plugin_test_lib",
     ],
 )
 ### auto-generated section `build intellij.gradle.completion.kotlin.tests` end

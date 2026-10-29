@@ -72,6 +72,13 @@
     <registryKey key="vcs.diff.preview.scope.navigation.to.group" defaultValue="true" restartRequired="false"
                  description="Scope diff file navigation ('Go to change' popup and file counter) to the current change's group (e.g. changelist or unversioned files). When disabled, navigation spans all changes."/>
 
+    <registryKey key="vcs.show.structural.changes" defaultValue="false" restartRequired="false"
+                 description="Enables structural changes in the Changes view"/>
+    <registryKey key="vcs.show.structural.changes.max.files" defaultValue="100" restartRequired="false"
+                 description="The Changes view shows no structural changes when it has more changed files"/>
+    <registryKey key="vcs.show.structural.changes.dim" defaultValue="65" restartRequired="false"
+                 description="The strength of the dim around a structural change in its preview, in percent from 0 to 100"/>
+
     <projectService serviceInterface="com.intellij.platform.vcs.impl.shared.changes.ChangesViewSettings"
                     serviceImplementation="com.intellij.platform.vcs.impl.shared.changes.ChangesViewSettingsImpl"/>
 

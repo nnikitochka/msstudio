@@ -1,17 +1,27 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 @file:Suppress("ReplaceGetOrSet", "ReplacePutWithAssignment")
 @file:OptIn(SettingsInternalApi::class)
 
 package com.intellij.configurationStore
 
+import com.intellij.codeWithMe.ClientId
+import com.intellij.codeWithMe.asContextElement
 import com.intellij.configurationStore.schemeManager.ROOT_CONFIG
 import com.intellij.ide.plugins.PluginManagerCore
+import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.impl.ApplicationImpl
+import com.intellij.openapi.client.ClientAppSession
+import com.intellij.openapi.client.ClientAppSessionImpl
+import com.intellij.openapi.client.ClientSessionsManager
+import com.intellij.openapi.client.ClientType
 import com.intellij.openapi.components.ComponentManagerEx
+import com.intellij.openapi.components.RoamingType
 import com.intellij.openapi.components.SerializablePersistentStateComponent
 import com.intellij.openapi.components.State
 import com.intellij.openapi.components.Storage
 import com.intellij.openapi.components.StoragePathMacros
+import com.intellij.openapi.components.service
 import com.intellij.openapi.util.JDOMUtil
 import com.intellij.platform.settings.DelegatedSettingsController
 import com.intellij.platform.settings.GetResult
@@ -23,17 +33,23 @@ import com.intellij.platform.settings.SettingDescriptor
 import com.intellij.platform.settings.SettingsController
 import com.intellij.platform.settings.local.SettingsControllerMediator
 import com.intellij.testFramework.assertions.Assertions.assertThat
+import com.intellij.testFramework.common.timeoutRunBlocking
+import com.intellij.testFramework.junit5.RegistryKey
 import com.intellij.testFramework.junit5.TestApplication
+import com.intellij.testFramework.junit5.TestDisposable
 import com.intellij.testFramework.rules.InMemoryFsExtension
 import com.intellij.util.io.write
 import com.intellij.util.xmlb.SettingsInternalApi
 import com.intellij.util.xmlb.annotations.Attribute
+import com.intellij.util.xmlb.annotations.Property
+import com.intellij.util.xmlb.annotations.Tag
 import com.intellij.util.xmlb.annotations.Text
 import com.intellij.util.xmlb.annotations.XCollection
 import com.intellij.util.xmlb.jdomToJson
 import com.intellij.util.xmlb.jsonDomToXml
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -112,6 +128,153 @@ class ControllerBackedStoreTest {
   }
 
   private fun encodePrimitiveValue(v: String) = JsonPrimitive(v)
+
+  @Test
+  @RegistryKey(key = "store.save.use.modificationCount", value = "true")
+  fun `remote save preserves a pending new component`(): Unit = timeoutRunBlocking(context = ClientId.localId.asContextElement()) {
+    val store = createRemoteSaveStore()
+    val component = ControllerTestComponent()
+    store.initComponent(component, serviceDescriptor = null, pluginId = PluginManagerCore.CORE_ID)
+    val file = appConfig.resolve(TEST_COMPONENT_FILE_NAME)
+    for (value in listOf("first", "latest")) {
+      component.update(ControllerTestState(foo = value))
+      withContext(ClientId("remote-save-test").asContextElement()) {
+        store.save(forceSavingAllSettings = true)
+      }
+      assertThat(file).doesNotExist()
+      assertThat(data.get("TestState.foo")).isEqualTo(JsonPrimitive(value))
+    }
+
+    store.save(forceSavingAllSettings = false)
+    assertThat(JDOMUtil.load(file)).isEqualTo("""
+      <application>
+        <component name="TestState" foo="latest" />
+      </application>
+    """.trimIndent())
+
+    data.clear()
+    withContext(ClientId("remote-save-test").asContextElement()) {
+      store.save(forceSavingAllSettings = true)
+    }
+    assertThat(data).isEmpty()
+  }
+
+  @Test
+  @RegistryKey(key = "store.save.use.modificationCount", value = "true")
+  fun `remote save preserves pending changes to an existing component`(): Unit = timeoutRunBlocking(context = ClientId.localId.asContextElement()) {
+    val store = createRemoteSaveStore()
+    val component = ControllerTestComponent()
+    store.initComponent(component, serviceDescriptor = null, pluginId = PluginManagerCore.CORE_ID)
+    component.update(ControllerTestState(foo = "backend"))
+    store.save(forceSavingAllSettings = false)
+
+    component.update(ControllerTestState(foo = "backend", bar = "frontend"))
+    withContext(ClientId("remote-save-test").asContextElement()) {
+      store.save(forceSavingAllSettings = true)
+    }
+
+    val file = appConfig.resolve(TEST_COMPONENT_FILE_NAME)
+    assertThat(JDOMUtil.load(file)).isEqualTo("""
+      <application>
+        <component name="TestState" foo="backend" />
+      </application>
+    """.trimIndent())
+    assertThat(data.get("TestState.bar")).isEqualTo(JsonPrimitive("frontend"))
+
+    store.save(forceSavingAllSettings = false)
+    val reloadedComponent = ControllerTestComponent()
+    createStore { GetResult.inapplicable() }.initComponent(reloadedComponent, serviceDescriptor = null, pluginId = PluginManagerCore.CORE_ID)
+    assertThat(reloadedComponent.state.foo).isEqualTo("backend")
+    assertThat(reloadedComponent.state.bar).isEqualTo("frontend")
+  }
+
+  @Test
+  @RegistryKey(key = "store.save.use.modificationCount", value = "true")
+  fun `remote save preserves a pending reset to defaults`(): Unit = timeoutRunBlocking(context = ClientId.localId.asContextElement()) {
+    val store = createRemoteSaveStore()
+    val component = ControllerTestComponent()
+    store.initComponent(component, serviceDescriptor = null, pluginId = PluginManagerCore.CORE_ID)
+    component.update(ControllerTestState(foo = "backend"))
+    store.save(forceSavingAllSettings = false)
+
+    component.update(ControllerTestState())
+    withContext(ClientId("remote-save-test").asContextElement()) {
+      store.save(forceSavingAllSettings = true)
+    }
+
+    val file = appConfig.resolve(TEST_COMPONENT_FILE_NAME)
+    assertThat(file).exists()
+    assertThat(data).containsEntry("TestState.foo", null)
+
+    store.save(forceSavingAllSettings = false)
+    assertThat(file).doesNotExist()
+  }
+
+  @Test
+  @RegistryKey(key = "store.save.use.modificationCount", value = "true")
+  fun `a remote save does not postpone a pending non-roamable local save`(): Unit = timeoutRunBlocking(context = ClientId.localId.asContextElement()) {
+    @State(name = "TestState", storages = [Storage(value = TEST_COMPONENT_FILE_NAME, roamingType = RoamingType.DISABLED)], allowLoadInTests = true)
+    class NonRoamableComponent : SerializablePersistentStateComponent<ControllerTestState>(ControllerTestState()) {
+      fun update(value: String) {
+        updateState { ControllerTestState(foo = value) }
+      }
+    }
+
+    val store = createRemoteSaveStore()
+    val component = NonRoamableComponent()
+    store.initComponent(component, serviceDescriptor = null, pluginId = PluginManagerCore.CORE_ID)
+    val info = store.getComponents().getValue("TestState")
+    info.lastSaved = 0
+    component.update("pending")
+    withContext(ClientId("remote-save-test").asContextElement()) {
+      store.save(forceSavingAllSettings = true)
+    }
+    assertThat(data.get("TestState.foo")).isEqualTo(JsonPrimitive("pending"))
+    store.save(forceSavingAllSettings = false)
+    val file = appConfig.resolve(TEST_COMPONENT_FILE_NAME)
+    assertThat(file).exists()
+    assertThat(JDOMUtil.load(file)).isEqualTo("""
+      <application>
+        <component name="TestState" foo="pending" />
+      </application>
+    """.trimIndent())
+    assertThat(info.lastSaved).isGreaterThan(0)
+
+    component.update("next")
+    store.save(forceSavingAllSettings = false)
+    assertThat(JDOMUtil.load(file).getChild("component").getAttributeValue("foo")).isEqualTo("pending")
+    store.save(forceSavingAllSettings = true)
+    assertThat(JDOMUtil.load(file).getChild("component").getAttributeValue("foo")).isEqualTo("next")
+  }
+
+  @Test
+  @RegistryKey(key = "store.save.use.modificationCount", value = "true")
+  fun `a remote save selects the per-client instance`(@TestDisposable disposable: Disposable): Unit =
+    timeoutRunBlocking(context = ClientId.localId.asContextElement()) {
+      val application = ApplicationManager.getApplication() as ApplicationImpl
+      val clientId = ClientId("per-client-save-test")
+      val session = object : ClientAppSessionImpl(clientId, ClientType.CONTROLLER, application) {
+        override val name: String = "Settings test"
+      }
+      service<ClientSessionsManager<ClientAppSession>>().registerSession(disposable, session)
+      val remoteComponent = PerClientTestComponent()
+      session.replaceServiceInstance(PerClientTestComponent::class.java, remoteComponent, disposable)
+
+      val store = createRemoteSaveStore()
+      val hostComponent = PerClientTestComponent()
+      store.initComponent(hostComponent, serviceDescriptor = null, pluginId = PluginManagerCore.CORE_ID)
+      hostComponent.update("host")
+      remoteComponent.update("remote")
+      withContext(clientId.asContextElement()) {
+        assertThat(application.getService(PerClientTestComponent::class.java)).isSameAs(remoteComponent)
+        store.save(forceSavingAllSettings = true)
+      }
+      assertThat(data.get("TestState.foo")).isEqualTo(JsonPrimitive("remote"))
+      assertThat(appConfig.resolve(TEST_COMPONENT_FILE_NAME)).doesNotExist()
+
+      store.save(forceSavingAllSettings = false)
+      assertThat(JDOMUtil.load(appConfig.resolve(TEST_COMPONENT_FILE_NAME)).getChild("component").getAttributeValue("foo")).isEqualTo("host")
+    }
 
   @Test
   fun `pass Element`() = runBlocking<Unit>(Dispatchers.Default) {
@@ -340,6 +503,42 @@ class ControllerBackedStoreTest {
     assertThat(component.state.bean.foo).isEqualTo("test")
   }
 
+  @Test
+  fun `a controller can use a local collection without a wrapper`(): Unit = timeoutRunBlocking {
+    @State(name = "TestState", storages = [Storage(TEST_COMPONENT_FILE_NAME)], allowLoadInTests = true)
+    class ListComponent : SerializablePersistentStateComponent<UnwrappedListState>(UnwrappedListState())
+
+    for (hasLocalItems in listOf(false, true)) {
+      if (hasLocalItems) {
+        writeConfig(TEST_COMPONENT_FILE_NAME, """
+          <application>
+            <component name="TestState">
+              <item name="a" enabled="true" />
+              <item name="b" />
+            </component>
+          </application>
+        """.trimIndent())
+      }
+      val expectedLocalValue = if (hasLocalItems) Json.parseToJsonElement("""[{"name":"a","enabled":true},{"name":"b"}]""") else null
+      var localValueRequested = false
+      var receivedLocalValue: JsonElement? = null
+      val store = createStore { key ->
+        val localValue = key.tags.filterIsInstance<OldLocalValueSupplierTag>().single().value
+        localValueRequested = true
+        receivedLocalValue = localValue
+        GetResult.resolved(localValue)
+      }
+      val component = ListComponent()
+      store.initComponent(component, serviceDescriptor = null, pluginId = PluginManagerCore.CORE_ID)
+
+      assertThat(localValueRequested).isTrue()
+      assertThat(receivedLocalValue).isEqualTo(expectedLocalValue)
+      assertThat(component.state.items).isEqualTo(
+        if (hasLocalItems) listOf(ControllerListItem(name = "a", enabled = true), ControllerListItem(name = "b")) else emptyList(),
+      )
+    }
+  }
+
   @Suppress("unused")
   @Test
   fun kotlinx_serialization() = runBlocking<Unit>(Dispatchers.Default) {
@@ -492,6 +691,19 @@ class ControllerBackedStoreTest {
     )
   }
 
+  private fun createRemoteSaveStore(): ControllerBackedTestComponentStore = createStore(object : DelegatedSettingsController {
+    override fun <T : Any> getItem(key: SettingDescriptor<T>): GetResult<T?> = GetResult.inapplicable()
+
+    override fun <T : Any> setItem(key: SettingDescriptor<T>, value: T?): SetResult {
+      if (ClientId.isCurrentlyUnderLocalId) {
+        return SetResult.inapplicable()
+      }
+
+      data.put(key.key, value as JsonElement?)
+      return SetResult.done()
+    }
+  })
+
   private fun createStore(supplier: (SettingDescriptor<JsonElement>) -> GetResult<JsonElement?>): ControllerBackedTestComponentStore {
     return createStore(object : DelegatedSettingsController {
       override fun <T : Any> getItem(key: SettingDescriptor<T>): GetResult<T?> {
@@ -542,3 +754,20 @@ private data class ControllerTestState(
   @JvmField @Text var text: String = "",
   @JvmField @XCollection val list: List<String> = emptyList(),
 )
+
+private data class UnwrappedListState(
+  @JvmField @Property(surroundWithTag = false) @XCollection var items: List<ControllerListItem> = emptyList(),
+)
+
+@Tag("item")
+private data class ControllerListItem(
+  @JvmField @Attribute var name: String = "",
+  @JvmField @Attribute var enabled: Boolean = false,
+)
+
+@State(name = "TestState", storages = [Storage(TEST_COMPONENT_FILE_NAME)], perClient = true, allowLoadInTests = true)
+private class PerClientTestComponent : SerializablePersistentStateComponent<ControllerTestState>(ControllerTestState()) {
+  fun update(value: String) {
+    updateState { ControllerTestState(foo = value) }
+  }
+}

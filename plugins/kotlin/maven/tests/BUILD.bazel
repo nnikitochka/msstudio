@@ -42,6 +42,7 @@ jvm_library(
         "//plugins/kotlin/compiler-plugins/kotlin-dataframe/maven",
         "//plugins/maven",
         "//libraries/kotlinc/analysis-api:libraries-kotlinc-analysis-api",
+        "//platform/main/intellij.platform.monolith.main:monolith-main",
     ],
 )
 
@@ -70,6 +71,7 @@ jvm_library(
         "//plugins/kotlin/compiler-plugins/kotlinx-serialization/maven:maven_test_lib",
         "//plugins/kotlin/compiler-plugins/kotlin-dataframe/maven:maven_test_lib",
         "//platform/ide-core:ide-core_test_lib",
+        "//platform/main/intellij.platform.monolith.main:monolith-main_test_lib",
     ],
     deps = [
         # do not sort,
@@ -166,6 +168,8 @@ jvm_library(
         "//plugins/kotlin/code-insight/inspections-k2:kotlin-codeInsight-inspections_test_lib",
         "//plugins/kotlin/code-insight/api",
         "//plugins/kotlin/code-insight/api:api_test_lib",
+        "//platform/scratch/plugin",
+        "//platform/scratch/plugin:plugin_test_lib",
     ],
 )
 ### auto-generated section `build intellij.kotlin.maven.tests` end

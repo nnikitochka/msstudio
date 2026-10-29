@@ -98,10 +98,13 @@ jvm_library(
     visibility = ["//visibility:public"],
     runtime_deps = [
         # do not sort,
+        "//java/mcp",
         "//plugins/mcp-server/mcpserver.plugin",
         "//platform/structure-view-impl/plugin",
         "//aether-dependency-resolver/plugin",
         "//platform/todo/plugin",
+        "//platform/main/intellij.platform.monolith.main:monolith-main",
+        "//community-resources:customization",
         "//xml/plugin",
     ],
 )
@@ -117,10 +120,7 @@ jvm_library(
         ],
         allow_empty = True,
     ),
-    associates = [
-        "//java/mcp",
-        "//java/mcp:mcp_test_lib",
-    ],
+    module_name = "intellij.java.mcp.tests",
     resource_strip_prefix = "testResources",
     resources = glob(
         ["testResources/**/*"],
@@ -129,10 +129,13 @@ jvm_library(
     runtime_deps = [
         # do not sort,
         ":mcp-tests",
+        "//java/mcp:mcp_test_lib",
         "//plugins/mcp-server/mcpserver.plugin:mcpserver.plugin_test_lib",
         "//platform/structure-view-impl/plugin:plugin_test_lib",
         "//aether-dependency-resolver/plugin:plugin_test_lib",
         "//platform/todo/plugin:plugin_test_lib",
+        "//platform/main/intellij.platform.monolith.main:monolith-main_test_lib",
+        "//community-resources:customization_test_lib",
         "//xml/plugin:plugin_test_lib",
     ],
     deps = [

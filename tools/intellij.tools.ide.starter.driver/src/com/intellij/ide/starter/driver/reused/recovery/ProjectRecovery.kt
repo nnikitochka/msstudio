@@ -191,7 +191,57 @@ private fun Driver.waitForGlobalModelFilesLoaded() {
   }
 }
 
+/**
+ * Waits until the commands of the startup script have finished.
+ *
+ * The script runs again on each IDE start, for example `%setupSDK` of the test case SDK. A command that ends after
+ * this wait would change the IDE during a test or after the baseline capture.
+ */
+private fun Driver.waitForStartupCommandsFinished() {
+  waitFor(
+    message = "Startup script commands have finished",
+    timeout = INDEXES_TIMEOUT,
+    errorMessage = { "Startup script commands have not finished" },
+  ) {
+    utility<CommandsRunner>().haveCommandsFinished()
+  }
+}
+
+/**
+ * Waits until the startup script commands have finished and no open project has startup work.
+ *
+ * Call it once after each IDE start. The startup work is a configuration activity such as a Maven or Gradle sync, a VFS
+ * refresh, or indexing. The end of a sync starts a background VFS refresh, and the refresh can start indexing. Each step
+ * starts a short time after the previous step ends, so the wait needs two idle polls in a row.
+ */
+internal fun Driver.waitForStartupWorkFinished() {
+  waitForStartupCommandsFinished()
+  val projects = getOpenProjects(RdTarget.BACKEND)
+  logOutput("[ReusedRecovery] Waiting for open projects to finish the startup work: ${projects.joinToString(", ")}")
+  val refreshQueue = utility<RefreshQueueImpl>()
+  projects.forEach { project ->
+    val basePath = project.getBasePath()
+    val configurationFlow = utility<Observation>().configurationFlow(project)
+    val pendingIndexingWork = pendingIndexingWorkProbe(project)
+    var idlePolls = 0
+    var lastState = "not checked"
+    waitFor(
+      message = "Project has no startup work: $basePath",
+      timeout = INDEXES_TIMEOUT,
+      errorMessage = { "Project still has startup work: $basePath. Last state: $lastState" },
+    ) {
+      val configuring = configurationFlow.getValue()
+      val refreshing = refreshQueue.isRefreshInProgress()
+      val indexing = pendingIndexingWork()
+      lastState = "configuring=$configuring, refreshing=$refreshing, indexing=${indexing ?: "none"}"
+      idlePolls = if (configuring || refreshing || indexing != null) 0 else idlePolls + 1
+      idlePolls >= 2
+    }
+  }
+}
+
 internal fun Driver.waitForProjectsWithNoPendingIndexingWork(reason: String) {
+  waitForStartupCommandsFinished()
   waitForGlobalModelFilesLoaded()
   val projects = getOpenProjects(RdTarget.BACKEND)
   if (projects.isEmpty()) {
@@ -204,11 +254,7 @@ internal fun Driver.waitForProjectsWithNoPendingIndexingWork(reason: String) {
     waitForProjectInitialized(project)
     waitForProjectModelFilesLoaded(project)
     val basePath = project.getBasePath()
-    val dumbService = utility<DumbServiceImpl>().getInstance(project)
-    // Smart mode can be observed before required startup dumb tasks are submitted, so force submission before inspecting queues.
-    dumbService.ensureInitialDumbTaskRequiredForSmartModeSubmitted()
-    val scanner = utility<UnindexedFilesScannerExecutorImpl>().getInstance(project)
-    val smartModeScheduler = service<SmartModeScheduler>(project)
+    val pendingIndexingWork = pendingIndexingWorkProbe(project)
     var lastReadiness = "not checked"
     waitFor(
       message = "Project has no pending indexing work before $reason: $basePath",
@@ -220,21 +266,59 @@ internal fun Driver.waitForProjectsWithNoPendingIndexingWork(reason: String) {
         return@waitFor false
       }
 
-      val scannerQueued = scanner.getHasQueuedTasks()
-      val dumbScheduled = dumbService.hasScheduledTasks()
-      val dumbRunning = dumbService.isRunning()
-      // SmartModeScheduler folds scanner-running and dumb-state signals; this catches gaps left by a plain DumbService.isDumb check.
-      val smartModeSchedulerMode = smartModeScheduler.getCurrentMode()
-      lastReadiness = "scannerQueued=$scannerQueued, dumbScheduled=$dumbScheduled, dumbRunning=$dumbRunning, " +
-                      "smartModeSchedulerMode=$smartModeSchedulerMode"
-      !scannerQueued && !dumbScheduled && !dumbRunning && smartModeSchedulerMode == 0
+      val indexing = pendingIndexingWork()
+      lastReadiness = indexing ?: "no pending indexing work"
+      indexing == null
     }
+  }
+}
+
+/**
+ * Returns a probe for the pending indexing work of [project].
+ *
+ * The probe returns the indexing state while the work is pending, and `null` when there is no work.
+ */
+private fun Driver.pendingIndexingWorkProbe(project: Project): () -> String? {
+  val dumbService = utility<DumbServiceImpl>().getInstance(project)
+  // Smart mode can be observed before required startup dumb tasks are submitted, so force submission before inspecting queues.
+  dumbService.ensureInitialDumbTaskRequiredForSmartModeSubmitted()
+  val scanner = utility<UnindexedFilesScannerExecutorImpl>().getInstance(project)
+  val smartModeScheduler = service<SmartModeScheduler>(project)
+  return {
+    val scannerQueued = scanner.getHasQueuedTasks()
+    val dumbScheduled = dumbService.hasScheduledTasks()
+    val dumbRunning = dumbService.isRunning()
+    // SmartModeScheduler folds scanner-running and dumb-state signals; this catches gaps left by a plain DumbService.isDumb check.
+    val smartModeSchedulerMode = smartModeScheduler.getCurrentMode()
+    if (!scannerQueued && !dumbScheduled && !dumbRunning && smartModeSchedulerMode == 0) null
+    else "scannerQueued=$scannerQueued, dumbScheduled=$dumbScheduled, dumbRunning=$dumbRunning, " +
+         "smartModeSchedulerMode=$smartModeSchedulerMode"
   }
 }
 
 private fun Driver.updateLastProjectPath() {
   logOutput("[ReusedRecovery] Updating RecentProjectsManager last project path")
   utility<RecentProjectsManagerBase>().getInstanceEx().updateLastProjectPath()
+}
+
+@Remote("com.jetbrains.performancePlugin.CommandsRunner", plugin = "com.jetbrains.performancePlugin", rdTarget = RdTarget.BACKEND)
+private interface CommandsRunner {
+  fun haveCommandsFinished(): Boolean
+}
+
+@Remote("com.intellij.platform.backend.observation.Observation", rdTarget = RdTarget.BACKEND)
+private interface Observation {
+  fun configurationFlow(project: Project): ConfigurationFlow
+}
+
+@Remote("kotlinx.coroutines.flow.StateFlow", rdTarget = RdTarget.BACKEND)
+private interface ConfigurationFlow {
+  fun getValue(): Boolean
+}
+
+@Remote("com.intellij.openapi.vfs.newvfs.RefreshQueueImpl", rdTarget = RdTarget.BACKEND)
+private interface RefreshQueueImpl {
+  fun isRefreshInProgress(): Boolean
 }
 
 @Remote("com.intellij.workspaceModel.ide.impl.GlobalWorkspaceModelRegistry", rdTarget = RdTarget.BACKEND)
@@ -287,7 +371,8 @@ private interface SmartModeScheduler {
   fun getCurrentMode(): Int
 }
 
-@Remote("com.intellij.util.indexing.UnindexedFilesScannerExecutorImpl", rdTarget = RdTarget.BACKEND)
+@Remote("com.intellij.util.indexing.UnindexedFilesScannerExecutorImpl", plugin = "com.intellij/intellij.platform.lang.impl.backend",
+        rdTarget = RdTarget.BACKEND)
 private interface UnindexedFilesScannerExecutorImpl {
   fun getInstance(project: Project): UnindexedFilesScannerExecutorImpl
   fun getHasQueuedTasks(): Boolean

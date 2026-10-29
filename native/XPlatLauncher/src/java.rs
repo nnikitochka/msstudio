@@ -1,6 +1,6 @@
 // Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
-use std::ffi::{c_char, c_int, c_void, CStr, CString};
+use std::ffi::{c_char, c_int, c_void, CStr, CString, VaList};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
@@ -37,10 +37,10 @@ const JVM_LIB_REL_PATH: &str = "lib/server/libjvm.so";
 static DEBUG_MODE: AtomicBool = AtomicBool::new(true);
 static HOOK_MESSAGES: Mutex<Option<Vec<String>>> = Mutex::new(None);
 
-extern "C" fn vfprintf_hook(fp: *const c_void, format: *const c_char, args: va_list::VaList<'_>) -> jint {
+extern "C" fn vfprintf_hook(fp: *const c_void, format: *const c_char, args: VaList<'_>) -> jint {
     unsafe extern "C" {
-        fn vfprintf(fp: *const c_void, format: *const c_char, args: va_list::VaList<'_>) -> c_int;
-        fn vsnprintf(s: *mut c_char, n: usize, format: *const c_char, args: va_list::VaList<'_>) -> c_int;
+        fn vfprintf(fp: *const c_void, format: *const c_char, args: VaList<'_>) -> c_int;
+        fn vsnprintf(s: *mut c_char, n: usize, format: *const c_char, args: VaList<'_>) -> c_int;
     }
 
     match &mut *HOOK_MESSAGES.lock().unwrap() {
@@ -136,15 +136,15 @@ pub fn run_jvm_and_event_loop(
         match call_main_method(jni_env, &main_class, args) {
             Outcome::Ok(_) => {
                 debug!("[JVM] main method finished peacefully");
-                std::process::exit(0);
+                exit_launcher(0);
             }
             Outcome::Err(e) => {
                 error!("[JVM] main method failed: {e:?}");
-                std::process::exit(1);
+                exit_launcher(1);
             }
             Outcome::Panic(e) => {
                 error!("[JVM] main method panicked: {e:?}");
-                std::process::exit(1);
+                exit_launcher(1);
             }
         };
     })?;
@@ -171,6 +171,12 @@ fn reset_signal_handler(signal: c_int) -> Result<()> {
             _ => bail!("sigaction({}): {}", signal, std::io::Error::last_os_error())
         }
     }
+}
+
+fn exit_launcher(status: i32) -> ! {
+    #[cfg(target_os = "windows")]
+    crate::java_sockets::cleanup();
+    std::process::exit(status)
 }
 
 #[cfg(target_os = "windows")]
@@ -260,6 +266,14 @@ fn load_libjvm(libjvm_path: &Path, is_musl: bool) -> Result<libloading::Library>
 
 fn get_jvm_init_args(vm_options: Vec<String>) -> Result<(jni::sys::JavaVMInitArgs, Vec<jni::sys::JavaVMOption>)> {
     let mut jni_options = Vec::with_capacity(vm_options.len() + 1);
+
+    #[cfg(target_os = "windows")]
+    if crate::java_sockets::owns_directory() {
+        jni_options.push(jni::sys::JavaVMOption {
+            optionString: CString::new("exit")?.into_raw(),
+            extraInfo: crate::java_sockets::exit_hook as *mut c_void,
+        });
+    }
 
     jni_options.push(jni::sys::JavaVMOption {
         optionString: CString::new("abort")?.into_raw(),

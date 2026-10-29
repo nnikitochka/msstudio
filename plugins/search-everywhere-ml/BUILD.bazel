@@ -123,7 +123,11 @@ jvm_library(
     ),
     module_name = "intellij.searchEverywhereMl.tests",
     visibility = ["//visibility:public"],
-    exports = ["@lib//:search_everywhere_ml-tests-ai-grazie-emb"],
+    runtime_deps = [
+        # do not sort,
+        "//platform/main/intellij.platform.monolith.main:monolith-main",
+        "//community-resources:customization",
+    ],
 )
 
 jvm_library(
@@ -142,8 +146,12 @@ jvm_library(
         "//plugins/search-everywhere-ml:search-everywhere-ml_test_lib",
     ],
     visibility = ["//visibility:public"],
-    exports = ["@lib//:search_everywhere_ml-tests-ai-grazie-emb"],
-    runtime_deps = [":searchEverywhereMl-tests"],
+    runtime_deps = [
+        # do not sort,
+        ":searchEverywhereMl-tests",
+        "//platform/main/intellij.platform.monolith.main:monolith-main_test_lib",
+        "//community-resources:customization_test_lib",
+    ],
     deps = [
         # do not sort,
         "@lib//:kotlin-stdlib",
@@ -151,10 +159,6 @@ jvm_library(
         "//platform/core-api:core_test_lib",
         "//platform/editor-ui-api:editor-ui",
         "//platform/editor-ui-api:editor-ui_test_lib",
-        "//platform/lang-impl",
-        "//platform/lang-impl:lang-impl_test_lib",
-        "//platform/statistics",
-        "//platform/statistics:statistics_test_lib",
         "//platform/testFramework",
         "//platform/testFramework:testFramework_test_lib",
         "@lib//:search_everywhere_ml-tests-ai-grazie-emb",
@@ -185,6 +189,8 @@ jvm_library(
         "//libraries/junit6:junit6_test_lib",
         "//libraries/junit6-params",
         "//libraries/junit6-params:junit6-params_test_lib",
+        "//platform/scratch/plugin",
+        "//platform/scratch/plugin:plugin_test_lib",
     ],
 )
 ### auto-generated section `build intellij.searchEverywhereMl.tests` end

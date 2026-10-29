@@ -45,6 +45,7 @@ import com.intellij.platform.compose.swing.components.BrowserLink
 import com.intellij.platform.compose.swing.components.Comment
 import com.intellij.platform.compose.swing.components.FormGap
 import com.intellij.platform.compose.swing.components.FormPanel
+import com.intellij.platform.compose.swing.components.FormRightGap
 import com.intellij.platform.compose.swing.components.FormScope
 import com.intellij.platform.compose.swing.components.OptionButton
 import com.intellij.platform.ide.progress.ModalTaskOwner
@@ -100,6 +101,8 @@ class McpServerSettingsConfigurable : ComposeSwingSearchableConfigurable() {
 
   private var enabled by bind(settings::enableMcpServer)
   private var port by bind(settings::mcpServerPort)
+  private var portChangedWarning by mutableStateOf<@NlsContexts.DetailedDescription String?>(null)
+
   private var braveMode by bind(settings::enableBraveMode)
   private var showTerminalPromotion by bind(TerminalPromotionSetting::isShown, TerminalPromotionSetting::setShown)
   private var terminalAnsiHighlighting by bind(settings::enableTerminalAnsiHighlighting)
@@ -174,6 +177,7 @@ class McpServerSettingsConfigurable : ComposeSwingSearchableConfigurable() {
       updateServerSettings(settings.enableMcpServer)
       refreshServerStatus()
     }
+    portChangedWarning = null
   }
 
   override fun apply() {
@@ -187,6 +191,14 @@ class McpServerSettingsConfigurable : ComposeSwingSearchableConfigurable() {
       enableChangeScope.launch(Dispatchers.EDT + ModalityState.stateForComponent(getContent()).asContextElement()) {
         enableChangeMutex.withLock {
           updateServerSettings(settings.enableMcpServer, requestedPort)
+          val service = McpServerService.getInstance()
+          // The user can turn the server off before Apply. `service.port` throws when no server runs, so check `isRunning` first.
+          if (service.isRunning) {
+            if (requestedPort != service.port) {
+              portChangedWarning =
+                McpServerBundle.message("mcp.server.port.changed.warning.message", requestedPort.toString(), service.port.toString())
+            }
+          }
         }
         refreshServerStatus()
         // Note that we need to reset auto-config for all clients, as the port may have changed.
@@ -224,7 +236,7 @@ class McpServerSettingsConfigurable : ComposeSwingSearchableConfigurable() {
         text = if (serverRunning) McpServerBundle.message("enable.mcp.server.when.enabled")
         else McpServerBundle.message("enable.mcp.server"),
         checked = enabled,
-        modifier = SwingModifier.cell(smallGapAfter = true),
+        modifier = SwingModifier.gap(FormRightGap.SMALL),
         onCheckedChange = ::requestEnabledChange,
       )
     }
@@ -234,17 +246,26 @@ class McpServerSettingsConfigurable : ComposeSwingSearchableConfigurable() {
           TextField(
             value = port.toString(),
             onValueChange = { newVal ->
-              newVal.toIntOrNull()?.let { parsedPort -> if (isValidPort(parsedPort)) port = parsedPort }
+              newVal.toIntOrNull()?.let { parsedPort ->
+                if (isValidPort(parsedPort)) {
+                  port = parsedPort
+                  portChangedWarning = null
+                }
+              }
             },
-            modifier = SwingModifier.cell(smallGapAfter = true),
+            modifier = SwingModifier.gap(FormRightGap.SMALL),
             columns = PORT_TXT_WIDTH
           )
+          portChangedWarning?.let {
+            Label(text = "", modifier = SwingModifier.gap(FormRightGap.SMALL).icon(AllIcons.General.Warning))
+            Comment(it)
+          }
         }
         FormRow {
           BrowserLink(
             text = sseUrl,
             url = sseUrl,
-            modifier = SwingModifier.cell(smallGapAfter = true).toolTip(sseUrl),
+            modifier = SwingModifier.gap(FormRightGap.SMALL).toolTip(sseUrl),
           )
           BrowserLink(text = streamUrl, url = streamUrl, modifier = SwingModifier.toolTip(streamUrl))
         }
@@ -361,7 +382,7 @@ class McpServerSettingsConfigurable : ComposeSwingSearchableConfigurable() {
         modifier = SwingModifier.enabled(serverRunning),
       )
       state.statusIcon?.let {
-        Label(text = "", modifier = SwingModifier.cell(smallGapAfter = true).icon(it))
+        Label(text = "", modifier = SwingModifier.gap(FormRightGap.SMALL).icon(it))
       }
       if (state.statusText.isNotEmpty()) {
         if (state.statusIsComment) Comment(state.statusText) else Label(state.statusText)

@@ -294,7 +294,9 @@ images/jcef
 java/codeserver/core
 java/codeserver/highlighting
 java/compiler
+java/compiler/external-javac
 java/compiler/forms-compiler
+java/compiler/fragments
 java/compiler/heavy-tests
 java/compiler/impl
 java/compiler/instrumentation-util
@@ -304,6 +306,7 @@ java/compiler/openapi
 java/debugger/backend
 java/debugger/frontend
 java/debugger/impl
+java/debugger/impl/compiler
 java/debugger/jb-jdi
 java/debugger/jsp
 java/debugger/memory-agent
@@ -373,6 +376,7 @@ java/terminal/shared
 java/testFramework
 java/testFramework/backend
 java/testFramework/shared
+java/testFramework/tests
 java/typeMigration
 java/unscramble
 java/vcs
@@ -428,6 +432,7 @@ libraries/cli-parser
 libraries/clikt
 libraries/cloud-config-client
 libraries/coil
+libraries/coil/test
 libraries/commons/cli
 libraries/commons/codec
 libraries/commons/compress
@@ -452,6 +457,7 @@ libraries/compose-foundation-desktop
 libraries/compose-foundation-desktop-junit
 libraries/compose-runtime-desktop
 libraries/compose-swing-ui
+libraries/compose-swing-ui/test
 libraries/cucumber-core1
 libraries/dokka
 libraries/download-pgp-verifier
@@ -822,6 +828,7 @@ platform/execution.serviceView
 platform/execution.serviceView/backend
 platform/execution.serviceView/frontend
 platform/execution.serviceView/plugin
+platform/execution/testFramework
 platform/experiment
 platform/exploratory-tests
 platform/extensions
@@ -973,6 +980,7 @@ platform/platform-resources-en-file-templates
 platform/platform-resources-file-types
 platform/platform-tests
 platform/platform-tests/benchmarks
+platform/platform-tests/concurrency
 platform/platform-tests/durability
 platform/platform-tests/eel-helper
 platform/platform-util-io
@@ -1042,6 +1050,9 @@ platform/runtime/repository
 platform/runtime/repository/tests
 platform/scopes
 platform/scopes/backend
+platform/scratch
+platform/scratch/backend
+platform/scratch/plugin
 platform/script-debugger/backend
 platform/script-debugger/debugger-ui
 platform/script-debugger/protocol/protocol-reader
@@ -1054,6 +1065,10 @@ platform/service-container
 platform/settings
 platform/settings-local
 platform/settings-sync-core
+platform/settings.v2
+platform/settings.v2/backend
+platform/settings.v2/shared
+platform/settings.v2/test
 platform/smRunner
 platform/smRunner/dashboard
 platform/smRunner/vcs
@@ -1221,9 +1236,10 @@ plugins/compose/intellij.compose.ide.plugin.projectStructureTests
 plugins/compose/intellij.compose.ide.plugin.resources
 plugins/compose/intellij.compose.ide.plugin.resources.android
 plugins/compose/intellij.compose.ide.plugin.shared
-plugins/compose/intellij.compose.ide.plugin.shared.android
 plugins/compose/intellij.compose.ide.plugin.tests.main
 plugins/configuration-script
+plugins/configuration-script/backend
+plugins/configuration-script/execution
 plugins/copyright
 plugins/copyright/vcs
 plugins/coverage
@@ -1430,6 +1446,7 @@ plugins/jshell/execution
 plugins/jshell/frontend
 plugins/jshell/protocol
 plugins/jsonpath
+plugins/jsonpath/scratch
 plugins/junit
 plugins/junit/dashboard
 plugins/junit/groovy-tests
@@ -1535,6 +1552,7 @@ plugins/kotlin/compiler-plugins/power-assert/gradle
 plugins/kotlin/compiler-plugins/sam-with-receiver/maven
 plugins/kotlin/compiler-plugins/scripting
 plugins/kotlin/compiler-reference-index
+plugins/kotlin/compiler-reference-index/maven
 plugins/kotlin/compiler-reference-index/tests.k2
 plugins/kotlin/completion/api
 plugins/kotlin/completion/impl-k2
@@ -1667,6 +1685,7 @@ plugins/kotlin/util/test-generator-fir
 plugins/laf/macos
 plugins/laf/win10
 plugins/lombok
+plugins/lombok/compiler
 plugins/lombok/generated
 plugins/lombok/plugin
 plugins/lsp.client.playground
@@ -1726,6 +1745,7 @@ plugins/maven/testFramework
 plugins/mcp-server
 plugins/mcp-server/mcpserver.frontend
 plugins/mcp-server/mcpserver.plugin
+plugins/mcp-server/mcpserver.skills
 plugins/mcp-server/mcpserver.stdio
 plugins/mcp-server/mcpserver.terminal
 plugins/mcp-server/mcpserver.terminal.frontend
@@ -1887,6 +1907,7 @@ python/flask/common
 python/ide-common/ide-customization
 python/ide/customization.backend
 python/ide/customization.frontend
+python/ide/customization.scratch
 python/ide/customization.shared
 python/ide/impl
 python/ide/impl/intellij.pycharm.community.ide.impl.promotion
@@ -1914,6 +1935,8 @@ python/python-black
 python/python-black/common
 python/python-black/frontend
 python/python-black/tests
+python/python-code-insight
+python/python-console
 python/python-copyright
 python/python-core-impl
 python/python-exec-service
@@ -1930,8 +1953,15 @@ python/python-lsp-core/frontend
 python/python-lsp-impl/frontend
 python/python-markdown
 python/python-minimap
+python/python-navigation
 python/python-packaging
 python/python-parser
+python/python-pixi/backend
+python/python-pixi/common
+python/python-pixi/frontend
+python/python-pixi/plugin
+python/python-pixi/test-env
+python/python-pixi/tests
 python/python-poetry/backend
 python/python-poetry/common
 python/python-poetry/frontend
@@ -1953,6 +1983,7 @@ python/python-pytools/backend
 python/python-pytools/common
 python/python-pytools/frontend
 python/python-pytools/tests
+python/python-refactoring
 python/python-requirements/backend
 python/python-requirements/common
 python/python-requirements/tests
@@ -1966,6 +1997,8 @@ python/python-sdk/backend
 python/python-sdk/common
 python/python-sdk/frontend
 python/python-sdk/tests
+python/python-source-roots
+python/python-spellchecker
 python/python-syntax
 python/python-syntax-core
 python/python-syntax/lambdaTests
@@ -1977,6 +2010,7 @@ python/python-test-env/junit4
 python/python-test-env/junit5
 python/python-test-env/plain
 python/python-test-env/uv
+python/python-testing-code-insight
 python/python-ty
 python/python-ty/common
 python/python-ty/frontend
@@ -1993,6 +2027,7 @@ python/python-venv/frontend
 python/python-zuban
 python/python-zuban/common
 python/python-zuban/frontend
+python/python-zuban/plugin
 python/services/internal-impl
 python/services/shared
 python/services/system-python
@@ -2006,6 +2041,12 @@ spellchecker
 spellchecker/vcs
 spellchecker/xml
 spellchecker/xml/backend
+standalone-analysis/java-api
+standalone-analysis/java-impl
+standalone-analysis/java-smoke
+standalone-analysis/platform-api
+standalone-analysis/platform-impl
+standalone-analysis/platform-smoke
 tools/apiDump
 tools/apiDump/testData
 tools/intellij.ide.starter.allure.annotations.scanner

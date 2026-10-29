@@ -9,6 +9,7 @@ content_module_jar(module = ":common")
 ### auto-generated section `build intellij.python.sdk.common` start
 create_kotlinc_options(
     name = "custom_common",
+    opt_in = ["com.jetbrains.python.PyInternalExecApi"],
     warn = "error",
     x_warning_level = ["DEPRECATION:warning"],
 )
@@ -30,6 +31,7 @@ jvm_library(
         ["resources/**/*"],
     ),
     visibility = ["//visibility:public"],
+    exports = ["//platform/platform-impl/rpc"],
     deps = [
         # do not sort,
         "@lib//:kotlin-stdlib",
@@ -45,6 +47,8 @@ jvm_library(
         "//platform/platform-impl/rpc",
         "//platform/remote-topics/shared:rpc-topics",
         "//python/python-pytools/common",
+        "//platform/eel",
+        "//python/openapi:community",
     ],
 )
 
@@ -58,6 +62,11 @@ jvm_library(
     kotlinc_opts = ":custom_common",
     module_name = "intellij.python.sdk.common",
     visibility = ["//visibility:public"],
+    exports = [
+        # do not sort,
+        "//platform/platform-impl/rpc",
+        "//platform/platform-impl/rpc:rpc_test_lib",
+    ],
     runtime_deps = [
         # do not sort,
         ":common",
@@ -73,6 +82,8 @@ jvm_library(
         "//platform/platform-impl/rpc:rpc_test_lib",
         "//platform/remote-topics/shared:rpc-topics_test_lib",
         "//python/python-pytools/common:common_test_lib",
+        "//platform/eel:eel_test_lib",
+        "//python/openapi:community_test_lib",
     ],
 )
 ### auto-generated section `build intellij.python.sdk.common` end

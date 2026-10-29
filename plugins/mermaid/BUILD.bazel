@@ -140,7 +140,9 @@ jvm_library(
         "//platform/util/coroutines:coroutines_test_lib",
     ],
 )
+### auto-generated section `build intellij.mermaid` end
 
+### auto-generated section `plugin intellij.mermaid` start
 ij_plugin(
     name = "mermaid_plugin",
     descriptor_module = ":mermaid",
@@ -153,7 +155,7 @@ ij_plugin(
     ],
     visibility = ["//visibility:public"],
 )
-### auto-generated section `build intellij.mermaid` end
+### auto-generated section `plugin intellij.mermaid` end
 
 ### auto-generated section `iml intellij.mermaid` start
 exports_files(
@@ -177,7 +179,12 @@ jvm_library(
     ),
     module_name = "intellij.mermaid.tests",
     visibility = ["//visibility:public"],
-    runtime_deps = ["//plugins/mermaid"],
+    runtime_deps = [
+        # do not sort,
+        "//plugins/mermaid",
+        "//platform/main/intellij.platform.monolith.main:monolith-main",
+        "//community-resources:customization",
+    ],
 )
 
 jvm_library(
@@ -191,18 +198,22 @@ jvm_library(
         ],
         allow_empty = True,
     ),
-    associates = [
-        "//plugins/mermaid",
-        "//plugins/mermaid:mermaid_test_lib",
-    ],
+    module_name = "intellij.mermaid.tests",
     resource_strip_prefix = "testData",
     resources = glob(
         ["testData/**/*"],
     ),
     visibility = ["//visibility:public"],
-    runtime_deps = [":mermaid-tests"],
+    runtime_deps = [
+        # do not sort,
+        ":mermaid-tests",
+        "//platform/main/intellij.platform.monolith.main:monolith-main_test_lib",
+        "//community-resources:customization_test_lib",
+    ],
     deps = [
         # do not sort,
+        "//plugins/mermaid",
+        "//plugins/mermaid:mermaid_test_lib",
         "//platform/testFramework",
         "//platform/testFramework:testFramework_test_lib",
         "//platform/core-api:core",

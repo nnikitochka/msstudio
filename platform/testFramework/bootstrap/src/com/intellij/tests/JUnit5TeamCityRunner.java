@@ -36,7 +36,6 @@ import org.junit.platform.launcher.core.LauncherDiscoveryRequestBuilder;
 import org.junit.platform.launcher.core.LauncherFactory;
 import org.junit.runner.RunWith;
 import org.junit.runners.Suite;
-import org.junit.vintage.engine.VintageTestEngine;
 import org.opentest4j.AssertionFailedError;
 import org.opentest4j.MultipleFailuresError;
 
@@ -971,7 +970,7 @@ public final class JUnit5TeamCityRunner {
         isClassNameIncluded = MethodHandles.publicLookup()
           .findStatic(Class.forName("com.intellij.TestCaseLoader", true, classLoader),
                       "isClassNameIncluded", MethodType.methodType(boolean.class, String.class));
-        boolean ignored = (boolean)isClassNameIncluded.invokeExact(Object.class.getName() + "Test");  // force load test classes filter, *Test matches ClassFinder#isSuitableTestClassName
+        boolean ignored = (boolean)isClassNameIncluded.invokeExact(Object.class.getName() + "Test");  // force load test classes filter
       }
       catch (Throwable e) {
         throw new RuntimeException(e);
@@ -1094,6 +1093,7 @@ public final class JUnit5TeamCityRunner {
   public static class IgnorePostDiscoveryFilter implements PostDiscoveryFilter {
     private static final Class<? extends Annotation> ignoreJUnit3;
     private static final Class<? extends Annotation> ignoreIJ;
+    private static final String SUITE_UNIQUE_ID = UniqueId.forEngine("junit-platform-suite").getLastSegment().toString();
 
     static {
       try {
@@ -1129,6 +1129,9 @@ public final class JUnit5TeamCityRunner {
       if (source instanceof ClassSource classSource) {
         Class<?> aClass = classSource.getJavaClass();
         if (aClass.isAnnotationPresent(ignoreJUnit3) || aClass.isAnnotationPresent(ignoreIJ)) {
+          if (SUITE_UNIQUE_ID.equals(descriptor.getParent().map(p -> p.getUniqueId().getLastSegment().toString()).orElse(null))) {  // TODO: use org.junit.platform.suite.api.Disabled
+            descriptor.removeFromHierarchy();
+          }
           return FilterResult.excluded("Ignored");
         }
         return FilterResult.included(null);

@@ -79,19 +79,8 @@ fn hash_chars_of_a_long_string_and_a_supplementary_character() {
 #[test]
 fn kotlin_hash_vectors() {
     let temporary = tempfile::tempdir().unwrap();
-    for (size, expected) in [
-        (0usize, 3244421341483603138i64),
-        (1, -2399747073602280719),
-        (3, -737883702129266468),
-        (240, 2788469911834355041),
-        (241, -4155630063455057979),
-        (262143, 9078738661776034622),
-        (262144, -1692254647099917537),
-        (262145, -2541306581069977202),
-        (524288, 3157545227256347297),
-        (524301, 8144707773225287728),
-    ] {
-        let data: Vec<u8> = (0..size).map(|index| (index * 31 + 7) as u8).collect();
+    for (size, expected) in testkit::REFERENCE_CONTENT_HASHES {
+        let data = testkit::reference_bytes(size);
         let source = temporary.path().join(format!("input-{size}.jar"));
         fs::write(&source, &data).unwrap();
         assert_eq!(hash_file(&source).unwrap(), expected, "size {size}");
@@ -176,7 +165,7 @@ fn the_hasher_over_random_chunks_equals_hash_file() {
                 hasher.update(&[]);
                 rest = tail;
             }
-            assert!(rest.is_empty());
+            assert_eq!(rest, []);
             assert_eq!(hasher.finish(), expected, "size {size}, {} chunks", split.len());
         }
     }

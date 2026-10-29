@@ -58,7 +58,9 @@ import com.jetbrains.python.psi.types.PyTypeChecker.convertToType
 import com.jetbrains.python.psi.types.PyTypeChecker.expandTupleTypeParameters
 import com.jetbrains.python.psi.types.PyTypeChecker.match
 import com.jetbrains.python.psi.types.PyTypeChecker.recordFrame
+import com.jetbrains.python.psi.types.PyTypeChecker.recordFrameBool
 import com.jetbrains.python.psi.types.PyTypeChecker.recordLeaf
+import com.jetbrains.python.psi.types.PyTypeChecker.withoutRecording
 import com.jetbrains.python.psi.types.PyTypeParameterMapping.Option.USE_DEFAULTS
 import com.jetbrains.python.psi.types.PyTypeUtil.derefOrUnknown
 import com.jetbrains.python.psi.types.PyTypeUtil.toStream
@@ -439,6 +441,10 @@ object PyTypeChecker {
     }
 
     if (actual is PySelfType && context.reversedSubstitutions) {
+      return Optional.of(match(actual, expected, context))
+    }
+
+    if (actual is PyParamSpecType && context.reversedSubstitutions) {
       return Optional.of(match(actual, expected, context))
     }
 
@@ -2040,7 +2046,7 @@ object PyTypeChecker {
   private inline fun recordTypeArgumentFrame(
     context: MatchContext,
     typeArgIndex: Int,
-    typeParameter: PyTypeVarType?,
+    typeParameter: PyTypeParameterType?,
     genericType: PyClassType?,
     expected: PyType?,
     actual: PyType?,
@@ -2063,23 +2069,23 @@ object PyTypeChecker {
     }, body)
 
   /**
-   * The declared type variable at [typeArgumentIndex] of [genericType]'s class, or null when there isn't one
-   * (no generic class, a tuple, or a non-[PyTypeVarType] parameter — see PY-89623). Used both to find the
+   * The declared type parameter at [typeArgumentIndex] of [genericType]'s class, or null when there isn't one
+   * (no generic class, a tuple, or an index past the declared parameters). Used both to find the
    * variance and to name the parameter in breakdowns.
    */
   private fun findTypeParameter(
     genericType: PyClassType?,
     typeArgumentIndex: Int,
     context: MatchContext,
-  ): PyTypeVarType? {
+  ): PyTypeParameterType? {
     if (genericType == null) return null
     if (genericType is PyTupleType) return null
     val genericDefType = findGenericDefinitionType(genericType.pyClass, context.context)
-    return genericDefType?.typeArguments?.getOrNull(typeArgumentIndex) as? PyTypeVarType
+    return genericDefType?.typeArguments?.getOrNull(typeArgumentIndex) as? PyTypeParameterType
   }
 
   private fun matchCapturedType(
-    typeParameter: PyTypeVarType?,
+    typeParameter: PyTypeParameterType?,
     genericType: PyClassType?,
     typeArgIndex: Int,
     variance: PyVariance,
@@ -2104,7 +2110,8 @@ object PyTypeChecker {
           // Invariance also requires the reverse direction. When only this leg fails, the actual is a strict
           // subtype (e.g. `list[bool]` where `list[int]` is expected); recording the reversed leg would read
           // backwards ("int is not assignable to bool"), so discard it and emit one invariance-specific reason.
-          val sameType = withoutRecording(context) { match(actualType, expectedType, context).getOrElse { false } }
+          val sameType = isUnboundTypeParameterOnActualSide(expectedType, context) ||
+                         withoutRecording(context) { match(actualType, expectedType, context).getOrElse { false } }
           if (!sameType) {
             recordLeaf(context, {
               // The prose form only earns the educational "even though … is a subtype of …" clause here, on the
@@ -2140,6 +2147,16 @@ object PyTypeChecker {
       PyVariance.BIVARIANT -> recordTypeArgumentFrame(context, typeArgIndex, typeParameter, genericType, expectedType, actualType) { match(expectedType, actualType, context).getOrElse { false } }
       else -> false
     }
+  }
+
+  /**
+   * Returns true if [type] is a type parameter that the reverse leg of an invariance check would see on its actual side.
+   * The forward leg has already bound it. [matchImpl] treats such a [PyTypeVarType] as unknown (see [containsAny]).
+   * A [PyTypeVarTupleType] or a [PyParamSpecType] gets the same treatment here, because the dedicated matchers
+   * for a positional variadic or a `Concatenate` on the expected side run before that check and reject it.
+   */
+  private fun isUnboundTypeParameterOnActualSide(type: PyType?, context: MatchContext): Boolean {
+    return !context.reversedSubstitutions && (type is PyTypeVarType || type is PyTypeVarTupleType || type is PyParamSpecType)
   }
 
   private fun matchNumericTypes(expected: PyType?, actual: PyType?): Boolean {
@@ -2740,32 +2757,64 @@ object PyTypeChecker {
   @JvmStatic
   fun unifyGenericCall(arguments: Map<PyCallableArgument, PyCallableParameter>, context: TypeEvalContext): GenericSubstitutions? {
     val substitutions = GenericSubstitutions()
+    return if (matchArguments(arguments, substitutions, context)) substitutions else null
+  }
+
+  private fun matchArguments(
+    arguments: Map<PyCallableArgument, PyCallableParameter>,
+    substitutions: GenericSubstitutions,
+    context: TypeEvalContext,
+    expandedParamSpecs: Set<PyParamSpecType> = emptySet(),
+  ): Boolean {
     for ((argument, parameter) in PyCallExpressionHelper.getRegularMappedParameters(arguments).entries) {
       val expectedType = parameter.getArgumentType(context)
       val promotedToLiteral = argument.expression?.let { PyLiteralType.promoteToLiteral(it, expectedType, context, substitutions) }
       val actualType = promotedToLiteral?.takeUnless { it.isUnknown } ?: argument.getType(context)
       val matchedByTypes = match(expectedType, actualType, context, substitutions)
       if (!matchedByTypes) {
-        return null
+        return false
       }
     }
-    if (!matchContainer(
-        PyCallExpressionHelper.getMappedPositionalContainer(arguments),
+    var paramSpec: PyParamSpecType? = null
+    val forwardedArguments = mutableListOf<PyCallableArgument>()
+    val containers = listOf(
+      PyCallExpressionHelper.getMappedPositionalContainer(arguments) to
         PyCallExpressionHelper.getArgumentsMappedToPositionalContainer(arguments),
-        substitutions,
-        context
-      )
-    ) {
-      return null
+      PyCallExpressionHelper.getMappedKeywordContainer(arguments) to
+        PyCallExpressionHelper.getArgumentsMappedToKeywordContainer(arguments),
+    )
+    for ((container, containerArguments) in containers) {
+      val containerType = container?.getArgumentType(context)
+      if (containerType is PyParamSpecType) {
+        paramSpec = containerType
+        forwardedArguments += containerArguments
+      }
+      else if (!matchContainer(container, containerArguments, substitutions, context)) {
+        return false
+      }
     }
-    if (!matchContainer(
-        PyCallExpressionHelper.getMappedKeywordContainer(arguments), PyCallExpressionHelper.getArgumentsMappedToKeywordContainer(arguments),
-        substitutions, context
-      )
-    ) {
-      return null
-    }
-    return substitutions
+    return paramSpec == null || matchParamSpecArguments(paramSpec, forwardedArguments, substitutions, context, expandedParamSpecs)
+  }
+
+  /**
+   * Matches the arguments for `*args: P.args` and `**kwargs: P.kwargs` against the parameters of `P`.
+   * The other arguments of the call solve `P`. If they do not solve it, nothing is checked.
+   * The match fails if an argument has no parameter of `P`, or a required parameter of `P` has no argument.
+   * [expandedParamSpecs] stops the recursion when the parameters of `P` refer to `P` again.
+   */
+  private fun matchParamSpecArguments(
+    paramSpec: PyParamSpecType,
+    arguments: List<PyCallableArgument>,
+    substitutions: GenericSubstitutions,
+    context: TypeEvalContext,
+    expandedParamSpecs: Set<PyParamSpecType>,
+  ): Boolean {
+    if (paramSpec in expandedParamSpecs) return true
+    val parameters = substitutions.paramSpecs[paramSpec] as? PyCallableParameterListType ?: return true
+    val mapping = PyCallExpressionHelper.analyzeArguments(arguments, parameters, context)
+    return mapping.unmappedArguments.isEmpty() &&
+           mapping.unmappedParameters.isEmpty() &&
+           matchArguments(mapping.mappedParameters, substitutions, context, expandedParamSpecs + paramSpec)
   }
 
   private fun matchContainer(

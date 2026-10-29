@@ -24,6 +24,7 @@ import org.jetbrains.kotlin.psi.KtFile
 import org.jetbrains.kotlin.psi.KtImportDirective
 import org.jetbrains.kotlin.psi.KtPackageDirective
 import org.jetbrains.kotlin.psi.KtSimpleNameExpression
+import org.jetbrains.kotlin.psi.isConventionOperator
 
 /**
  * Adds a missing Kotlin import.
@@ -83,7 +84,7 @@ private fun importsOf(file: KtFile): List<String> = file.importDirectives.mapNot
 private fun unresolvedExpressions(file: KtFile): List<KtSimpleNameExpression> =
     SyntaxTraverser.psiTraverser(file)
         .filter(KtSimpleNameExpression::class.java)
-        .filter { canTakeImport(it) && it.mainReference.resolve() == null }
+        .filter { it.mainReference.resolvesByNames.isNotEmpty() && canTakeImport(it) && it.mainReference.resolve() == null }
         .toList()
 
 private fun importVariantsOf(

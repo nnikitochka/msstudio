@@ -19,8 +19,10 @@ import com.intellij.platform.ijent.IjentApi
 import com.intellij.platform.ijent.IjentDeploymentFailed
 import com.intellij.platform.ijent.IjentEventBus
 import com.intellij.platform.ijent.IjentExecFileProvider
+import com.intellij.platform.ijent.IjentIncompatibleBinary
 import com.intellij.platform.ijent.IjentMissingBinary
 import com.intellij.platform.ijent.IjentProcessExited
+import com.intellij.platform.ijent.IjentProcessInfo
 import com.intellij.platform.ijent.IjentScope
 import com.intellij.platform.ijent.IjentSession
 import com.intellij.platform.ijent.ParentOfIjentScopes
@@ -176,6 +178,38 @@ class IjentDeployingOverShellProcessStrategyUnitTest {
       } shouldBe expectedFailure
 
       strategy.shellProcess.destroyed.await()
+      strategy.shellProcess.isAlive shouldBe false
+    }
+    finally {
+      parentScope.cancel()
+    }
+  }
+
+  @Test
+  fun `a protocol mismatch is reported before the deployer closes`(): Unit = timeoutRunBlocking {
+    val mismatch = IjentIncompatibleBinary("Protocol hash mismatch")
+    val localBinary = Path.of("local-ijent")
+    val parentScope = childScope("protocol mismatch test", Dispatchers.Default)
+    val strategy = TestShellStrategy(
+      parentScope,
+      usePowerShell = true,
+      binaryProvider = { _, _ -> localBinary },
+      pathMapper = { "C:\\remote\\ijent.exe" },
+    )
+    val provider = object : IjentSessionProvider {
+      override suspend fun connect(deploymentResult: IjentConnectionContext): IjentSession {
+        throw mismatch
+      }
+    }
+    val loggedErrors = mutableListOf<Throwable>()
+    try {
+      executeAndCollectLoggedErrors(loggedErrors) {
+        shouldThrow<IjentIncompatibleBinary> {
+          strategy.createIjentSession(provider)
+        } shouldBe mismatch
+        strategy.shellProcess.destroyed.await()
+      }
+      loggedErrors.single() shouldBe mismatch
       strategy.shellProcess.isAlive shouldBe false
     }
     finally {
@@ -660,6 +694,7 @@ private class TestShellStrategy(
       override val isRunning: Boolean get() = shellProcess.isAlive
       override val platform: EelPlatform = deploymentResult.targetPlatform
       override val remotePathToBinary: String = remoteBinaryPath
+      override val ijentProcessInfo: IjentProcessInfo get() = error("Unused in this test")
       override val transportConnected = MutableStateFlow(true)
 
       @OptIn(DelicateCoroutinesApi::class)

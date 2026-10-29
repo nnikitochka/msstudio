@@ -26,8 +26,8 @@ public class AnnotateMethodInGeneratedFilesTest extends LightJavaCodeInsightFixt
   };
 
   @Override
-  protected String getBasePath() {
-    return JavaTestUtil.getRelativeJavaTestDataPath() +
+  protected String getTestDataPath() {
+    return JavaTestUtil.getJavaTestDataPath() +
            "/codeInsight/daemonCodeAnalyzer/quickFix/annotateMethodInGeneratedFiles";
   }
 
@@ -40,7 +40,7 @@ public class AnnotateMethodInGeneratedFilesTest extends LightJavaCodeInsightFixt
   }
 
   public void testAnnotateOverriddenMethod() {
-    IdeaTestUtil.setModuleLanguageLevel(myFixture.getModule(), LanguageLevel.JDK_1_6);
+    IdeaTestUtil.setModuleLanguageLevel(myFixture.getModule(), LanguageLevel.JDK_1_6, myFixture.getTestRootDisposable());
     doTest("Add missing nullability annotations");
   }
 

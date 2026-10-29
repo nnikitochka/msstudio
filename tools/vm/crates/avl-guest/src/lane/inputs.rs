@@ -9,6 +9,7 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Component, Path, PathBuf};
 
+use avl_trace::protocol::VideoRetention;
 use avl_wire::runtime::{self, RuntimeDescriptor};
 
 use super::context::CliRuntime;
@@ -34,6 +35,9 @@ const RUNTIME_FLAG_SUFFIX: &str = ".runtime=";
 const RECORDER_FLAG: &str = "-Dair.trace.recorder=";
 const TRACE_OFF_FLAG: &str = "-Dair.flow.trace=off";
 const SCREEN_FLAG: &str = "-Dair.flow.trace.screen=on";
+/// The flag that asks the recorder for the Allure results. No lane target sets it, so a BUILD edit or a `--jvm_flag` of
+/// `lane-run` asks for them.
+pub(crate) const ALLURE_FLAG: &str = "-Dair.flow.trace.allure=on";
 
 /// The key of the `DevIdeConfig` file that names the home of the distribution, `DevIdeConfig.HOME_PATH_KEY`.
 const HOME_PATH_KEY: &str = "home.path";
@@ -69,8 +73,12 @@ pub(crate) struct LaunchInputs {
 pub(crate) struct TraceInputs {
     /// The `air-trace-record` binary, or `None` when the descriptor names none or turns the trace off.
     pub recorder: Option<PathBuf>,
-    /// The recorder may read the screen itself, because the display belongs to the lane.
+    /// The recorder may read the screen itself, because the display belongs to the lane or to a TeamCity build.
     pub screen: bool,
+    /// The recorder writes the Allure result of each scenario, because a person asked for it with [`ALLURE_FLAG`].
+    pub allure: bool,
+    /// Which scenarios keep their video. Only `lane-run` keeps less than every video, when `AIR_LANE_VIDEO` says so.
+    pub keep_video: VideoRetention,
     /// The outputs directory of the Bazel test that runs `lane-run`, which Bazel keeps after the test. The bundles then
     /// go to its `air-traces`. `None` keeps them in the directory of each iteration, where the trace pull of the
     /// controller finds them.
@@ -171,6 +179,8 @@ fn trace_inputs(flags: &[String], runfiles_root: &Path) -> TraceInputs {
     TraceInputs {
         recorder,
         screen: flags.iter().any(|flag| flag == SCREEN_FLAG),
+        allure: flags.iter().any(|flag| flag == ALLURE_FLAG),
+        keep_video: VideoRetention::Always,
         bazel_outputs: None,
     }
 }

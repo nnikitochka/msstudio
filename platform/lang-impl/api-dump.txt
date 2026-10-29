@@ -1992,6 +1992,15 @@ c:com.intellij.execution.console.ProcessBackedConsoleExecuteActionHandler
 - processLine(java.lang.String):V
 f:com.intellij.execution.filters.impl.HyperlinkInfoFactoryImpl
 - com.intellij.execution.filters.HyperlinkInfoFactory
+c:com.intellij.execution.lineMarker.LineMarkerActionWrapper
+- com.intellij.openapi.actionSystem.ActionGroup
+- com.intellij.codeInsight.intention.PriorityAction
+- com.intellij.openapi.actionSystem.ActionWithDelegate
+- com.intellij.openapi.actionSystem.DataSnapshotProvider
+c:com.intellij.execution.lineMarker.RunLineMarkerProvider
+- com.intellij.codeInsight.daemon.LineMarkerProviderDescriptor
+- com.intellij.openapi.project.DumbAware
+- <init>():V
 c:com.intellij.execution.services.ServiceViewToolWindowFactory
 - com.intellij.openapi.project.DumbAware
 - com.intellij.openapi.wm.ToolWindowFactory
@@ -2690,8 +2699,6 @@ c:com.intellij.ide.fileTemplates.actions.CreateFromTemplateAction
 a:com.intellij.ide.fileTemplates.actions.CreateFromTemplateActionBase
 - com.intellij.openapi.actionSystem.AnAction
 - s:startLiveTemplate(com.intellij.psi.PsiFile):V
-f:com.intellij.ide.fileTemplates.actions.FileTemplateSeparator
-- com.intellij.openapi.actionSystem.ActionGroup
 f:com.intellij.ide.fileTemplates.impl.AllFileTemplatesConfigurable
 - com.intellij.openapi.options.Configurable$NoMargin
 - com.intellij.openapi.options.Configurable$NoScroll
@@ -3262,11 +3269,6 @@ f:com.intellij.ide.scratch.ScratchFileServiceImpl
 - com.intellij.ide.scratch.ScratchFileService
 - com.intellij.openapi.Disposable
 - com.intellij.openapi.components.PersistentStateComponent
-c:com.intellij.ide.scratch.ScratchFileType
-- com.intellij.openapi.fileTypes.LanguageFileType
-f:com.intellij.ide.scratch.ScratchRootType
-- com.intellij.ide.scratch.RootType
-- s:getInstance():com.intellij.ide.scratch.ScratchRootType
 f:com.intellij.ide.scratch.ScratchTreeStructureProvider
 - com.intellij.ide.projectView.TreeStructureProvider
 - com.intellij.openapi.project.DumbAware
@@ -3663,9 +3665,17 @@ com.intellij.ide.util.scopeChooser.ScopeChooserCombo$BrowseListener
 - a:onAfterBrowseFinished():V
 - a:onBeforeBrowseStarted():V
 f:com.intellij.ide.util.scopeChooser.ScopeChooserConfigurable
-- com.intellij.openapi.ui.MasterDetailsComponent
+- com.intellij.openapi.options.MasterDetails
 - com.intellij.openapi.options.SearchableConfigurable
 - <init>(com.intellij.openapi.project.Project):V
+- createComponent():javax.swing.JComponent
+- disposeUIResources():V
+- getDetails():com.intellij.openapi.ui.DetailsComponent
+- getMaster():javax.swing.JComponent
+- getSelectedObject():java.lang.Object
+- getToolbar():javax.swing.JComponent
+- initUi():V
+- selectNodeInTree(java.lang.String):V
 com.intellij.ide.util.scopeChooser.ScopeDescriptorProvider
 - sf:Companion:com.intellij.ide.util.scopeChooser.ScopeDescriptorProvider$Companion
 - sf:EMPTY:com.intellij.ide.util.scopeChooser.ScopeDescriptor[]
@@ -5411,11 +5421,6 @@ a:com.intellij.util.TextFieldCompletionProviderDumbAware
 f:com.intellij.util.gist.GistAstMarker
 - <init>(com.intellij.openapi.fileTypes.FileType,java.lang.String,kotlin.jvm.functions.Function1):V
 - f:accepts(com.intellij.openapi.project.Project,com.intellij.openapi.vfs.VirtualFile):Z
-f:com.intellij.util.indexing.FileBasedIndexProjectHandler
-- s:scheduleReindexingInDumbMode(com.intellij.openapi.project.Project):V
-f:com.intellij.util.indexing.FileBasedIndexTumbler
-- <init>(java.lang.String):V
-- f:turnOff():V
 f:com.intellij.util.indexing.FindSymbolParameters
 - getCompletePattern():java.lang.String
 - getIdFilter():com.intellij.util.indexing.IdFilter

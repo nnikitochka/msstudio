@@ -306,6 +306,22 @@ class KotlinJavaChangeInfoConverter: JavaChangeInfoConverter {
                 return changeInfo.oldParameterNames.indexOf(oldParameterName).takeIf { it >= 0 }
             }
 
+            override fun isValueParameterRemoved(): Boolean {
+                val retainedIndices = changeInfo.newParameters
+                    .mapTo(mutableSetOf()) { it.oldIndex }
+
+                return changeInfo.oldParameterNames.indices.any {
+                    it !in retainedIndices
+                }
+            }
+
+            override fun isValueParameterRetyped(): Boolean {
+                val oldTypes = changeInfo.oldParameterTypes
+                return changeInfo.newParameters.any {
+                    it.oldIndex >= 0 && it.typeText != oldTypes[it.oldIndex]
+                }
+            }
+
             override fun getNewParameters(): Array<out KotlinParameterInfo> {
                 return kotlinParameterInfos            }
 

@@ -63,6 +63,9 @@ jvm_library(
         "//platform/statistics",
         "//platform/welcome-screen",
         "//fleet/rpc",
+        "//libraries/kotlinx/serialization/core",
+        "//libraries/kotlinx/serialization/json",
+        "//platform/credential-store",
     ],
 )
 
@@ -110,6 +113,9 @@ jvm_library(
         "//platform/statistics:statistics_test_lib",
         "//platform/welcome-screen:welcome-screen_test_lib",
         "//fleet/rpc:rpc_test_lib",
+        "//libraries/kotlinx/serialization/core:core_test_lib",
+        "//libraries/kotlinx/serialization/json:json_test_lib",
+        "//platform/credential-store:credential-store_test_lib",
     ],
 )
 ### auto-generated section `build intellij.platform.searchEverywhere.frontend` end
@@ -133,6 +139,11 @@ jvm_library(
     ),
     module_name = "intellij.platform.searchEverywhere.frontend.tests",
     visibility = ["//visibility:public"],
+    runtime_deps = [
+        # do not sort,
+        "//platform/main/intellij.platform.monolith.main:monolith-main",
+        "//community-resources:customization",
+    ],
 )
 
 jvm_library(
@@ -154,6 +165,8 @@ jvm_library(
     runtime_deps = [
         # do not sort,
         ":frontend-tests",
+        "//platform/main/intellij.platform.monolith.main:monolith-main_test_lib",
+        "//community-resources:customization_test_lib",
         "//platform/ide-core:ide-core_test_lib",
     ],
     deps = [
@@ -188,6 +201,10 @@ jvm_library(
         "//platform/lang-api:lang",
         "//platform/lang-api:lang_test_lib",
         "//platform/ide-core",
+        "//platform/credential-store",
+        "//platform/credential-store:credential-store_test_lib",
+        "//libraries/snakeyaml",
+        "//libraries/snakeyaml:snakeyaml_test_lib",
     ],
 )
 ### auto-generated section `build intellij.platform.searchEverywhere.frontend.tests` end

@@ -119,9 +119,34 @@ public abstract class KotlinFirInlineTestGenerated extends AbstractKotlinFirInli
             KotlinTestUtils.runTest(this::doTest, this, testDataFilePath);
         }
 
+        @TestMetadata("boundClassMemberReference.kt")
+        public void testBoundClassMemberReference() throws Exception {
+            runTest("testData/inline/inlineTypeAlias/boundClassMemberReference.kt");
+        }
+
+        @TestMetadata("classMemberReference.kt")
+        public void testClassMemberReference() throws Exception {
+            runTest("testData/inline/inlineTypeAlias/classMemberReference.kt");
+        }
+
+        @TestMetadata("companionMemberAccess.kt")
+        public void testCompanionMemberAccess() throws Exception {
+            runTest("testData/inline/inlineTypeAlias/companionMemberAccess.kt");
+        }
+
+        @TestMetadata("constructorReference.kt")
+        public void testConstructorReference() throws Exception {
+            runTest("testData/inline/inlineTypeAlias/constructorReference.kt");
+        }
+
         @TestMetadata("extensionFunctionTypeToFunctionType.kt")
         public void testExtensionFunctionTypeToFunctionType() throws Exception {
             runTest("testData/inline/inlineTypeAlias/extensionFunctionTypeToFunctionType.kt");
+        }
+
+        @TestMetadata("fixedTypeArgumentAlias.kt")
+        public void testFixedTypeArgumentAlias() throws Exception {
+            runTest("testData/inline/inlineTypeAlias/fixedTypeArgumentAlias.kt");
         }
 
         @TestMetadata("functionTypeToFunctionType.kt")
@@ -134,6 +159,46 @@ public abstract class KotlinFirInlineTestGenerated extends AbstractKotlinFirInli
             runTest("testData/inline/inlineTypeAlias/functionTypeToNullableType.kt");
         }
 
+        @TestMetadata("genericClassMemberReference.kt")
+        public void testGenericClassMemberReference() throws Exception {
+            runTest("testData/inline/inlineTypeAlias/genericClassMemberReference.kt");
+        }
+
+        @TestMetadata("innerClassConstructorGeneric.kt")
+        public void testInnerClassConstructorGeneric() throws Exception {
+            runTest("testData/inline/inlineTypeAlias/innerClassConstructorGeneric.kt");
+        }
+
+        @TestMetadata("innerClassConstructorGenericOuter.kt")
+        public void testInnerClassConstructorGenericOuter() throws Exception {
+            runTest("testData/inline/inlineTypeAlias/innerClassConstructorGenericOuter.kt");
+        }
+
+        @TestMetadata("innerClassConstructorHiddenReceiver.kt")
+        public void testInnerClassConstructorHiddenReceiver() throws Exception {
+            runTest("testData/inline/inlineTypeAlias/innerClassConstructorHiddenReceiver.kt");
+        }
+
+        @TestMetadata("innerClassConstructorImplicit.kt")
+        public void testInnerClassConstructorImplicit() throws Exception {
+            runTest("testData/inline/inlineTypeAlias/innerClassConstructorImplicit.kt");
+        }
+
+        @TestMetadata("innerClassConstructorNested.kt")
+        public void testInnerClassConstructorNested() throws Exception {
+            runTest("testData/inline/inlineTypeAlias/innerClassConstructorNested.kt");
+        }
+
+        @TestMetadata("innerClassConstructorReceiver.kt")
+        public void testInnerClassConstructorReceiver() throws Exception {
+            runTest("testData/inline/inlineTypeAlias/innerClassConstructorReceiver.kt");
+        }
+
+        @TestMetadata("innerClassConstructorUnusedTypeParameter.kt")
+        public void testInnerClassConstructorUnusedTypeParameter() throws Exception {
+            runTest("testData/inline/inlineTypeAlias/innerClassConstructorUnusedTypeParameter.kt");
+        }
+
         @TestMetadata("keepImports.kt")
         public void testKeepImports() throws Exception {
             runTest("testData/inline/inlineTypeAlias/keepImports.kt");
@@ -144,6 +209,41 @@ public abstract class KotlinFirInlineTestGenerated extends AbstractKotlinFirInli
             runTest("testData/inline/inlineTypeAlias/lambdaExpression.kt");
         }
 
+        @TestMetadata("mixedStarReordered.kt")
+        public void testMixedStarReordered() throws Exception {
+            runTest("testData/inline/inlineTypeAlias/mixedStarReordered.kt");
+        }
+
+        @TestMetadata("nestedAliasConstructor.kt")
+        public void testNestedAliasConstructor() throws Exception {
+            runTest("testData/inline/inlineTypeAlias/nestedAliasConstructor.kt");
+        }
+
+        @TestMetadata("nullableSuspendFunctionType.kt")
+        public void testNullableSuspendFunctionType() throws Exception {
+            runTest("testData/inline/inlineTypeAlias/nullableSuspendFunctionType.kt");
+        }
+
+        @TestMetadata("objectAliasImport.kt")
+        public void testObjectAliasImport() throws Exception {
+            runTest("testData/inline/inlineTypeAlias/objectAliasImport.kt");
+        }
+
+        @TestMetadata("objectCompanionExpression.kt")
+        public void testObjectCompanionExpression() throws Exception {
+            runTest("testData/inline/inlineTypeAlias/objectCompanionExpression.kt");
+        }
+
+        @TestMetadata("objectExpression.kt")
+        public void testObjectExpression() throws Exception {
+            runTest("testData/inline/inlineTypeAlias/objectExpression.kt");
+        }
+
+        @TestMetadata("projectedFunctionType.kt")
+        public void testProjectedFunctionType() throws Exception {
+            runTest("testData/inline/inlineTypeAlias/projectedFunctionType.kt");
+        }
+
         @TestMetadata("replaceImports.kt")
         public void testReplaceImports() throws Exception {
             runTest("testData/inline/inlineTypeAlias/replaceImports.kt");
@@ -152,6 +252,96 @@ public abstract class KotlinFirInlineTestGenerated extends AbstractKotlinFirInli
         @TestMetadata("simpleAlias.kt")
         public void testSimpleAlias() throws Exception {
             runTest("testData/inline/inlineTypeAlias/simpleAlias.kt");
+        }
+
+        @TestMetadata("starProjectedFunctionType.kt")
+        public void testStarProjectedFunctionType() throws Exception {
+            runTest("testData/inline/inlineTypeAlias/starProjectedFunctionType.kt");
+        }
+
+        @TestMetadata("starProjection.kt")
+        public void testStarProjection() throws Exception {
+            runTest("testData/inline/inlineTypeAlias/starProjection.kt");
+        }
+
+        @TestMetadata("staticMembersAndClassLiteral.kt")
+        public void testStaticMembersAndClassLiteral() throws Exception {
+            runTest("testData/inline/inlineTypeAlias/staticMembersAndClassLiteral.kt");
+        }
+
+        @TestMetadata("stdlibAliasSupertype.kt")
+        public void testStdlibAliasSupertype() throws Exception {
+            runTest("testData/inline/inlineTypeAlias/stdlibAliasSupertype.kt");
+        }
+
+        @TestMetadata("stdlibGenericAlias.kt")
+        public void testStdlibGenericAlias() throws Exception {
+            runTest("testData/inline/inlineTypeAlias/stdlibGenericAlias.kt");
+        }
+
+        @TestMetadata("stdlibGenericAliasInType.kt")
+        public void testStdlibGenericAliasInType() throws Exception {
+            runTest("testData/inline/inlineTypeAlias/stdlibGenericAliasInType.kt");
+        }
+
+        @TestMetadata("stdlibGenericInferredAlias.kt")
+        public void testStdlibGenericInferredAlias() throws Exception {
+            runTest("testData/inline/inlineTypeAlias/stdlibGenericInferredAlias.kt");
+        }
+
+        @TestMetadata("stdlibGenericNullableAlias.kt")
+        public void testStdlibGenericNullableAlias() throws Exception {
+            runTest("testData/inline/inlineTypeAlias/stdlibGenericNullableAlias.kt");
+        }
+
+        @TestMetadata("stdlibNonGenericAlias.kt")
+        public void testStdlibNonGenericAlias() throws Exception {
+            runTest("testData/inline/inlineTypeAlias/stdlibNonGenericAlias.kt");
+        }
+
+        @TestMetadata("suspendFunctionType.kt")
+        public void testSuspendFunctionType() throws Exception {
+            runTest("testData/inline/inlineTypeAlias/suspendFunctionType.kt");
+        }
+
+        @TestMetadata("suspendFunctionTypeReceiver.kt")
+        public void testSuspendFunctionTypeReceiver() throws Exception {
+            runTest("testData/inline/inlineTypeAlias/suspendFunctionTypeReceiver.kt");
+        }
+
+        @TestMetadata("typeAnnotationAtUsage.kt")
+        public void testTypeAnnotationAtUsage() throws Exception {
+            runTest("testData/inline/inlineTypeAlias/typeAnnotationAtUsage.kt");
+        }
+
+        @TestMetadata("typeAnnotationGeneric.kt")
+        public void testTypeAnnotationGeneric() throws Exception {
+            runTest("testData/inline/inlineTypeAlias/typeAnnotationGeneric.kt");
+        }
+
+        @TestMetadata("typeAnnotationProjected.kt")
+        public void testTypeAnnotationProjected() throws Exception {
+            runTest("testData/inline/inlineTypeAlias/typeAnnotationProjected.kt");
+        }
+
+        @TestMetadata("unusedTypeParameter.kt")
+        public void testUnusedTypeParameter() throws Exception {
+            runTest("testData/inline/inlineTypeAlias/unusedTypeParameter.kt");
+        }
+
+        @TestMetadata("useSiteVariance.kt")
+        public void testUseSiteVariance() throws Exception {
+            runTest("testData/inline/inlineTypeAlias/useSiteVariance.kt");
+        }
+
+        @TestMetadata("useSiteVarianceAliasArgument.kt")
+        public void testUseSiteVarianceAliasArgument() throws Exception {
+            runTest("testData/inline/inlineTypeAlias/useSiteVarianceAliasArgument.kt");
+        }
+
+        @TestMetadata("useSiteVarianceReordered.kt")
+        public void testUseSiteVarianceReordered() throws Exception {
+            runTest("testData/inline/inlineTypeAlias/useSiteVarianceReordered.kt");
         }
     }
 

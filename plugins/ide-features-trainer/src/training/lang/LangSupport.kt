@@ -56,6 +56,10 @@ interface LangSupport {
   val sdkConfigurationTasks: LessonContext.(lesson: KLesson) -> Unit
     get() = {}
 
+  /** True means that each lesson waits until all background tasks in the status bar finish before the lesson content starts */
+  val waitForBackgroundTasksBeforeLesson: Boolean
+    get() = false
+
   /** Check that the project has needed SDK configured */
   fun isSdkConfigured(project: Project): Boolean
 
@@ -78,13 +82,13 @@ interface LangSupport {
    * @throws NoSdkException in the case no valid SDK is available, yet it's required for the given project
    */
   @Throws(NoSdkException::class)
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   fun getSdkForProject(project: Project, selectedSdk: Sdk?): Sdk?
 
   /**
    * [sdk] is from [getSdkForProject]
    */
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   fun applyProjectSdk(sdk: Sdk, project: Project)
 
   fun applyToProjectAfterConfigure(): (Project) -> Unit

@@ -4,12 +4,14 @@ package com.intellij.openapi.editor.impl.marker
 import com.intellij.openapi.editor.ex.DocumentPatch
 import com.intellij.openapi.editor.impl.DocumentImpl
 import com.intellij.openapi.editor.impl.marker.PMarkerRoot.MarkerEntry
-import com.intellij.openapi.util.TextRange
+import com.intellij.openapi.util.TextRangeScalarUtil
 import com.intellij.testFramework.junit5.TestApplication
 import it.unimi.dsi.fastutil.longs.LongArrayList
 import it.unimi.dsi.fastutil.longs.LongLists
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNotSame
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -19,16 +21,101 @@ import kotlin.random.Random
 @TestApplication
 class PMarkerRootBatchTest {
   @Test
+  fun `marker changes share offsets without changing old roots`() {
+    val root = applyPatch(PMarkerRootImpl.empty().insertMany(entries()), TEXT, 0, 0, "abcd")
+    root.resolve(12)
+    val cache = checkNotNull(offsetCache(root))
+    val spec = MarkerSpec.create(isGreedyToLeft = false, isGreedyToRight = false)
+    val roots = listOf(
+      root,
+      root.insert(100, 3, 4, spec, flavorFlags = 0),
+      root.insertMany(listOf(entry(101, 1, 2), entry(102, 2, 3))),
+      root.updateSpec(12, spec),
+      root.updateFlavor(12, 0),
+      root.updateMeasure(1, 99),
+      root.remove(12),
+      root.removeMany(LongLists.singleton(12)),
+      root.purgeMany(LongLists.singleton(12)),
+    )
+
+    repeat(2) { pass ->
+      for (current in roots.shuffled(Random(pass))) {
+        assertSame(cache, offsetCache(current))
+        val expected = resolvedEntries(current).associateBy { it.markerId }
+        for (id in ((1L..48L).toList() + (100L..102L).toList()).shuffled(Random(pass))) {
+          val entry = expected[id]
+          val resolution = if (entry == null) PMarkerResolution.ABSENT
+          else PMarkerResolution.valid(TextRangeScalarUtil.toScalarRange(entry.nodeStart, entry.nodeEnd))
+          assertEquals(resolution, current.resolve(id), "Marker $id")
+        }
+      }
+    }
+
+    val edited = applyPatch(root, "abcd$TEXT", 0, 0, "x")
+    assertNull(offsetCache(edited))
+    assertEquals(TextRangeScalarUtil.shift(root.resolve(12), 1), edited.resolve(12))
+    assertNotSame(cache, offsetCache(edited))
+  }
+
+  @Test
+  fun `shared cache rejects conflicting offsets for one marker ID`() {
+    val root = PMarkerRootImpl.empty().insertMany(entries())
+    root.resolve(12)
+    val inserted = root.insertMany(listOf(entry(100, 1, 2)))
+
+    assertThrows(AssertionError::class.java) { root.insertMany(listOf(entry(100, 3, 4))) }
+    assertEquals(PMarkerResolution.ABSENT, root.resolve(100))
+    assertEquals(TextRangeScalarUtil.toScalarRange(1, 2), inserted.resolve(100))
+  }
+
+  @Test
+  fun `cached absolute offsets preserve shifted roots and removals`() {
+    val initial = PMarkerRootImpl.empty().insertMany(entries() + entry(100, 0, 0))
+    val shifted = applyPatch(initial, TEXT, 0, 0, "abcd")
+    val edited = applyPatch(shifted, "abcd$TEXT", 10, 12, "")
+    edited.resolve(12)
+    val spec = MarkerSpec.create(isGreedyToLeft = false, isGreedyToRight = false, isStickingToRight = false)
+    val roots = listOf(initial, shifted, edited, edited.updateSpec(12, spec))
+
+    for (root in roots) {
+      val expected = resolvedEntries(root).associateBy { it.markerId }
+      repeat(2) { pass ->
+        for (id in expected.keys.shuffled(Random(pass))) {
+          val entry = expected.getValue(id)
+          val resolution = root.resolve(id)
+          assertTrue(PMarkerResolution.isValid(resolution))
+          assertEquals(PMarkerResolution.valid(TextRangeScalarUtil.toScalarRange(entry.nodeStart, entry.nodeEnd)), resolution)
+        }
+      }
+      val entry = expected.getValue(12)
+      val removed = root.remove(12)
+      assertTrue(PMarkerResolution.isAbsent(removed.resolve(12)))
+      assertEquals(PMarkerResolution.ABSENT, removed.resolve(12))
+      assertEquals(PMarkerResolution.valid(TextRangeScalarUtil.toScalarRange(entry.nodeStart, entry.nodeEnd)), root.resolve(12))
+    }
+  }
+
+  @Test
+  fun `cached absolute offsets support empty and maximum ranges`() {
+    val root = PMarkerRootImpl.empty().insertMany(listOf(entry(1, 0, 0), entry(2, Int.MAX_VALUE - 1, Int.MAX_VALUE)))
+
+    repeat(2) {
+      assertEquals(PMarkerResolution.valid(TextRangeScalarUtil.toScalarRange(0, 0)), root.resolve(1))
+      assertEquals(PMarkerResolution.valid(TextRangeScalarUtil.toScalarRange(Int.MAX_VALUE - 1, Int.MAX_VALUE)), root.resolve(2))
+    }
+  }
+
+  @Test
   fun `insert batch preserves shifted markers and entry metadata`() {
     val initial = insertIndividually(PMarkerRootImpl.empty(), entries())
     val shifted = applyPatch(initial, TEXT, 0, 0, "xx").remove(7)
-    val additions = listOf(entry(100, 3, 3, measure = 5), entry(7, 10, 12), entry(101, 3, 6))
+    val additions = listOf(entry(100, 3, 3, measure = 5), entry(102, 10, 12), entry(101, 3, 6))
     val before = resolvedEntries(shifted)
 
     val actual = shifted.insertMany(additions)
     val expected = insertIndividually(shifted, additions)
 
-    assertEquivalent(expected, actual, (1L..48L).toList() + listOf(100L, 101L))
+    assertEquivalent(expected, actual, (1L..48L).toList() + listOf(100L, 101L, 102L))
     assertEquals(before, resolvedEntries(shifted))
     assertEquivalent(insertIndividually(PMarkerRootImpl.empty(), entries()), PMarkerRootImpl.empty().insertMany(entries()), (1L..48L).toList())
   }
@@ -49,8 +136,8 @@ class PMarkerRootBatchTest {
     assertEquivalent(individuallyRemoved, removed.purgeMany(ids), (1L..48L).toList(), ids.toSet())
     assertTrue((removed as PMarkerRootImpl).containsMarkerId(24))
     assertFalse((purged as PMarkerRootImpl).containsMarkerId(24))
-    assertEquals(root.resolve(24, TextRange.EMPTY_RANGE), removed.resolve(24, TextRange.EMPTY_RANGE))
-    assertEquals(TextRange.EMPTY_RANGE, purged.resolve(24, TextRange.EMPTY_RANGE))
+    assertEquals(PMarkerResolution.ABSENT, removed.resolve(24))
+    assertEquals(PMarkerResolution.ABSENT, purged.resolve(24))
     assertEquals(before, resolvedEntries(root))
 
     val beforeText = "xx$TEXT".removeRange(3, 7)
@@ -83,8 +170,8 @@ class PMarkerRootBatchTest {
       MarkerTransformResult(marker)
     }
     val root = PMarkerRootImpl.empty().insertMany(listOf(
-      entry(1, 0, 0).copy(spec = MarkerSpec(isGreedyToLeft = false, isGreedyToRight = false, policy = countingPolicy)),
-      entry(2, 5, 6).copy(spec = MarkerSpec(isGreedyToLeft = false, isGreedyToRight = false, policy = PersistentMarkerPolicy)),
+      entry(1, 0, 0).copy(spec = MarkerSpec.create(isGreedyToLeft = false, isGreedyToRight = false), policy = countingPolicy),
+      entry(2, 5, 6).copy(spec = MarkerSpec.create(isGreedyToLeft = false, isGreedyToRight = false), policy = PersistentMarkerPolicy),
     ))
 
     applyPatch(root, "0123456789", 1, 9, "")
@@ -154,6 +241,10 @@ class PMarkerRootBatchTest {
     }
   }
 
+  private fun offsetCache(root: PMarkerRoot): Any? = PMarkerRootImpl::class.java.getDeclaredField("cachedOffsets").apply {
+    isAccessible = true
+  }.get(root)
+
   private fun entries(): List<MarkerEntry> = List(48) { index ->
     val start = index / 2 + 2
     val end = if (index % 3 == 0) start else start + 2
@@ -164,14 +255,15 @@ class PMarkerRootBatchTest {
     id,
     start,
     end,
-    MarkerSpec(id % 2 == 0L, measure == 0 && id % 3 == 0L, id % 4 == 0L,
-               if (id % 5 == 0L) PersistentMarkerPolicy else DefaultMarkerPolicy),
+    MarkerSpec.create(id % 2 == 0L, measure == 0 && id % 3 == 0L, id % 4 == 0L),
     (1 shl (id % 8).toInt()).toByte(),
     measure = measure,
+    policy = if (id % 5 == 0L) PersistentMarkerPolicy else DefaultMarkerPolicy,
   )
 
   private fun insertIndividually(root: PMarkerRoot, entries: List<MarkerEntry>): PMarkerRoot = entries.fold(root) { current, entry ->
-    current.insert(entry.markerId, entry.nodeStart, entry.nodeEnd, entry.spec, entry.flavorFlags, entry.markerReference, entry.measure)
+    current.insert(entry.markerId, entry.nodeStart, entry.nodeEnd, entry.spec, entry.flavorFlags, entry.markerReference, entry.measure,
+                   entry.policy)
   }
 
   private fun resolvedEntries(root: PMarkerRoot): List<MarkerEntry> {
@@ -187,10 +279,10 @@ class PMarkerRootBatchTest {
     assertEquals(resolvedEntries(expected), resolvedEntries(actual))
     assertEquals(expected.isEmpty(), actual.isEmpty())
     for (id in ids) {
-      val expectedResolution = if (id in purgedIds) PMarkerResolution.Absent(0, 0) else expected.resolve(id, TextRange.EMPTY_RANGE)
-      val actualResolution = actual.resolve(id, TextRange.EMPTY_RANGE)
-      assertEquals(expectedResolution::class, actualResolution::class, "Marker $id")
+      val expectedResolution = if (id in purgedIds) PMarkerResolution.ABSENT else expected.resolve(id)
+      val actualResolution = actual.resolve(id)
       assertEquals(expectedResolution, actualResolution, "Marker $id")
+      assertEquals(if (id in purgedIds) null else expected.invalidationReason(id), actual.invalidationReason(id), "Marker $id")
       val expectedContains = id !in purgedIds && (expected as PMarkerRootImpl).containsMarkerId(id)
       assertEquals(expectedContains, (actual as PMarkerRootImpl).containsMarkerId(id), "Marker $id")
     }
@@ -207,7 +299,7 @@ class PMarkerRootBatchTest {
   private fun applyPatch(root: PMarkerRoot, text: String, start: Int, end: Int, replacement: String): PMarkerRoot {
     val before = DocumentImpl(text, true).core.snapshot().text()
     val patch = DocumentPatch.simple(start, end, replacement, newModStamp = 1, clearLineFlags = false)
-    val after = patch.ops().fold(before) { current, op -> current.applyOp(op) }
+    val after = before.replace(start, end, replacement)
     return root.applyPatch(patch, before, after)
   }
 

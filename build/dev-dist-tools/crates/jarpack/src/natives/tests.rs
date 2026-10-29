@@ -5,7 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::nativelib::{self, Arch, Family};
-use crate::tests::testjar::{Scratch, entry, entry_names, is_library, module_source, pack, parse_recipe, read_entry, write_zip_jar};
+use crate::tests::testjar::{self, Scratch, entry, entry_names, is_library, module_source, pack, parse_recipe, read_entry, write_zip_jar};
 use crate::{INDEX_FILE_NAME, MergeOptions, MergeSpec, NativeSpec, NativeTree, Source};
 
 /// A presigned library as `JarPackager` sees one. It is a jar with a Maven name and one native per platform under a
@@ -96,10 +96,7 @@ fn pack_error(spec: &MergeSpec) -> String {
     if let Some(tree) = spec.native.as_ref().and_then(|native| native.tree.as_ref()) {
         fs::create_dir_all(&tree.dir).unwrap();
     }
-    match spec.pack(&MergeOptions::default()) {
-        Ok(_) => panic!("the recipe for {} was accepted", spec.output.display()),
-        Err(error) => format!("{error:#}"),
-    }
+    testjar::pack_error(spec)
 }
 
 #[test]
@@ -302,7 +299,7 @@ fn natives_mode_moves_the_platform_natives_out_of_the_jar() {
 
 fn read_index_bytes(data: &[u8]) -> Vec<u8> {
     use std::io::Read;
-    let mut archive = crate::tests::testjar::open_packed(data);
+    let mut archive = testjar::open_packed(data);
     let mut file = archive.by_name(INDEX_FILE_NAME).unwrap();
     let mut content = Vec::new();
     file.read_to_end(&mut content).unwrap();
@@ -673,21 +670,7 @@ fn natives_spec_validation_refuses_an_incomplete_spec() {
 #[cfg(unix)]
 #[test]
 fn natives_mode_creates_each_directory_with_mode_0755() {
-    const CHILD: &str = "JARPACK_TEST_UMASK_CHILD";
-    if std::env::var_os(CHILD).is_none() {
-        let output = std::process::Command::new("/bin/sh")
-            .args(["-c", r#"umask 002 && exec "$0" --exact "$1" --nocapture"#])
-            .arg(std::env::current_exe().unwrap())
-            .arg("natives::tests::natives_mode_creates_each_directory_with_mode_0755")
-            .env(CHILD, "1")
-            .output()
-            .unwrap();
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        assert!(
-            output.status.success() && stdout.contains(" 1 passed;"),
-            "the run under the umask 002 failed:\n{stdout}\n{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
+    if testkit::rerun_under_shell("natives::tests::natives_mode_creates_each_directory_with_mode_0755", &["umask 002"]).is_none() {
         return;
     }
     let scratch = Scratch::new();

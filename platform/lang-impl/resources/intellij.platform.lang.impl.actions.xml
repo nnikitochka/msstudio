@@ -230,13 +230,6 @@
     <action id="MembersPullUp" class="com.intellij.refactoring.actions.PullUpAction"/>
     <action id="MemberPushDown" class="com.intellij.refactoring.actions.PushDownAction"/>
     <action id="InvertBoolean" class="com.intellij.refactoring.actions.InvertBooleanAction"/>
-    <action id="NewScratchFile" class="com.intellij.ide.scratch.ScratchFileActions$NewFileAction">
-      <override-text place="EditorPopup"/>
-    </action>
-    <action id="NewScratchBuffer" class="com.intellij.ide.scratch.ScratchFileActions$NewBufferAction"/>
-    <action id="Scratch.ChangeLanguage" class="com.intellij.ide.scratch.ScratchFileActions$ChangeLanguageAction"/>
-    <action id="Scratch.ShowFilesPopup" class="com.intellij.ide.scratch.ScratchFileActions$ShowFilesPopupAction"/>
-    <action id="Scratch.ExportToScratch" class="com.intellij.ide.scratch.ScratchFileActions$ExportToScratchAction"/>
     <group id="NewWebDevelopment" class="com.intellij.ide.actions.NewWebDevelopmentGroup"/>
     <group id="NewMicroservices" class="com.intellij.ide.actions.NewMicroservicesGroup"/>
     <group id="NewFromTemplate" class="com.intellij.ide.fileTemplates.actions.CreateFromTemplateGroup"/>
@@ -323,14 +316,8 @@
     <action id="EditorSearchSession.PrevOccurrence" class="com.intellij.find.editorHeaderActions.PrevOccurrenceAction"/>
     <action id="EditorSearchSession.NextOccurrenceAction" class="com.intellij.find.editorHeaderActions.NextOccurrenceAction"/>
     <action class="com.intellij.ide.hierarchy.actions.ActivateHierarchyToolWindowAction" id="ActivateHierarchyToolWindow"/>
-    <action id="SwitchFileBasedIndexStorageAction" internal="true"
-            class="com.intellij.util.indexing.impl.storage.SwitchFileBasedIndexStorageAction"/>
     <action id="ClickLink" class="com.intellij.codeInsight.navigation.actions.ClickLinkAction"
             use-shortcut-of="GotoDeclaration" />
-    <action id="ForceIndexRescanning" internal="true" class="com.intellij.util.indexing.ForceIndexRescanningAction" icon="AllIcons.Actions.Refresh"/>
-    <action id="ForceIndexRebuild" internal="true" class="com.intellij.util.indexing.ForceIndexRebuildAction" icon="AllIcons.Actions.Refresh"/>
-    <action id="ToggleFileBasedIndexes" internal="true" class="com.intellij.util.indexing.internal.ToggleFileBasedIndexesAction"/>
-    <action id="PauseScanningAndIndexing" internal="true" class="com.intellij.util.indexing.internal.PauseScanningAndIndexingAction"/>
     <action id="QuickDocCopy" class="com.intellij.codeInsight.documentation.actions.CopyQuickDocAction"
             icon="AllIcons.Actions.Copy" use-shortcut-of="$Copy"/>
     <action id="SearchEverywhere" class="com.intellij.ide.actions.SearchEverywhereAction" icon="AllIcons.Actions.Find"/>
@@ -570,9 +557,5 @@
       <reference ref="CompareFileWithEditor"/>
     </group>
     <action id="WelcomeNewEmptyFile" class="com.intellij.ide.actions.WelcomeNewEmptyFileAction" icon="AllIcons.FileTypes.Text" use-shortcut-of="NewScratchFile"/>
-    <action id="WelcomeFileChangeLanguage" class="com.intellij.ide.actions.WelcomeChangeLanguageAction" use-shortcut-of="Scratch.ChangeLanguage">
-      <add-to-group group-id="EditorPopupMenu2" anchor="after" relative-to-action="Scratch.ChangeLanguage"/>
-    </action>
-    <action id="EditAnalysisIgnoreDefaults" class="com.intellij.ide.analysisignore.EditAnalysisIgnoreDefaultsAction"/>
   </actions>
 </idea-plugin>

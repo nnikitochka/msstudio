@@ -657,6 +657,31 @@ class PyProtocolTypeTest : PyCodeInsightTestCase() {
       accepts_protocol(obj)
       """.trimIndent())
 
+    @TestFor(issues = ["PY-93429"])
+    @Test
+    fun `TypedDict matches a protocol with the class variables of the TypedDict fallback`() = test("""
+      from typing import ClassVar, Protocol, TypedDict
+
+
+      class TypedDictLike(Protocol):
+          __required_keys__: ClassVar[frozenset[str]]
+          __optional_keys__: ClassVar[frozenset[str]]
+
+
+      class TypedDictInstanceLike(Protocol):
+          __required_keys__: frozenset[str]
+
+
+      class Movie(TypedDict):
+          name: str
+
+
+      instance: TypedDictLike = Movie(name="")
+      definition: type[TypedDictLike] = Movie
+      not_class_variable: TypedDictInstanceLike = Movie(name="")
+      #                                           ^^^^^^^^^^^^^^ WARNING Expected type 'TypedDictInstanceLike', got 'Movie' instead
+      """.trimIndent())
+
     @TestFor(issues = ["PY-53104"])
     @Test
     fun `protocol method returning Self matches concrete returning subclass`() = test("""
@@ -1801,12 +1826,12 @@ class PyProtocolTypeTest : PyCodeInsightTestCase() {
 
 
       def some_union_members_match_no_any(iterable: A | B | None):
-          for _ in iterable: # WARNING Expected type 'collections.Iterable', got 'A | B | None' instead
+          for _ in iterable: # WARNING Expected type 'Iterable', got 'A | B | None' instead
               pass
 
 
       def all_union_members_dont_match_no_any(iterable: C | None):
-          for _ in iterable: # WARNING Expected type 'collections.Iterable', got 'C | None' instead
+          for _ in iterable: # WARNING Expected type 'Iterable', got 'C | None' instead
               pass
 
 
@@ -1816,12 +1841,12 @@ class PyProtocolTypeTest : PyCodeInsightTestCase() {
 
 
       def some_union_members_match_with_any(iterable: A | B | None | Any):
-          for _ in iterable: # WARNING Expected type 'collections.Iterable', got 'A | B | None | Any' instead
+          for _ in iterable: # WARNING Expected type 'Iterable', got 'A | B | None | Any' instead
               pass
 
 
       def all_union_members_dont_match_with_any(iterable: C | None | Any):
-          for _ in iterable: # WARNING Expected type 'collections.Iterable', got 'C | None | Any' instead
+          for _ in iterable: # WARNING Expected type 'Iterable', got 'C | None | Any' instead
               pass
       """.trimIndent())
 
@@ -1865,7 +1890,7 @@ class PyProtocolTypeTest : PyCodeInsightTestCase() {
 
       def all_intersection_members_dont_match_no_any(iterable: "C & None"):
       #                                                           └ WARNING Class 'type' does not define '__and__', so the '&' operator cannot be used on its instances
-          for _ in iterable: # WARNING Expected type 'collections.Iterable', got 'C & None' instead
+          for _ in iterable: # WARNING Expected type 'Iterable', got 'C & None' instead
               pass
 
 

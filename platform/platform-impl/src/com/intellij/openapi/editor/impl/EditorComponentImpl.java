@@ -2,10 +2,7 @@
 package com.intellij.openapi.editor.impl;
 
 import com.intellij.diagnostic.PluginException;
-import com.intellij.ide.CutProvider;
-import com.intellij.ide.DataManager;
 import com.intellij.ide.IdeEventQueue;
-import com.intellij.ide.PasteProvider;
 import com.intellij.ide.actions.UndoRedoAction;
 import com.intellij.ide.ui.UISettings;
 import com.intellij.ide.ui.UISettingsListener;
@@ -14,10 +11,7 @@ import com.intellij.internal.inspector.PropertyBean;
 import com.intellij.internal.inspector.UiInspectorContextProvider;
 import com.intellij.internal.inspector.UiInspectorPreciseContextProvider;
 import com.intellij.internal.inspector.UiInspectorUtil;
-import com.intellij.openapi.Disposable;
-import com.intellij.openapi.actionSystem.ActionManager;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
-import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.actionSystem.DataSink;
 import com.intellij.openapi.actionSystem.UiCompatibleDataProvider;
 import com.intellij.openapi.application.ApplicationManager;
@@ -30,10 +24,7 @@ import com.intellij.openapi.command.CommandProcessor;
 import com.intellij.openapi.command.UndoConfirmationPolicy;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.diagnostic.ThrottledLogger;
-import com.intellij.openapi.editor.Caret;
-import com.intellij.openapi.editor.CaretActionListener;
 import com.intellij.openapi.editor.Document;
-import com.intellij.openapi.editor.EditorBundle;
 import com.intellij.openapi.editor.EditorCoreUtil;
 import com.intellij.openapi.editor.EditorThreading;
 import com.intellij.openapi.editor.Inlay;
@@ -42,19 +33,9 @@ import com.intellij.openapi.editor.RangeMarker;
 import com.intellij.openapi.editor.ReadOnlyFragmentModificationException;
 import com.intellij.openapi.editor.VisualPosition;
 import com.intellij.openapi.editor.actionSystem.EditorActionManager;
-import com.intellij.openapi.editor.actions.CaretStop;
-import com.intellij.openapi.editor.actions.CaretStopPolicy;
 import com.intellij.openapi.editor.actions.ChangeEditorFontSizeStrategy;
-import com.intellij.openapi.editor.actions.EditorActionUtil;
 import com.intellij.openapi.editor.colors.EditorColorsManager;
-import com.intellij.openapi.editor.event.BulkAwareDocumentListener;
-import com.intellij.openapi.editor.event.CaretEvent;
-import com.intellij.openapi.editor.event.CaretListener;
-import com.intellij.openapi.editor.event.DocumentEvent;
-import com.intellij.openapi.editor.event.DocumentListener;
-import com.intellij.openapi.editor.ex.EditorSettingsExternalizable;
 import com.intellij.openapi.editor.ex.util.EditorUIUtil;
-import com.intellij.openapi.editor.ex.util.EditorUtil;
 import com.intellij.openapi.extensions.PluginDescriptor;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.fileEditor.impl.EditorsSplittersKt;
@@ -62,59 +43,34 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.Queryable;
 import com.intellij.openapi.ui.TypingTarget;
 import com.intellij.openapi.util.ActionCallback;
-import com.intellij.openapi.util.Disposer;
-import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.ui.DirtyUI;
 import com.intellij.ui.Grayer;
 import com.intellij.ui.components.Magnificator;
 import com.intellij.ui.paint.PaintUtil;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.ObjectUtils;
-import com.intellij.util.concurrency.ThreadingAssertions;
 import com.intellij.util.concurrency.annotations.RequiresEdt;
 import com.intellij.util.ui.EdtInvocationManager;
 import com.intellij.util.ui.JBSwingUtilities;
-import com.intellij.util.ui.accessibility.AccessibleContextDelegateWithContextMenu;
-import com.intellij.util.ui.accessibility.AccessibleContextUtil;
 import com.intellij.util.ui.accessibility.ScreenReader;
-import org.intellij.lang.annotations.MagicConstant;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.accessibility.Accessible;
-import javax.accessibility.AccessibleAction;
 import javax.accessibility.AccessibleContext;
-import javax.accessibility.AccessibleEditableText;
-import javax.accessibility.AccessibleExtendedText;
-import javax.accessibility.AccessibleRole;
-import javax.accessibility.AccessibleState;
-import javax.accessibility.AccessibleStateSet;
-import javax.accessibility.AccessibleText;
-import javax.accessibility.AccessibleTextSequence;
 import javax.swing.JViewport;
 import javax.swing.Scrollable;
-import javax.swing.event.UndoableEditListener;
-import javax.swing.plaf.TextUI;
-import javax.swing.text.AttributeSet;
-import javax.swing.text.EditorKit;
-import javax.swing.text.Element;
+import javax.swing.event.CaretEvent;
+import javax.swing.event.CaretListener;
 import javax.swing.text.JTextComponent;
-import javax.swing.text.Position;
-import javax.swing.text.Segment;
-import javax.swing.text.SimpleAttributeSet;
-import javax.swing.text.View;
 import java.awt.AWTEvent;
 import java.awt.Color;
-import java.awt.Container;
 import java.awt.Cursor;
 import java.awt.Dimension;
-import java.awt.Font;
-import java.awt.FontMetrics;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.Point;
@@ -129,19 +85,59 @@ import java.awt.event.MouseListener;
 import java.awt.geom.AffineTransform;
 import java.awt.geom.Point2D;
 import java.awt.im.InputMethodRequests;
-import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
+/**
+ * The content component of {@link EditorImpl}.
+ * <p>
+ * This editor extends {@link JTextComponent} rather than {@link javax.swing.JComponent} <i>only</i> for accessibility
+ * purposes, and the JTextComponent is not fully supported: it does not reflect the
+ * true contents of the document, it doesn't paint, it doesn't have a proper UI delegate,
+ * etc.
+ * <p>
+ * Swing supports accessibility via the AccessibleText interface, as well as AccessibleEditableText
+ * and some other accessibility interfaces. In theory, all we would need to do to support
+ * accessibility for the IDE editor is to implement these in the accessible context for
+ * the editor component.
+ * <p>
+ * However, it turns out that on some platforms, such as on MacOSX, the accessibility integration
+ * for Java is hardcoded to only work with JTextComponents! Not only does the code ignore
+ * property change events announcing caret motion and document changes; it performs specific
+ * instanceof checks, and the way it adds listeners is to directly add caret and document
+ * listeners on the JTextComponent. It also performs other JTextComponent operations such
+ * as looking up the TextUI delegate and performing viewToModel calls, it asks for the Swing
+ * document's root element and uses it to compute line numbers (and line offset ranges),
+ * etc.
+ * <p>
+ * Therefore, in order to support accessibility for the source editor, we have to make the source
+ * editor actually extend JTextComponent. However, we don't want to use any of the editor functionality,
+ * so we use very simple stub implementations for:
+ * <ul>
+ *   <li>the caret, {@link EditorAccessibilityCaret}</li>
+ *   <li>the document, {@link EditorAccessibilityDocument}</li>
+ *   <li>the UI delegate, {@link EditorAccessibilityTextUI}</li>
+ * </ul>
+ * and we override various JTextComponent to disable their normal operation. This leaves us with
+ * <ol>
+ *   <li>an accessible component which extends JTextComponent, and which provides a document and
+ *   a caret instance that the accessibility infrastructure will register listeners with</li>
+ *   <li>the ability to translate real IDE editor events (caret motion, editing events) into
+ *   corresponding Swing events and dispatch these to the caret/document listeners</li>
+ * </ol>
+ */
 @DirtyUI
-public final class EditorComponentImpl extends JTextComponent implements Scrollable, UiCompatibleDataProvider, Queryable, TypingTarget, Accessible,
-                                                                         UISettingsListener, UiInspectorPreciseContextProvider,
-                                                                         UiInspectorContextProvider {
+public final class EditorComponentImpl extends JTextComponent
+  implements Scrollable, UiCompatibleDataProvider, Queryable, TypingTarget, Accessible, UISettingsListener,
+             UiInspectorPreciseContextProvider, UiInspectorContextProvider {
   private static final Logger LOG = Logger.getInstance(EditorComponentImpl.class);
   private static final ThrottledLogger THROTTLED_LOGGER = new ThrottledLogger(LOG, TimeUnit.HOURS.toMillis(1));
-  private static final ThreadLocal<PluginDescriptor> currentDescriptor = ThreadLocal.withInitial(() -> null);
+  private static final ThreadLocal<PluginDescriptor> currentDescriptor = new ThreadLocal<>();
+  private static final String LOCK_IN_PAINT_ADVICE =
+    "The Read/Write lock is disallowed during paint. Usage of the R/W lock can lead to UI freezes.\n" +
+    "Consider using `PsiVersioningService.freezePsiVersion` for accessing PSI trees";
 
   private final EditorImpl editor;
   private final EditorAccessibleText myAccessibleText;
@@ -162,52 +158,9 @@ public final class EditorComponentImpl extends JTextComponent implements Scrolla
     }
     setOpaque(true);
 
-    putClientProperty(Magnificator.CLIENT_PROPERTY_KEY, new Magnificator() {
-      @Override
-      public Point magnify(double scale, Point at) {
-        if (EditorComponentImpl.this.editor.isDisposed()) return at;
-        VisualPosition magnificationPosition = EditorComponentImpl.this.editor.xyToVisualPosition(at);
-        float currentSize = EditorComponentImpl.this.editor.getColorsScheme().getEditorFontSize2D();
-        boolean isChangePersistent = EditorSettingsExternalizable.getInstance().isWheelFontChangePersistent();
-        float defaultFontSize;
-        if (isChangePersistent) {
-          defaultFontSize = UISettings.getInstance().getFontSize();
-        }
-        else {
-          defaultFontSize = EditorColorsManager.getInstance().getGlobalScheme().getEditorFontSize2D();
-        }
-
-        float size = Math.max((float)(currentSize * scale), defaultFontSize);
-
-        var strategy = EditorComponentImpl.this.editor.getUserData(ChangeEditorFontSizeStrategy.KEY);
-        if (strategy != null) {
-          strategy.setFontSize(size);
-          var zoomPoint = strategy.preferredZoomPointRelative(EditorComponentImpl.this.editor);
-          var area = EditorComponentImpl.this.editor.getScrollingModel().getVisibleArea();
-          return new Point(area.x + zoomPoint.x, area.y + zoomPoint.y);
-        }
-
-        EditorComponentImpl.this.editor.setFontSize(size);
-        if (isChangePersistent) {
-          // Has to be performed with the correct modality because there's an
-          // EditorColorsManagerImpl.dropPsiCaches call inside, and it requires a write-safe context.
-          ApplicationManager.getApplication().invokeLater(() -> {
-            EditorComponentImpl.this.editor.adjustGlobalFontSize(UISettingsUtils.scaleFontSize(size, 1 / UISettingsUtils.getInstance().getCurrentIdeScale()));
-          }, ModalityState.stateForComponent(EditorComponentImpl.this));
-        }
-
-        return EditorComponentImpl.this.editor.visualPositionToXY(magnificationPosition);
-      }
-    });
+    putClientProperty(Magnificator.CLIENT_PROPERTY_KEY, (Magnificator)this::magnify);
     putClientProperty(UndoRedoAction.IGNORE_SWING_UNDO_MANAGER, Boolean.TRUE);
 
-    // This editor extends JTextComponent rather than JComponent *only* for accessibility
-    // purposes, and the JTextComponent is not fully supported: it does not reflect the
-    // true contents of the document, it doesn't paint, it doesn't have a proper UI delegate,
-    // etc. It simply extends JTextComponent and accepts document and caret listeners (and
-    // dispatches editing events to them) because on some platforms, the accessibility
-    // support is hardcoded to only work for JTextComponent rather than AccessibleText in
-    // general.
     setupJTextComponentContext();
 
     // Remove JTextComponent's mouse/focus listeners added in its ctor.
@@ -215,6 +168,41 @@ public final class EditorComponentImpl extends JTextComponent implements Scrolla
     for (FocusListener l : getFocusListeners()) removeFocusListener(l);
 
     setupEditorSwingCaretUpdatesCourierIfRequired();
+  }
+
+  private Point magnify(double scale, Point at) {
+    if (editor.isDisposed()) return at;
+    VisualPosition magnificationPosition = editor.xyToVisualPosition(at);
+    float currentSize = editor.getColorsScheme().getEditorFontSize2D();
+    boolean isChangePersistent = editor.getSettings().isWheelFontChangePersistent();
+    float defaultFontSize;
+    if (isChangePersistent) {
+      defaultFontSize = UISettings.getInstance().getFontSize();
+    }
+    else {
+      defaultFontSize = EditorColorsManager.getInstance().getGlobalScheme().getEditorFontSize2D();
+    }
+
+    float size = Math.max((float)(currentSize * scale), defaultFontSize);
+
+    ChangeEditorFontSizeStrategy strategy = editor.getUserData(ChangeEditorFontSizeStrategy.KEY);
+    if (strategy != null) {
+      strategy.setFontSize(size);
+      var zoomPoint = strategy.preferredZoomPointRelative(editor);
+      var area = editor.getScrollingModel().getVisibleArea();
+      return new Point(area.x + zoomPoint.x, area.y + zoomPoint.y);
+    }
+
+    editor.setFontSize(size);
+    if (isChangePersistent) {
+      // Has to be performed with the correct modality because there's an
+      // EditorColorsManagerImpl.dropPsiCaches call inside, and it requires a write-safe context.
+      ApplicationManager.getApplication().invokeLater(() -> {
+        editor.adjustGlobalFontSize(UISettingsUtils.scaleFontSize(size, 1 / UISettingsUtils.getInstance().getCurrentIdeScale()));
+      }, ModalityState.stateForComponent(this));
+    }
+
+    return editor.visualPositionToXY(magnificationPosition);
   }
 
   @Override
@@ -249,18 +237,25 @@ public final class EditorComponentImpl extends JTextComponent implements Scrolla
     LogicalPosition pressedLocation = editor.myLastMousePressedLocation;
     LogicalPosition location = pressedLocation != null ? pressedLocation : editor.getCaretModel().getLogicalPosition();
     boolean virtualSpace = EditorCoreUtil.inVirtualSpace(editor, location);
-    // IJPL-52267: log whenever EDITOR_VIRTUAL_SPACE is derived from a retained mouse-press location instead
-    // of the caret. When the press location is virtual but the caret is not, this is precisely the value that
-    // wrongly disables keyboard Go To Declaration / Find Usages — correlate the "press #N" with the
-    // GotoDeclarationAction:trace "reason=virtualSpace" line and the focusLost trace for the same press.
-    if (pressedLocation != null && EditorImpl.MOUSE_PRESS_LOG.isTraceEnabled()) {
-      LogicalPosition caret = editor.getCaretModel().getLogicalPosition();
-      EditorImpl.MOUSE_PRESS_LOG.trace("[press #" + editor.myMousePressSeq + "] EDITOR_VIRTUAL_SPACE served from press location=" +
-                                       pressedLocation + " virtualSpace=" + virtualSpace +
-                                       " caret=" + caret + " caretVirtualSpace=" + EditorCoreUtil.inVirtualSpace(editor, caret) +
-                                       " ageMs=" + (System.nanoTime() - editor.myMousePressTimestampNanos) / 1_000_000);
+    if (pressedLocation != null) {
+      traceVirtualSpaceFromPress(pressedLocation, virtualSpace);
     }
     sink.set(CommonDataKeys.EDITOR_VIRTUAL_SPACE, virtualSpace);
+  }
+
+  /**
+   * IJPL-52267: log whenever EDITOR_VIRTUAL_SPACE is derived from a retained mouse-press location instead
+   * of the caret. When the press location is virtual but the caret is not, this is precisely the value that
+   * wrongly disables keyboard Go To Declaration / Find Usages — correlate the "press #N" with the
+   * GotoDeclarationAction:trace "reason=virtualSpace" line and the focusLost trace for the same press.
+   */
+  private void traceVirtualSpaceFromPress(@NotNull LogicalPosition pressedLocation, boolean virtualSpace) {
+    if (!EditorImpl.MOUSE_PRESS_LOG.isTraceEnabled()) return;
+    LogicalPosition caret = editor.getCaretModel().getLogicalPosition();
+    EditorImpl.MOUSE_PRESS_LOG.trace("[press #" + editor.myMousePressSeq + "] EDITOR_VIRTUAL_SPACE served from press location=" +
+                                     pressedLocation + " virtualSpace=" + virtualSpace +
+                                     " caret=" + caret + " caretVirtualSpace=" + EditorCoreUtil.inVirtualSpace(editor, caret) +
+                                     " ageMs=" + (System.nanoTime() - editor.myMousePressTimestampNanos) / 1_000_000);
   }
 
   @DirtyUI
@@ -301,17 +296,12 @@ public final class EditorComponentImpl extends JTextComponent implements Scrolla
       // First try to handle the event using the default editor logic, then dispatch to
       // `super.processInputMethodEvent(e)`, which in turn will call the listeners and
       // if still not consumed, handle the event by the default JTextComponent logic.
-      //    super.processInputMethodEvent(e);
 
       if (!e.isConsumed() && !editor.isDisposed()) {
         InputMethodListener listener = editor.getInputMethodSupport().getListener();
         switch (e.getID()) {
-          case InputMethodEvent.INPUT_METHOD_TEXT_CHANGED:
-            listener.inputMethodTextChanged(e);
-            break;
-          case InputMethodEvent.CARET_POSITION_CHANGED:
-            listener.caretPositionChanged(e);
-            break;
+          case InputMethodEvent.INPUT_METHOD_TEXT_CHANGED -> listener.inputMethodTextChanged(e);
+          case InputMethodEvent.CARET_POSITION_CHANGED -> listener.caretPositionChanged(e);
         }
       }
     });
@@ -352,23 +342,12 @@ public final class EditorComponentImpl extends JTextComponent implements Scrolla
     Graphics2D gg = (Graphics2D)g;
     EditorUIUtil.setupEditorPainting(gg, editor.useEditorAntialiasing());
     AffineTransform origTx = PaintUtil.alignTxToInt(gg, PaintUtil.insets2offset(getInsets()), true, false, PaintUtil.RoundingMode.FLOOR);
-    if (!editor.isStickyLinePainting() && !editor.isPaintingDumbBuffer()) { // sticky lines and the offscreen dumb buffer might have a different alignment from the main area
+    // sticky lines and the offscreen dumb buffer might have a different alignment from the main area
+    if (!editor.isStickyLinePainting() && !editor.isPaintingDumbBuffer()) {
       alignment = ObjectUtils.notNull(PaintUtil.getUserSpacePixelOffset(gg), Point2D.Double::new);
     }
 
-    ApplicationManagerEx.getApplicationEx().withLocksSoftlyProhibited(
-      "The Read/Write lock is disallowed during paint. Usage of the R/W lock can lead to UI freezes.\n" +
-      "Consider using `PsiVersioningService.freezePsiVersion` for accessing PSI trees"
-      , t -> {
-        PluginDescriptor violatingDescriptor = currentDescriptor.get();
-        Throwable exception;
-        if (violatingDescriptor != null) {
-          exception = new PluginException(t, violatingDescriptor.getPluginId());
-        } else {
-          exception = t;
-        }
-        THROTTLED_LOGGER.error(exception);
-      }, () -> {
+    ApplicationManagerEx.getApplicationEx().withLocksSoftlyProhibited(LOCK_IN_PAINT_ADVICE, EditorComponentImpl::reportLockInPaint, () -> {
       editor.paint(gg);
       return null;
     });
@@ -381,6 +360,11 @@ public final class EditorComponentImpl extends JTextComponent implements Scrolla
     if (project != null) {
       EditorsSplittersKt.stopOpenFilesActivity(project);
     }
+  }
+
+  private static void reportLockInPaint(@NotNull Throwable t) {
+    PluginDescriptor violatingDescriptor = currentDescriptor.get();
+    THROTTLED_LOGGER.error(violatingDescriptor != null ? new PluginException(t, violatingDescriptor.getPluginId()) : t);
   }
 
   @ApiStatus.Internal
@@ -400,7 +384,8 @@ public final class EditorComponentImpl extends JTextComponent implements Scrolla
    *   Note that the current implementation always aligns X to an integer coordinate, so only the Y can be non-zero.
    *   But as this can change at any moment, it's best to use both coordinates.
    * </p>
-   * @return the unscaled (user space) offset used for the last painting operation, zero if no painting was performed yet or no fractional scaling is used
+   * @return the unscaled (user space) offset used for the last painting operation,
+   * zero if no painting was performed yet or no fractional scaling is used
    * @see PaintUtil#getUserSpacePixelOffset(Graphics2D)
    */
   @ApiStatus.Internal
@@ -450,12 +435,12 @@ public final class EditorComponentImpl extends JTextComponent implements Scrolla
 
   @Override
   public boolean getScrollableTracksViewportWidth() {
-    return getParent() instanceof JViewport && getParent().getWidth() > getPreferredSize().width;
+    return getParent() instanceof JViewport viewport && viewport.getWidth() > getPreferredSize().width;
   }
 
   @Override
   public boolean getScrollableTracksViewportHeight() {
-    return getParent() instanceof JViewport && getParent().getHeight() > getPreferredSize().height;
+    return getParent() instanceof JViewport viewport && viewport.getHeight() > getPreferredSize().height;
   }
 
   @Override
@@ -477,288 +462,48 @@ public final class EditorComponentImpl extends JTextComponent implements Scrolla
   // -----------------------------------------------------------------------------------------------
   private EditorSwingCaretUpdatesCourier myEditorSwingCaretUpdatesCourier = null;
 
-  @SuppressWarnings("UnusedReturnValue")
   @RequiresEdt
-  private boolean setupEditorSwingCaretUpdatesCourierIfRequired() {
-    if ((myEditorSwingCaretUpdatesCourier != null) || (editor == null) || (editor.isDisposed()) ) {
-      return false;
+  private void setupEditorSwingCaretUpdatesCourierIfRequired() {
+    if (myEditorSwingCaretUpdatesCourier != null || editor == null || editor.isDisposed()) {
+      return;
     }
 
     if (ArrayUtil.isEmpty(getCaretListeners())) {
-      return false;
+      return;
     }
 
-    myEditorSwingCaretUpdatesCourier = EditorSwingCaretUpdatesCourier.create(this);
-
-    return true;
+    myEditorSwingCaretUpdatesCourier = new EditorSwingCaretUpdatesCourier(this);
   }
 
   @Override
-  public void addCaretListener(javax.swing.event.CaretListener listener) {
+  public void addCaretListener(CaretListener listener) {
     super.addCaretListener(listener);
     setupEditorSwingCaretUpdatesCourierIfRequired();
   }
 
-
-  /**
-   * How it works:<br>
-   * 1. if {@link #beforeAllCaretsAction} / {@link #beforeDocumentChange(Document)} gets called, then {@link #fireCaretUpdate}
-   *    will be called ONLY after {@link #afterAllCaretsAction} / {@link #afterDocumentChange(Document)} will have been called respectively
-   *    (if the primary caret position will have been changed)<br>
-   * 2. otherwise, if any of {@link #documentChanged}, {@link #caretPositionChanged}, {@link #caretAdded}, {@link #caretRemoved} gets called,
-   *    {@link #fireCaretUpdate} will be called as well (again, if the primary caret position will have been changed)
-   * <p>
-   * <p/>
-   *
-   * Why we need all these listeners:<br>
-   * -  if we don't install {@link CaretListener}, we'll miss some caret updates which arrive outside of {@link CaretActionListener} events,
-   *    e.g. the test {@link com.intellij.openapi.editor.impl.EditorComponentCaretListenerTest#testCaretNotificationsCausedByUndo testCaretNotificationsCausedByUndo}
-   *    won't get a notification after pasting a text into the editor;<br>
-   * -  if we don't install {@link CaretActionListener}, we'll sometimes get incorrect position for {@link javax.swing.event.CaretEvent#getMark()},
-   *    because position of the caret can be updated a bit earlier than the selection.
-   *    E.g. the test {@link com.intellij.openapi.editor.impl.EditorComponentCaretListenerTest#testCaretNotificationsOfSelectionMovementsWithoutTextModificationsFromTopLeft testCaretNotificationsOfSelectionMovementsWithoutTextModificationsFromTopLeft}
-   *    will get the wrong position of the selection at the first moving of the caret to the right;<br>
-   * -  if we don't install {@link DocumentListener}, we'll miss caret movements caused by document changes. See {@link CaretListener#caretPositionChanged} for more info.
-   *    E.g. the test {@link com.intellij.openapi.editor.impl.EditorComponentCaretListenerTest#testCaretNotificationsCausedByUndo testCaretNotificationsCausedByUndo}
-   *    won't get a notification after undoing the pasting
-   */
-  private final class EditorSwingCaretUpdatesCourier implements CaretListener, CaretActionListener, BulkAwareDocumentListener.Simple {
-    /** true if {@link #beforeAllCaretsAction} has been called, but {@link #afterAllCaretsAction} - has still not */
-    private boolean isInsideCaretsAction = false;
-    private boolean isInsideBulkDocumentUpdate = false;
-    private @NotNull WeakReference<Caret> myLastKnownPrimaryCaret;
-    private int myPrimaryCaretLastKnownDot;
-    private int myPrimaryCaretLastKnownMark;
-
-    @RequiresEdt
-    private static @Nullable EditorSwingCaretUpdatesCourier create(@NotNull EditorComponentImpl parent) {
-      if ((parent.editor == null) || (parent.editor.isDisposed()) ) {
-        return null;
-      }
-
-      return parent.new EditorSwingCaretUpdatesCourier();
-    }
-
-    /** Don't use it directly, use {@link #create(EditorComponentImpl)} instead */
-    @RequiresEdt
-    private EditorSwingCaretUpdatesCourier() {
-      assert(editor != null);
-      assert(!editor.isDisposed());
-
-      final @NotNull var caretModel = editor.getCaretModel();
-      final @NotNull var primaryCaret = caretModel.getPrimaryCaret();
-
-      myLastKnownPrimaryCaret = new WeakReference<>(primaryCaret);
-      EditorThreading.run(() -> {
-        myPrimaryCaretLastKnownDot = primaryCaret.getOffset();
-        myPrimaryCaretLastKnownMark = primaryCaret.getLeadSelectionOffset();
-      });
-
-      caretModel.addCaretActionListener(this, editor.getDisposable());
-      caretModel.addCaretListener(this, editor.getDisposable());
-      editor.getDocument().addDocumentListener(this, editor.getDisposable());
-    }
-
-
-    // ---- CaretActionListener ----
-
-    @Override
-    @RequiresEdt
-    public void beforeAllCaretsAction() {
-      isInsideCaretsAction = true;
-    }
-
-    @Override
-    @RequiresEdt
-    public void afterAllCaretsAction() {
-      isInsideCaretsAction = false;
-
-      if (isInsideBulkUpdate()) {
-        return;
-      }
-
-      final var currentPrimaryCaret = editor.getCaretModel().getPrimaryCaret();
-      primaryCaretPositionPossiblyChanged(currentPrimaryCaret);
-    }
-
-
-    // ---- CaretListener ----
-
-    @Override
-    @RequiresEdt
-    public void caretPositionChanged(@NotNull CaretEvent event) {
-      if (isInsideBulkUpdate()) {
-        return;
-      }
-
-      final Caret changedCaret = event.getCaret();
-      final Caret currentPrimaryCaret = editor.getCaretModel().getPrimaryCaret();
-
-      if (changedCaret != currentPrimaryCaret) {
-        // Filter out changes of secondary carets
-        return;
-      }
-
-      primaryCaretPositionPossiblyChanged(currentPrimaryCaret);
-    }
-
-    @Override
-    @RequiresEdt
-    public void caretAdded(@NotNull CaretEvent event) {
-      // Adding a caret may cause a change of the primary caret instance
-
-      if (isInsideBulkUpdate()) {
-        return;
-      }
-
-      final Caret addedCaret = event.getCaret();
-      final Caret currentPrimaryCaret = editor.getCaretModel().getPrimaryCaret();
-
-      if (addedCaret != currentPrimaryCaret) {
-        // The added caret hasn't become primary, so we're not interested in its position
-        return;
-      }
-
-      primaryCaretPositionPossiblyChanged(currentPrimaryCaret);
-    }
-
-    @Override
-    @RequiresEdt
-    public void caretRemoved(@NotNull CaretEvent event) {
-      // Removing a caret may cause a switching of the primary caret
-
-      if (isInsideBulkUpdate()) {
-        return;
-      }
-
-      final var currentPrimaryCaret = editor.getCaretModel().getPrimaryCaret();
-
-      if (myLastKnownPrimaryCaret.refersTo(currentPrimaryCaret)) {
-        // The removal of a caret didn't cause a switching of the primary caret, so its position isn't supposed to have changed
-        return;
-      }
-
-      primaryCaretPositionPossiblyChanged(currentPrimaryCaret);
-    }
-
-
-    // ---- BulkAwareDocumentListener ----
-
-    @Override
-    @RequiresEdt
-    public void beforeDocumentChange(@NotNull DocumentEvent event) {
-      isInsideBulkDocumentUpdate = true;
-    }
-
-    @Override
-    @RequiresEdt
-    public void afterDocumentChange(@NotNull Document document) {
-      isInsideBulkDocumentUpdate = false;
-
-      if (isInsideBulkUpdate()) {
-        return;
-      }
-
-      final Caret currentPrimaryCaret = editor.getCaretModel().getPrimaryCaret();
-      primaryCaretPositionPossiblyChanged(currentPrimaryCaret);
-    }
-
-
-    // ---- implementation details ----
-
-    @RequiresEdt
-    private boolean isInsideBulkUpdate() {
-      return isInsideCaretsAction || isInsideBulkDocumentUpdate;
-    }
-
-    @RequiresEdt // if you're going to remove this requirement, don't forget to make access to the fields thread-safe
-    private void primaryCaretPositionPossiblyChanged(final @NotNull Caret currentPrimaryCaret) {
-      final int currentPrimaryCaretDot = currentPrimaryCaret.getOffset();
-      final int currentPrimaryCaretMark = currentPrimaryCaret.getLeadSelectionOffset();
-
-      if (!myLastKnownPrimaryCaret.refersTo(currentPrimaryCaret)) {
-        myLastKnownPrimaryCaret.clear();
-        myLastKnownPrimaryCaret = new WeakReference<>(currentPrimaryCaret);
-      }
-
-      if (currentPrimaryCaretDot < 0) {
-        LOG.error(
-          "currentPrimaryCaretDot < 0",
-          String.format("currentPrimaryCaretDot == %d", currentPrimaryCaretDot),
-          String.format("currentPrimaryCaret == %s", currentPrimaryCaret)
-        );
-      }
-      else if (currentPrimaryCaretMark < 0) { // I don't think it worth adding almost the same error twice, so it's an else-if
-        LOG.error(
-          "currentPrimaryCaretMark < 0",
-          String.format("currentPrimaryCaretMark == %d", currentPrimaryCaretMark),
-          String.format("currentPrimaryCaret == %s", currentPrimaryCaret)
-        );
-      }
-
-      if ((myPrimaryCaretLastKnownDot == currentPrimaryCaretDot) && (myPrimaryCaretLastKnownMark == currentPrimaryCaretMark)) {
-        // The position hasn't changed
-        return;
-      }
-
-      myPrimaryCaretLastKnownDot = currentPrimaryCaretDot;
-      myPrimaryCaretLastKnownMark = currentPrimaryCaretMark;
-
-      fireCaretUpdate(new javax.swing.event.CaretEvent(EditorComponentImpl.this) {
-        @Override
-        public int getDot() {
-          return currentPrimaryCaretDot;
-        }
-
-        @Override
-        public int getMark() {
-          return currentPrimaryCaretMark;
-        }
-      });
-    }
+  void fireSwingCaretUpdate(@NotNull CaretEvent event) {
+    fireCaretUpdate(event);
   }
-
-
-  // -----------------------------------------------------------------------------------------------
-  // Accessibility/screen reader support for the editor
-  // -----------------------------------------------------------------------------------------------
-  // Swing supports accessibility via the AccessibleText interface, as well as AccessibleEditableText
-  // and some other accessibility interfaces. In theory, all we would need to do to support
-  // accessibility for the IDE editor is to implement these in the accessible context for
-  // the editor component.
-  //
-  // However, it turns out that on some platforms, such as on MacOSX, the accessibility integration
-  // for Java is hardcoded to only work with JTextComponents! Not only does the code ignore
-  // property change events announcing caret motion and document changes; it performs specific
-  // instanceof checks, and the way it adds listeners is to directly add caret and document
-  // listeners on the JTextComponent. It also performs other JTextComponent operations such
-  // as looking up the TextUI delegate and performing viewToModel calls, it asks for the Swing
-  // document's root element and uses it to compute line numbers (and line offset ranges),
-  // etc.
-  //
-  // Therefore, in order to support accessibility for the source editor, we have to make the source
-  // editor actually extend JTextComponent. However, we don't want to use any of the editor functionality,
-  // so we use very simple stub implementations for:
-  //   - the caret
-  //   - the document
-  //   - the UI delegate
-  // and we override various JTextComponent to disable their normal operation. This leaves us with
-  // (1) an accessible component which extends JTextComponent, and which provides a document and
-  //     a caret instance that the accessibility infrastructure will register listeners with
-  // (2) the ability to translate real IDE editor events (caret motion, editing events) into
-  //     corresponding Swing events and dispatch these to the caret/document listeners
 
   @Override
   public AccessibleContext getAccessibleContext() {
     if (accessibleContext == null) {
-      accessibleContext = new EditorAccessibleContextDelegate();
+      accessibleContext = new EditorAccessibleContextDelegate(this);
     }
     return accessibleContext;
   }
 
   private void setupJTextComponentContext() {
-    setDocument(new EditorAccessibilityDocument());
+    setDocument(new EditorAccessibilityDocument(editor, myAccessibleText));
     setCaret(new EditorAccessibilityCaret(editor));
+  }
+
+  @NotNull EditorAccessibleText getEditorAccessibleText() {
+    return myAccessibleText;
+  }
+
+  @NotNull EditorAccessibilityDocument getAccessibilityDocument() {
+    return (EditorAccessibilityDocument)getDocument();
   }
 
   /**
@@ -784,9 +529,8 @@ public final class EditorComponentImpl extends JTextComponent implements Scrolla
       // Don't use the default TextUI, BaseTextUI, which does a lot of unnecessary
       // work. We do however need to provide a TextUI implementation since some
       // screen reader support code will invoke it
-      setUI(new EditorAccessibilityTextUI());
+      setUI(new EditorAccessibilityTextUI(this));
       UISettings.setupEditorAntialiasing(this);
-      // myEditor is null when updateUI() is called from parent's constructor
       putClientProperty(RenderingHints.KEY_FRACTIONALMETRICS, UISettings.getEditorFractionalMetricsHint());
       invalidate();
     });
@@ -796,272 +540,6 @@ public final class EditorComponentImpl extends JTextComponent implements Scrolla
   public String getToolTipText(MouseEvent event) {
     // Undo effect of JTextComponent superclass: this is the default JComponent implementation
     return this.getToolTipText();
-  }
-
-  /** Redispatch an IDE {@link DocumentEvent} to a Swing {@link javax.swing.event.DocumentListener} */
-  private void fireJTextComponentDocumentChange(final DocumentEvent event) {
-    List<javax.swing.event.DocumentListener> listeners = ((EditorAccessibilityDocument)getDocument()).getListeners();
-    if (listeners == null) {
-      return;
-    }
-
-    int offset = myAccessibleText.fromDocumentOffset(event.getOffset());
-    int length = myAccessibleText.fromDocumentOffset(event.getOffset() + event.getNewLength()) - offset;
-    javax.swing.event.DocumentEvent swingEvent = new javax.swing.event.DocumentEvent() {
-      @Override
-      public int getOffset() {
-        return offset;
-      }
-
-      @Override
-      public int getLength() {
-        return length;
-      }
-
-      @Override
-      public javax.swing.text.Document getDocument() {
-        return EditorComponentImpl.this.getDocument();
-      }
-
-      @Override
-      public EventType getType() {
-        return event.getOldLength() == 0 ? EventType.INSERT : event.getNewLength() == 0 ? EventType.REMOVE : EventType.CHANGE;
-      }
-
-      @Override
-      public @Nullable ElementChange getChange(Element element) {
-        return null;
-      }
-    };
-    for (javax.swing.event.DocumentListener listener : listeners) {
-      javax.swing.event.DocumentEvent.EventType type = swingEvent.getType();
-      if (type == javax.swing.event.DocumentEvent.EventType.INSERT) {
-        listener.insertUpdate(swingEvent);
-      } else if (type == javax.swing.event.DocumentEvent.EventType.REMOVE) {
-        listener.removeUpdate(swingEvent);
-      } else if (type == javax.swing.event.DocumentEvent.EventType.CHANGE) {
-        listener.changedUpdate(swingEvent);
-      }
-    }
-  }
-
-  private static void notSupported() {
-    throw new RuntimeException("Not supported for this text implementation");
-  }
-
-  /** {@linkplain javax.swing.text.PlainDocument} does a lot of work we don't need.
-   * This exists simply to be able to send editing events to the screen reader. */
-  @SuppressWarnings("UnnecessaryFullyQualifiedName")
-  private final class EditorAccessibilityDocument implements javax.swing.text.Document, javax.swing.text.Element {
-    private List<javax.swing.event.DocumentListener> myListeners;
-
-    public @Nullable List<javax.swing.event.DocumentListener> getListeners() {
-      return myListeners;
-    }
-
-    @Override
-    public int getLength() {
-      return editor.getDocument().getTextLength();
-    }
-
-    @Override
-    public void addDocumentListener(javax.swing.event.DocumentListener documentListener) {
-      if (myListeners == null) {
-        myListeners = new ArrayList<>(2);
-      }
-      myListeners.add(documentListener);
-    }
-
-    @Override
-    public void removeDocumentListener(javax.swing.event.DocumentListener documentListener) {
-      if (myListeners != null) {
-        myListeners.remove(documentListener);
-      }
-    }
-
-    @Override
-    public void addUndoableEditListener(UndoableEditListener undoableEditListener) {
-    }
-
-    @Override
-    public void removeUndoableEditListener(UndoableEditListener undoableEditListener) {
-    }
-
-    @Override
-    public @Nullable Object getProperty(Object o) {
-      return null;
-    }
-
-    @Override
-    public void putProperty(Object o, Object o1) {
-    }
-
-    @Override
-    public void remove(final int offset, final int length) {
-      editDocumentSafely(offset, length, null);
-    }
-
-    @Override
-    public void insertString(final int offset, final String text, AttributeSet attributeSet) {
-      editDocumentSafely(offset, 0, text);
-    }
-
-    @Override
-    public String getText(final int offset, final int length) {
-      return EditorThreading.compute(() -> editor.getDocument().getText(new TextRange(offset, offset + length)));
-    }
-
-    @Override
-    public void getText(int offset, int length, Segment segment) {
-      char[] s = getText(offset, length).toCharArray();
-      segment.array = s;
-      segment.offset = 0;
-      segment.count = s.length;
-    }
-
-    @Override
-    public @NotNull Position getStartPosition() {
-      notSupported();
-      return null;
-    }
-
-    @Override
-    public @NotNull Position getEndPosition() {
-      notSupported();
-      return null;
-    }
-
-    @Override
-    public @NotNull Position createPosition(int i) {
-      notSupported();
-      return null;
-    }
-
-    @Override
-    public Element[] getRootElements() {
-      return new Element[] { this };
-    }
-
-    @Override
-    public Element getDefaultRootElement() {
-      return this;
-    }
-
-    @SuppressWarnings("UseRunReadActionBlockingShortcut")
-    @Override
-    public void render(Runnable runnable) {
-      ApplicationManager.getApplication().runReadAction(runnable);
-    }
-
-    // ---- Implements Element for the root element ----
-    //
-    // This is here because the accessibility code ends up calling some JTextComponent
-    // methods; in particular, CAccessibleText calls root.getElementIndex(index)
-    // to map an offset to a line number, and getRangeForLine calls root.getElement(lineIndex)
-    // to get a range object for a given line, and then getStartOffset() and getEndOffset()
-    // on the result.
-
-    @Override
-    public javax.swing.text.Document getDocument() {
-      return this;
-    }
-
-    @Override
-    public @Nullable Element getParentElement() {
-      return null;
-    }
-
-    @Override
-    public @Nullable String getName() {
-      return null;
-    }
-
-    @Override
-    public @Nullable AttributeSet getAttributes() {
-      return null;
-    }
-
-    @Override
-    public int getStartOffset() {
-      return 0;
-    }
-
-    @Override
-    public int getEndOffset() {
-      return myAccessibleText.getLength();
-    }
-
-    @Override
-    public int getElementIndex(int i) {
-      // For the root element this asks for the index of the offset, which
-      // means the line number
-      return myAccessibleText.getLineNumber(Math.clamp(i, 0, myAccessibleText.getLength()));
-    }
-
-    @Override
-    public int getElementCount() {
-      return myAccessibleText.getLineCount();
-    }
-
-    @Override
-    public Element getElement(final int i) {
-      return new Element() {
-        @Override
-        public javax.swing.text.Document getDocument() {
-          return EditorAccessibilityDocument.this;
-        }
-
-        @Override
-        public Element getParentElement() {
-          return EditorAccessibilityDocument.this;
-        }
-
-        @Override
-        public @Nullable String getName() {
-          return null;
-        }
-
-        @Override
-        public @Nullable AttributeSet getAttributes() {
-          return null;
-        }
-
-        @Override
-        public int getStartOffset() {
-          return myAccessibleText.getLineStartOffset(i);
-        }
-
-        @Override
-        public int getEndOffset() {
-          return myAccessibleText.getLineEndOffset(i);
-        }
-
-        @Override
-        public int getElementIndex(int i) {
-          return 0;
-        }
-
-        @Override
-        public int getElementCount() {
-          return 0;
-        }
-
-        @Override
-        public @Nullable Element getElement(int i) {
-          return null;
-        }
-
-        @Override
-        public boolean isLeaf() {
-          return true;
-        }
-      };
-    }
-
-    @Override
-    public boolean isLeaf() {
-      return false;
-    }
   }
 
   @Override
@@ -1082,9 +560,7 @@ public final class EditorComponentImpl extends JTextComponent implements Scrolla
     boolean allCaretsHaveTheSameText = true;
 
     for (var caret : editor.getCaretModel().getAllCarets()) {
-      var caretStart = offsetRelativeToCurrentCaret + caret.getOffset();
-      var caretEnd = caretStart + length;
-      String caretText = editor.getDocument().getText(new TextRange(caretStart, caretEnd));
+      String caretText = editor.getDocument().getText(TextRange.from(offsetRelativeToCurrentCaret + caret.getOffset(), length));
       if (!selectedText.equals(caretText)) {
         allCaretsHaveTheSameText = false;
         break;
@@ -1094,8 +570,7 @@ public final class EditorComponentImpl extends JTextComponent implements Scrolla
     if (allCaretsHaveTheSameText) {
       for (var caret : editor.getCaretModel().getAllCarets()) {
         var caretStart = offsetRelativeToCurrentCaret + caret.getOffset();
-        var caretEnd = caretStart + length;
-        caret.setSelection(caretStart, caretEnd);
+        caret.setSelection(caretStart, caretStart + length);
       }
     } else {
       // Fallback to the default implementation
@@ -1106,11 +581,11 @@ public final class EditorComponentImpl extends JTextComponent implements Scrolla
   @DirtyUI
   @Override
   public void setText(String text) {
-    editDocumentSafely(0, editor.getDocument().getTextLength(), text);
+    editDocumentSafely(editor, 0, editor.getDocument().getTextLength(), text);
   }
 
   /** Inserts, removes or replaces the given text at the given offset */
-  private void editDocumentSafely(final int offset, final int length, final @Nullable String text) {
+  static void editDocumentSafely(@NotNull EditorImpl editor, final int offset, final int length, final @Nullable String text) {
     Document document = editor.getDocument();
     RangeMarker marker = document.createRangeMarker(offset, offset + length);
 
@@ -1157,779 +632,5 @@ public final class EditorComponentImpl extends JTextComponent implements Scrolla
   @Override
   public @NotNull List<PropertyBean> getUiInspectorContext() {
     return List.of(new PropertyBean("Creation/Disposal Trace", editor.getDisposalStackTrace(), editor.isDisposed()));
-  }
-
-  /**
-   * Specialized TextUI intended *only* for accessibility usage. Not all the methods are called; only viewToModel, not modelToView.
-   */
-  private final class EditorAccessibilityTextUI extends TextUI {
-    @Override
-    public @NotNull Rectangle modelToView(JTextComponent tc, int offset) {
-      return modelToView(tc, offset, Position.Bias.Forward);
-    }
-
-    @Override
-    public int viewToModel(JTextComponent tc, Point pt) {
-      return myAccessibleText.getOffsetAt(pt);
-    }
-
-    @Override
-    public @NotNull Rectangle modelToView(JTextComponent tc, int offset, Position.Bias bias) {
-      LogicalPosition pos = editor.offsetToLogicalPosition(offset).leanForward(bias == Position.Bias.Forward);
-      LogicalPosition posNext = editor.offsetToLogicalPosition(bias == Position.Bias.Forward ? offset + 1 : offset - 1)
-        .leanForward(bias != Position.Bias.Forward);
-      Point point = editor.logicalPositionToXY(pos);
-      Point pointNext = editor.logicalPositionToXY(posNext);
-      return point.y == pointNext.y
-             ? new Rectangle(Math.min(point.x, pointNext.x), point.y, Math.abs(point.x - pointNext.x), editor.getLineHeight())
-             : new Rectangle(point.x, point.y, 0, editor.getLineHeight());
-    }
-
-    @Override
-    public int viewToModel(JTextComponent tc, Point pt, Position.Bias[] ignored) {
-      return viewToModel(tc, pt);
-    }
-
-    @Override
-    public int getNextVisualPositionFrom(JTextComponent t, int pos, Position.Bias b,
-                                         int direction,
-                                         Position.Bias[] biasRet) {
-      notSupported();
-      return 0;
-    }
-
-    @Override
-    public void damageRange(JTextComponent t, int p0, int p1) {
-      editor.repaint(p0, p1);
-    }
-
-    @Override
-    public void damageRange(JTextComponent t, int p0, int p1, Position.Bias ignored1, Position.Bias ignored2) {
-      damageRange(t, p0, p1);
-    }
-
-    @Override
-    public @NotNull EditorKit getEditorKit(JTextComponent t) {
-      notSupported();
-      return null;
-    }
-
-    @Override
-    public @NotNull View getRootView(JTextComponent t) {
-      notSupported();
-      return null;
-    }
-  }
-
-  private static final class TextAccessibleRole extends AccessibleRole {
-    // Can't use AccessibleRole.TEXT: The screen reader verbally refers to it as a text field
-    // and doesn't do multi-line iteration. (This is hardcoded into the sun/lwawt/macosx implementation.)
-    // As you can see from JavaAccessibilityUtilities.m, we should use the exact key "textarea" to get
-    // proper text area handling.
-    // Note: This is true for MacOS only. For other platform, we need to return the "regular"
-    // TEXT role to ensure screen readers behave as expected.
-    private static final AccessibleRole TEXT_AREA = new TextAccessibleRole("textarea");
-
-    private TextAccessibleRole(@NonNls String key) {
-      super(key);
-    }
-  }
-
-  private final class AccessibleEditorComponentImpl extends AccessibleJComponent
-      implements AccessibleText, AccessibleEditableText, AccessibleExtendedText, AccessibleAction,
-                 CaretListener, DocumentListener {
-
-    AccessibleEditorComponentImpl() {
-      if (editor.isDisposed()) return;
-
-      Disposable disposable = Disposer.newDisposable("AccessibleEditorComponentImpl");
-      EditorUtil.disposeWithEditor(editor, disposable);
-      editor.getCaretModel().addCaretListener(this, disposable);
-      editor.getDocument().addDocumentListener(this, disposable);
-      myAccessibleText.addChangeListener(this::textChanged, disposable);
-    }
-
-    // ---- Implements CaretListener ----
-
-    private int myCaretPos;
-    private int myPreviousCaretPos;
-
-
-    @Override
-    public void caretPositionChanged(@NotNull CaretEvent e) {
-      Caret caret = e.getCaret();
-      if (caret != editor.getCaretModel().getPrimaryCaret()) {
-        return;
-      }
-      caretMoved(caret);
-    }
-
-    private void caretMoved(@NotNull Caret caret) {
-      int dot = myAccessibleText.getCaretOffset(caret);
-      if (myCaretPos != dot) {
-        ThreadingAssertions.assertEventDispatchThread();
-        firePropertyChange(ACCESSIBLE_CARET_PROPERTY,
-                           Integer.valueOf(myCaretPos), Integer.valueOf(dot));
-        myPreviousCaretPos = myCaretPos;
-        myCaretPos = dot;
-      }
-
-      if (caret.getLeadSelectionOffset() != caret.getOffset()) {
-        ThreadingAssertions.assertEventDispatchThread();
-        firePropertyChange(ACCESSIBLE_SELECTION_PROPERTY, null,
-                           getSelectedText());
-      }
-    }
-
-    // ---- Implements DocumentListener ----
-
-    @Override
-    public void documentChanged(final @NotNull DocumentEvent event) {
-      final Integer pos = myAccessibleText.fromDocumentOffset(event.getOffset());
-      if (ApplicationManager.getApplication().isDispatchThread()) {
-        firePropertyChange(ACCESSIBLE_TEXT_PROPERTY, null, pos);
-        if (SystemInfo.isMac) {
-          // For MacOSX we also need to fire a JTextComponent event to anyone listening
-          // to our Document, since *that* rather than the accessible property
-          // change is the only way to trigger a speech update
-          fireJTextComponentDocumentChange(event);
-        }
-      } else {
-        ApplicationManager.getApplication().invokeLater(() -> {
-          firePropertyChange(ACCESSIBLE_TEXT_PROPERTY, null, pos);
-          fireJTextComponentDocumentChange(event);
-        });
-      }
-    }
-
-    private void textChanged() {
-      firePropertyChange(ACCESSIBLE_TEXT_PROPERTY, null, 0);
-      caretMoved(editor.getCaretModel().getPrimaryCaret());
-    }
-
-    // ---- Implements AccessibleContext ----
-
-    @Override
-    public @NotNull String getAccessibleName() {
-      if (accessibleName != null) {
-        return accessibleName;
-      }
-
-      VirtualFile file = editor.getVirtualFile();
-      if (file != null) {
-        return EditorBundle.message("editor.for.file.accessible.name", file.getName());
-      }
-      return EditorBundle.message("editor.accessible.name");
-    }
-
-    @Override
-    public String getAccessibleDescription() {
-      String description = super.getAccessibleDescription();
-      if (description == null && editor.getDocument().getTextLength() == 0) {
-        //noinspection HardCodedStringLiteral
-        CharSequence emptyText = getEditor().getPlaceholder();
-        if (emptyText != null && !emptyText.isEmpty()) {
-          return AccessibleContextUtil.getUniqueDescription(this, emptyText.toString());
-        }
-      }
-      return description;
-    }
-
-    @Override
-    public AccessibleRole getAccessibleRole() {
-      // See comment on TextAccessibleRole class.
-      if (SystemInfo.isMac) {
-        return TextAccessibleRole.TEXT_AREA;
-      } else {
-        return AccessibleRole.TEXT;
-      }
-    }
-
-    @Override
-    public AccessibleText getAccessibleText() {
-      if (editor.isDisposed()) return null;
-      return this;
-    }
-
-    @Override
-    public AccessibleEditableText getAccessibleEditableText() {
-      if (editor.isDisposed()) return null;
-      return this;
-    }
-
-    @Override
-    public AccessibleStateSet getAccessibleStateSet() {
-      AccessibleStateSet states = super.getAccessibleStateSet();
-      if (editor.getDocument().isWritable()) {
-        states.add(AccessibleState.EDITABLE);
-      }
-      states.add(AccessibleState.MULTI_LINE);
-      return states;
-    }
-
-    // ---- Implements AccessibleText ----
-
-    @Override
-    public int getIndexAtPoint(Point point) {
-      return myAccessibleText.getOffsetAt(point);
-    }
-
-    @Override
-    public Rectangle getCharacterBounds(int offset) {
-      // Since we report the very end of the document as being 1 character past the document
-      // length, we need to validate the offset passed back by the screen reader.
-      if (offset < 0 || offset > myAccessibleText.getLength() - 1) {
-        return null;
-      }
-      Point point = myAccessibleText.offsetToXY(offset);
-      FontMetrics fontMetrics = editor.getFontMetrics(Font.PLAIN);
-      char c = myAccessibleText.getText(offset, offset + 1).charAt(0);
-      return new Rectangle(point.x, point.y, fontMetrics.charWidth(c), fontMetrics.getHeight());
-    }
-
-    @Override
-    public int getCharCount() {
-      return myAccessibleText.getLength();
-    }
-
-    @Override
-    public int getCaretPosition() {
-      return EditorComponentImpl.this.getCaretPosition();
-    }
-
-    @Override
-    public @Nullable String getAtIndex(
-      @MagicConstant(intValues = {
-        CHARACTER,
-        WORD,
-        SENTENCE})
-      int part,
-      int index) {
-      return getTextAtOffset(part, index, HERE);
-    }
-
-    @Override
-    public @Nullable String getAfterIndex(
-      @MagicConstant(intValues = {CHARACTER, WORD, SENTENCE})
-      int part,
-      int index) {
-      return getTextAtOffset(part, index, AFTER);
-    }
-
-    @Override
-    public @Nullable String getBeforeIndex(
-      @MagicConstant(intValues = {CHARACTER, WORD, SENTENCE})
-      int part,
-      int index) {
-      return getTextAtOffset(part, index, BEFORE);
-    }
-
-    @Override
-    public AttributeSet getCharacterAttribute(int index) {
-      return new SimpleAttributeSet();
-    }
-
-    @Override
-    public int getSelectionStart() {
-      return EditorThreading.compute(() -> myAccessibleText.getSelectionStart());
-    }
-
-    @Override
-    public int getSelectionEnd() {
-      return EditorThreading.compute(() -> myAccessibleText.getSelectionEnd());
-    }
-
-    @Override
-    public @Nullable String getSelectedText() {
-      return EditorThreading.compute(() -> myAccessibleText.getSelectedText());
-    }
-
-    // ---- Implements AccessibleEditableText ----
-
-    @Override
-    public void setTextContents(String s) {
-      setText(s);
-    }
-
-    @Override
-    public void insertTextAtIndex(int index, String s) {
-      editDocumentSafely(myAccessibleText.toDocumentOffset(index), 0, s);
-    }
-
-    @Override
-    public String getTextRange(int startIndex, int endIndex) {
-      return myAccessibleText.getText(startIndex, endIndex);
-    }
-
-    @Override
-    public void delete(int startIndex, int endIndex) {
-      TextRange range = myAccessibleText.toDocumentRange(startIndex, endIndex);
-      editDocumentSafely(range.getStartOffset(), range.getLength(), null);
-    }
-
-    @Override
-    public void cut(int startIndex, int endIndex) {
-      TextRange range = myAccessibleText.toDocumentRange(startIndex, endIndex);
-      editor.getSelectionModel().setSelection(range.getStartOffset(), range.getEndOffset());
-      DataContext dataContext = DataManager.getInstance().getDataContext(EditorComponentImpl.this);
-      CutProvider cutProvider = editor.getCutProvider();
-      if (cutProvider.isCutEnabled(dataContext)) {
-        cutProvider.performCut(dataContext);
-      }
-    }
-
-    @Override
-    public void paste(int startIndex) {
-      editor.getCaretModel().moveToOffset(myAccessibleText.toDocumentOffset(startIndex));
-      DataContext dataContext = DataManager.getInstance().getDataContext(EditorComponentImpl.this);
-      PasteProvider pasteProvider = editor.getPasteProvider();
-      if (pasteProvider.isPasteEnabled(dataContext)) {
-        pasteProvider.performPaste(dataContext);
-      }
-    }
-
-    @Override
-    public void replaceText(int startIndex, int endIndex, String s) {
-      TextRange range = myAccessibleText.toDocumentRange(startIndex, endIndex);
-      editDocumentSafely(range.getStartOffset(), range.getLength(), s);
-    }
-
-    @Override
-    public void selectText(int startIndex, int endIndex) {
-      EditorThreading.run(() -> {
-        // a caret set inside a placeholder stays there, so that the caret position that a screen reader sets reads back the same
-        VisualPosition placeholderPosition = startIndex == endIndex ? myAccessibleText.getPlaceholderVisualPosition(startIndex) : null;
-        if (placeholderPosition != null) {
-          editor.getSelectionModel().removeSelection();
-          editor.getCaretModel().moveToVisualPosition(placeholderPosition);
-          return;
-        }
-        TextRange range = myAccessibleText.toDocumentRange(startIndex, endIndex);
-        editor.getSelectionModel().setSelection(range.getStartOffset(), range.getEndOffset());
-        editor.getCaretModel().moveToOffset(range.getEndOffset());
-      });
-    }
-
-    @Override
-    public void setAttributes(int startIndex, int endIndex, AttributeSet as) {
-    }
-
-    // ---- Implements AccessibleExtendedText ----
-
-    /** Looking for text before the given offset */
-    private static final int BEFORE = -1;
-    /** Looking for text at the given offset */
-    private static final int HERE = 0;
-    /** Looking for text after the given offset */
-    private static final int AFTER = 1;
-
-    @Override
-    public @Nullable AccessibleTextSequence getTextSequenceAt(
-      @MagicConstant(intValues = {
-        CHARACTER,
-        WORD,
-        SENTENCE,
-        LINE,
-        ATTRIBUTE_RUN})
-      int part,
-      int index) {
-      return getSequenceAtIndex(part, index, HERE);
-    }
-
-    @Override
-    public @Nullable AccessibleTextSequence getTextSequenceAfter(
-      @MagicConstant(intValues = {
-        CHARACTER,
-        WORD,
-        SENTENCE,
-        LINE,
-        ATTRIBUTE_RUN})
-      int part,
-      int index) {
-      return getSequenceAtIndex(part, index, AFTER);
-    }
-
-    @Override
-    public @Nullable AccessibleTextSequence getTextSequenceBefore(
-      @MagicConstant(intValues = {
-        CHARACTER,
-        WORD,
-        SENTENCE,
-        LINE,
-        ATTRIBUTE_RUN})
-      int part,
-      int index) {
-      return getSequenceAtIndex(part, index, BEFORE);
-    }
-
-    @Override
-    public @NotNull Rectangle getTextBounds(int startIndex, int endIndex) {
-      Point startPoint = myAccessibleText.offsetToXY(startIndex);
-      Rectangle rectangle = new Rectangle(startPoint);
-
-      Point endPoint = myAccessibleText.offsetToXY(endIndex);
-      FontMetrics fontMetrics = editor.getFontMetrics(Font.PLAIN);
-      char c = myAccessibleText.getText(endIndex - 1, endIndex).charAt(0);
-      endPoint.x += fontMetrics.charWidth(c);
-      endPoint.y += fontMetrics.getHeight();
-      rectangle.add(endPoint);
-
-      return rectangle;
-    }
-
-    // ---- Implements AccessibleAction ----
-
-    @Override
-    public int getAccessibleActionCount(){
-      return 0;
-    }
-
-    @Override
-    public String getAccessibleActionDescription(int i){
-      return null;
-    }
-
-    @Override
-    public boolean doAccessibleAction(int i) {
-      return false;
-    }
-
-    private @Nullable String getTextAtOffset(
-      @MagicConstant(intValues = {CHARACTER, WORD, SENTENCE})
-      int type,
-      int offset,
-      @MagicConstant(intValues = {BEFORE, HERE, AFTER})
-      int direction) {
-      int length = myAccessibleText.getLength();
-      if (offset < 0 || offset >= length) {
-        return null;
-      }
-      switch (type) {
-        case CHARACTER: {
-          if (offset + direction < length && offset + direction >= 0) {
-            int startOffset = offset + direction;
-            return myAccessibleText.getText(startOffset, startOffset + 1);
-          }
-          break;
-        }
-
-        case WORD: {
-          var word = getWordOrLexeme(offset, direction);
-          return word == null ? null : word.text;
-        }
-
-        case SENTENCE: {
-          int lineStart = getLineAtOffsetStart(offset, direction);
-          int lineEnd = getLineAtOffsetEnd(offset, direction);
-          if (lineStart == -1 || lineEnd == -1) {
-            return null;
-          }
-          return myAccessibleText.getText(lineStart, lineEnd);
-        }
-
-        case LINE:
-        case ATTRIBUTE_RUN:
-          // Not expected to be called in this method!
-          assert false : type;
-
-        default:
-          break;
-      }
-
-      return null;
-    }
-
-    /**
-     * Similar to {@link #getTextAtOffset} but returns an {@link AccessibleTextSequence} and can accept a few more types.
-     */
-    private @Nullable AccessibleTextSequence getSequenceAtIndex(
-        @MagicConstant(intValues = {
-          CHARACTER,
-          WORD,
-          SENTENCE,
-          LINE,
-          ATTRIBUTE_RUN})
-        int type,
-        int offset,
-        @MagicConstant(intValues = {BEFORE, HERE, AFTER})
-        int direction) {
-      assert direction == BEFORE || direction == HERE || direction == AFTER;
-
-      int length = myAccessibleText.getLength();
-      if (offset < 0 || offset >= length) {
-        return null;
-      }
-
-      switch (type) {
-        case CHARACTER -> {
-          AccessibleTextSequence charSequence = null;
-          if (offset + direction < length &&
-              offset + direction >= 0) {
-            int startOffset = offset + direction;
-            charSequence = new AccessibleTextSequence(startOffset, startOffset + 1,
-                                                      myAccessibleText.getText(startOffset, startOffset + 1));
-          }
-          return charSequence;
-        }
-        case ATTRIBUTE_RUN, WORD -> {
-          return getWordOrLexeme(offset, direction);
-        }
-        case LINE, SENTENCE -> {
-          int lineStart = getLineAtOffsetStart(offset, direction);
-          int lineEnd = getLineAtOffsetEnd(offset, direction);
-          if (lineStart == -1 || lineEnd == -1) {
-            return null;
-          }
-
-          return new AccessibleTextSequence(lineStart, lineEnd, myAccessibleText.getText(lineStart, lineEnd));
-        }
-      }
-      return null;
-    }
-
-    private int getLineAtOffsetStart(int offset) {
-      Document document = editor.getDocument();
-      if (offset == 0) {
-        return 0;
-      }
-      int lineNumber = editor.offsetToLogicalPosition(offset).line;
-      return document.getLineStartOffset(lineNumber);
-    }
-
-    private int moveLineOffset(int offset, @MagicConstant(intValues = {BEFORE, HERE, AFTER}) int direction) {
-      if (direction == AFTER) {
-        int lineNumber = myAccessibleText.getLineNumber(offset);
-        lineNumber++;
-        if (lineNumber == myAccessibleText.getLineCount()) {
-          return -1;
-        }
-        return myAccessibleText.getLineStartOffset(lineNumber);
-      } else if (direction == BEFORE) {
-        int lineNumber = myAccessibleText.getLineNumber(offset);
-        lineNumber--;
-        if (lineNumber < 0) {
-          return -1;
-        }
-        return myAccessibleText.getLineStartOffset(lineNumber);
-      } else {
-        assert direction == HERE;
-        return offset;
-      }
-    }
-
-    private int getLineAtOffsetStart(int offset, @MagicConstant(intValues = {BEFORE, HERE, AFTER}) int direction) {
-      offset = moveLineOffset(offset, direction);
-      if (offset == -1) {
-        return -1;
-      }
-
-      return myAccessibleText.getLineStartOffset(myAccessibleText.getLineNumber(offset));
-    }
-
-    private int getLineAtOffsetEnd(int offset, @MagicConstant(intValues = {BEFORE, HERE, AFTER}) int direction) {
-      offset = moveLineOffset(offset, direction);
-      if (offset == -1) {
-        return -1;
-      }
-
-      return myAccessibleText.getLineEndOffset(myAccessibleText.getLineNumber(offset));
-    }
-
-    private CaretStopPolicy resolveCaretStopPolicy(@MagicConstant(intValues = {BEFORE, HERE, AFTER}) int direction) {
-      var caretStopOptions = EditorSettingsExternalizable.getInstance().getCaretStopOptions();
-      switch (direction) {
-        case AFTER -> {
-          return caretStopOptions.getForwardPolicy();
-        }
-        case BEFORE -> {
-          return caretStopOptions.getBackwardPolicy();
-        }
-        case HERE -> {
-          return myCaretPos - myPreviousCaretPos >= 0 ? caretStopOptions.getForwardPolicy() : caretStopOptions.getBackwardPolicy();
-        }
-      }
-      return caretStopOptions.getForwardPolicy();
-    }
-
-    private AccessibleTextSequence getWordOrLexeme(int offset, @MagicConstant(intValues = {BEFORE, HERE, AFTER}) int direction) {
-      if (direction == HERE) {
-        TextRange placeholder = myAccessibleText.getPlaceholderRange(offset);
-        if (placeholder != null) {
-          int start = placeholder.getStartOffset();
-          int end = placeholder.getEndOffset();
-          return new AccessibleTextSequence(start, end, myAccessibleText.getText(start, end));
-        }
-      }
-      // the word helpers below use document offsets
-      boolean isCamel = editor.getSettings().isCamelWords();
-      var caretStopPolicy = resolveCaretStopPolicy(direction);
-      offset = moveWordOffset(myAccessibleText.toDocumentOffset(offset), direction, caretStopPolicy, isCamel);
-      var wordStop = caretStopPolicy.getWordStop();
-      int wordStart = getWordAtOffsetStart(offset, wordStop, isCamel);
-      int wordEnd = getWordAtOffsetEnd(offset, wordStop, isCamel);
-      if (wordStart == -1 || wordEnd == -1 || wordStart > wordEnd) {
-        return null;
-      }
-      int start = myAccessibleText.fromDocumentOffset(wordStart);
-      int end = myAccessibleText.fromDocumentOffset(wordEnd);
-      return new AccessibleTextSequence(start, end, myAccessibleText.getText(start, end));
-    }
-
-
-    private int moveWordOffset(int offset,
-                               @MagicConstant(intValues = {BEFORE, HERE, AFTER}) int direction,
-                               CaretStopPolicy stopPolicy,
-                               boolean isCamel) {
-      if (direction == AFTER) {
-        return EditorActionUtil.getNextCaretStopOffset(editor, stopPolicy, isCamel);
-      }
-      if (direction == BEFORE) {
-        return EditorActionUtil.getPreviousCaretStopOffset(editor, stopPolicy, isCamel);
-      }
-      return offset;
-    }
-
-    private int getWordAtOffsetStart(int offset, CaretStop wordStop, boolean isCamel) {
-      if (offset == 0) {
-        return 0;
-      }
-      if (wordStop.isAtEnd() && !wordStop.isAtStart()) {
-        if (EditorActionUtil.isWordOrLexemeEnd(editor, offset, isCamel)) {
-          return getWordAtOffsetStart(offset - 1, isCamel);
-        }
-        if (offset == getLineAtOffsetStart(offset)) {
-          return offset - 1;
-        }
-      }
-      if (Character.isWhitespace(editor.getDocument().getText().charAt(offset))) {
-        return offset;
-      }
-      return getWordAtOffsetStart(offset, isCamel);
-    }
-
-    // Based on CaretImpl#getWordAtCaretStart
-    private int getWordAtOffsetStart(int offset, boolean isCamel) {
-      Document document = editor.getDocument();
-      if (offset == 0) {
-        return 0;
-      }
-      int lineNumber = editor.offsetToLogicalPosition(offset).line;
-      int newOffset = offset;
-      int minOffset = lineNumber > 0 ? document.getLineEndOffset(lineNumber - 1) : 0;
-      for (; newOffset > minOffset; newOffset--) {
-        if (EditorActionUtil.isWordOrLexemeStart(editor, newOffset, isCamel)) {
-          break;
-        }
-      }
-
-      return newOffset;
-    }
-
-    private int getWordAtOffsetEnd(int offset, CaretStop stopWord, boolean isCamel) {
-      if (stopWord.isAtStart()) {
-        if (Character.isWhitespace(editor.getDocument().getText().charAt(offset))) {
-          return offset + 1;
-        }
-        return getWordAtOffsetEnd(offset + 1, isCamel);
-      }
-      if (offset == getLineAtOffsetStart(offset)) {
-        return offset;
-      }
-      return getWordAtOffsetEnd(offset, isCamel);
-    }
-
-
-    // Based on CaretImpl#getWordAtCaretEnd
-    private int getWordAtOffsetEnd(int offset, boolean isCamel) {
-      Document document = editor.getDocument();
-      if (offset >= document.getTextLength() - 1 || document.getLineCount() == 0) {
-        return offset;
-      }
-      int newOffset = offset;
-      int lineNumber = editor.offsetToLogicalPosition(offset).line;
-      int maxOffset = document.getLineEndOffset(lineNumber);
-      if (newOffset > maxOffset) {
-        if (lineNumber + 1 >= document.getLineCount()) {
-          return offset;
-        }
-        maxOffset = document.getLineEndOffset(lineNumber + 1);
-      }
-      for (; newOffset < maxOffset; newOffset++) {
-        if (EditorActionUtil.isWordOrLexemeEnd(editor, newOffset, isCamel)) {
-          break;
-        }
-      }
-
-      return newOffset;
-    }
-  }
-
-  private final class EditorAccessibleContextDelegate extends AccessibleContextDelegateWithContextMenu implements AccessibleText {
-    private EditorAccessibleContextDelegate() { super(new AccessibleEditorComponentImpl()); }
-
-    @Override
-    protected void doShowContextMenu() {
-      ActionManager.getInstance().tryToExecute(ActionManager.getInstance().getAction("ShowPopupMenu"), null, EditorComponentImpl.this.getEditor().getContentComponent(), null, true);
-    }
-
-    @Override
-    protected Container getDelegateParent() {
-      return getParent();
-    }
-
-    @Override
-    public int getIndexAtPoint(Point point) {
-      return ((AccessibleText) getDelegate()).getIndexAtPoint(point);
-    }
-
-    @Override
-    public Rectangle getCharacterBounds(int i) {
-      return ((AccessibleText) getDelegate()).getCharacterBounds(i);
-    }
-
-    @Override
-    public int getCharCount() {
-      return ((AccessibleText) getDelegate()).getCharCount();
-    }
-
-    @Override
-    public int getCaretPosition() {
-      return ((AccessibleText) getDelegate()).getCaretPosition();
-    }
-
-    @Override
-    public String getAtIndex(int part, int index) {
-      return ((AccessibleText) getDelegate()).getAtIndex(part, index);
-    }
-
-    @Override
-    public String getAfterIndex(int part, int index) {
-      return ((AccessibleText) getDelegate()).getAfterIndex(part, index);
-    }
-
-    @Override
-    public String getBeforeIndex(int part, int index) {
-      return ((AccessibleText) getDelegate()).getBeforeIndex(part, index);
-    }
-
-    @Override
-    public AttributeSet getCharacterAttribute(int i) {
-      return ((AccessibleText) getDelegate()).getCharacterAttribute(i);
-    }
-
-    @Override
-    public int getSelectionStart() {
-      return ((AccessibleText) getDelegate()).getSelectionStart();
-    }
-
-    @Override
-    public int getSelectionEnd() {
-      return ((AccessibleText) getDelegate()).getSelectionEnd();
-    }
-
-    @Override
-    public String getSelectedText() {
-      return ((AccessibleText) getDelegate()).getSelectedText();
-    }
   }
 }

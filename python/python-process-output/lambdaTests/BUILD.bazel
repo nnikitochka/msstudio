@@ -17,7 +17,11 @@ jvm_library(
     ),
     module_name = "intellij.python.processOutput.lambdaTests",
     visibility = ["//visibility:public"],
-    runtime_deps = ["@lib//:kotlin-stdlib"],
+    runtime_deps = [
+        # do not sort,
+        "@lib//:kotlin-stdlib",
+        "//python/python-process-output/frontend",
+    ],
 )
 
 jvm_library(
@@ -31,17 +35,18 @@ jvm_library(
         ],
         allow_empty = True,
     ),
-    associates = [
-        "//python/python-process-output/frontend",
-        "//python/python-process-output/frontend:frontend_test_lib",
-    ],
     kotlinc_opts = ":custom_lambdaTests",
+    module_name = "intellij.python.processOutput.lambdaTests",
     resource_strip_prefix = "resources",
     resources = glob(
         ["resources/**/*"],
     ),
     visibility = ["//visibility:public"],
-    runtime_deps = [":lambdaTests"],
+    runtime_deps = [
+        # do not sort,
+        ":lambdaTests",
+        "//python/python-process-output/frontend:frontend_test_lib",
+    ],
     deps = [
         # do not sort,
         "@lib//:kotlin-stdlib",

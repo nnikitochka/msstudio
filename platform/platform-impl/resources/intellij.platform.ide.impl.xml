@@ -285,6 +285,7 @@
                     beanClass="com.intellij.ide.browsers.BrowserSettingsConfigurableEP" dynamic="true">
       <with attribute="instance" implements="com.intellij.openapi.options.UnnamedConfigurable"/>
     </extensionPoint>
+    <extensionPoint qualifiedName="com.intellij.webBrowserProvider" interface="com.intellij.ide.browsers.WebBrowserProvider" dynamic="true"/>
     <extensionPoint qualifiedName="com.intellij.tipAndTrick" beanClass="com.intellij.ide.util.TipAndTrickBean" dynamic="true"/>
     <extensionPoint qualifiedName="com.intellij.remote.customDataContextSerializer"
                     interface="com.intellij.ide.CustomDataContextSerializer"
@@ -422,7 +423,7 @@
                     dynamic="true"/>
     <extensionPoint qualifiedName="com.intellij.managedCacheFactory" interface="com.intellij.util.io.cache.ManagedCacheFactory" dynamic="true" />
     <extensionPoint qualifiedName="com.intellij.editorSkeletonPolicy" interface="com.intellij.openapi.fileEditor.impl.EditorSkeletonPolicy" dynamic="true"/>
-    <extensionPoint qualifiedName="com.intellij.whatsNewPageProvider" interface="com.intellij.ide.actions.WhatsNewPageProvider" dynamic="true"/>
+    <extensionPoint qualifiedName="com.intellij.whatsNewPageProvider" interface="com.intellij.ide.whatsNew.WhatsNewPageProvider" dynamic="true"/>
     <extensionPoint qualifiedName="com.intellij.frontend.splitComponentProvider" interface="com.intellij.ui.split.SplitComponentProvider"
                     dynamic="true"/>
     <extensionPoint qualifiedName="com.intellij.ide.gdpr.traceConsentManager"
@@ -831,7 +832,6 @@
     <trustedProjectsLocator implementation="com.intellij.ide.trustedProjects.impl.DefaultTrustedProjectsLocator"/>
     <trustedProjectsStateProvider implementation="com.intellij.ide.trustedProjects.impl.TrustedPathsStateProvider" order="last"/>
     <activityTracker implementation="com.intellij.openapi.project.DumbServiceTracker"/>
-    <activityTracker implementation="com.intellij.openapi.project.ScanningTracker"/>
     <activityTracker implementation="com.intellij.ide.startup.StartupActivityTracker"/>
     <activityTracker implementation="com.intellij.openapi.vfs.newvfs.VfsActivityTracker"/>
     <activityTracker implementation="com.intellij.configurationStore.SavingTracker"/>
@@ -927,6 +927,9 @@
                     serviceImplementation="com.intellij.ui.content.impl.MessageViewImpl"/>
     <projectService serviceInterface="com.intellij.openapi.project.DumbService"
                     serviceImplementation="com.intellij.openapi.project.DumbServiceImpl"/>
+    <projectService serviceInterface="com.intellij.openapi.project.SmartModeScheduler"
+                    serviceImplementation="com.intellij.openapi.project.AlwaysSmartModeScheduler"
+                    open="true"/>
     <initProjectActivity id="dumbServiceStartup" implementation="com.intellij.openapi.project.DumbServiceStartupActivity" order="last"/>
     <projectService serviceInterface="com.intellij.openapi.project.IncompleteDependenciesService"
                     serviceImplementation="com.intellij.openapi.project.IncompleteDependenciesServiceImpl"/>
@@ -1017,6 +1020,7 @@
                              bundle="messages.IdeBundle"
                              key="configurable.notifications.name"/>
     <search.optionContributor implementation="com.intellij.notification.impl.NotificationSearchableOptionContributor"/>
+    <search.optionContributor implementation="com.intellij.ide.soundSignals.SoundSignalsSearchableOptionContributor"/>
     <!-- Accessibility -->
     <applicationConfigurable groupId="appearance"
                              groupWeight="140"
@@ -1110,7 +1114,7 @@
     <applicationService serviceInterface="com.intellij.notification.DoNotAskAppManager"
                         serviceImplementation="com.intellij.notification.impl.DoNotAskAppManagerImpl"/>
     <projectService serviceInterface="com.intellij.notification.DoNotAskProjectManager"
-                    serviceImplementation="com.intellij.notification.impl.DoNotAskProjectManagerImpl"/>
+                    serviceImplementation="com.intellij.notification.impl.DoNotAskProjectManagerImpl" preload="true"/>
     <applicationSettings service="com.intellij.notification.impl.DoNotAskAppManagerImpl"/>
     <projectSettings service="com.intellij.notification.impl.DoNotAskProjectManagerImpl"/>
     <applicationSettings service="com.intellij.notification.impl.NotificationsConfigurationImpl"/>
@@ -1275,6 +1279,8 @@
                         preload="notHeadless"/>
     <applicationService serviceInterface="com.intellij.ide.soundSignals.SoundSignalPlayer"
                         serviceImplementation="com.intellij.ide.soundSignals.SoundSignalPlayerImpl"/>
+    <applicationService serviceInterface="com.intellij.notification.impl.NotificationSoundPlayer"
+                        serviceImplementation="com.intellij.notification.impl.NotificationSoundPlayerImpl"/>
     <statistics.validation.customValidationRule implementation="com.intellij.ide.soundSignals.SoundSignalIdValidationRule"/>
     <soundSignalProvider implementation="com.intellij.ide.soundSignals.IdeSoundSignalProvider"/>
     <editorSoundSignalDetector implementation="com.intellij.ide.soundSignals.ErrorWarningSoundSignalDetector"/>
@@ -1401,6 +1407,7 @@
       implementationClass="com.intellij.platform.ide.diagnostic.startUpPerformanceReporter.WelcomeScreenPerformanceCollector"/>
     <statistics.counterUsagesCollector
       implementationClass="com.intellij.platform.ide.diagnostic.startUpPerformanceReporter.HotProjectReopenStartUpPerformanceCollector"/>
+    <statistics.counterUsagesCollector implementationClass="com.intellij.ide.whatsNew.WhatsNewUsagesCollector"/>
     <postStartupActivity implementation="com.intellij.ide.startup.CheckProjectActivity"/>
     <postStartupActivity implementation="com.intellij.ide.startup.CheckKeysStartupActivity"/>
     <postStartupActivity implementation="com.intellij.openapi.editor.impl.SmoothCaretAutoEnableActivity"/>

@@ -9,8 +9,8 @@
         <compilerArguments>
           <stringArguments>
             <stringArg name="jvmTarget" arg="1.8" />
-            <stringArg name="apiVersion" arg="2.4" />
-            <stringArg name="languageVersion" arg="2.4" />
+            <stringArg name="apiVersion" arg="2.5" />
+            <stringArg name="languageVersion" arg="2.5" />
           </stringArguments>
         </compilerArguments>
       </configuration>
@@ -31,7 +31,6 @@
     <orderEntry type="module" module-name="intellij.platform.util.multiplatform" />
     <orderEntry type="module" module-name="intellij.platform.syntax.i18n" />
     <orderEntry type="module" module-name="intellij.platform.syntax.extensions" />
-    <orderEntry type="module" module-name="intellij.platform.multiplatformSupport" scope="PROVIDED" />
     <orderEntry type="module" module-name="intellij.platform.syntax.util" />
   </component>
 </module>

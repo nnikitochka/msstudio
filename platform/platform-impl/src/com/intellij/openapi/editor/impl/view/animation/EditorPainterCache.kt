@@ -14,7 +14,7 @@ import com.intellij.openapi.editor.impl.view.animation.EditorAnimationCacheStati
 import com.intellij.openapi.editor.impl.view.animation.EditorAnimationCacheStatistics.recordMiss
 import com.intellij.openapi.editor.impl.view.animation.EditorPainterCache.Companion.THRASH_COOLDOWN
 import com.intellij.openapi.editor.impl.view.animation.EditorPainterCache.Companion.THRASH_WINDOW
-import com.intellij.openapi.util.registry.Registry
+import com.intellij.openapi.editor.registry.EditorRegistry
 import com.intellij.openapi.wm.impl.IdeBackgroundUtil
 import com.intellij.ui.paint.use
 import com.intellij.ui.paint.useCopy
@@ -39,7 +39,7 @@ internal class EditorPainterCache(
 ) : Disposable {
   private val coroutineScope: CoroutineScope = editor.coroutineScope
   private val lastCacheKey = AtomicReference<EditorAnimationCacheKey?>(null)
-  private val isCacheEnabled: Boolean = Registry.`is`("editor.animation.cache.enabled", true)
+  private val isCacheEnabled: Boolean = EditorRegistry.current().isAnimationCacheEnabled()
   private val debugWindow: EditorAnimationCacheDebugWindow?
 
   /**
@@ -105,7 +105,7 @@ internal class EditorPainterCache(
    * Paints the cached content behind [graphics.getClipBounds()], instead of repainting the editor. The caller paints the caret on top.
    * Returns `false` when nothing usable is cached, so the caller has to repaint after all.
    */
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   fun paintFromCache(graphics: Graphics2D): Boolean {
     if (!isCacheEnabled || editor.isDisposed) {
       return false
@@ -134,7 +134,7 @@ internal class EditorPainterCache(
     return recordHit()
   }
 
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   fun clear() {
     lastCacheKey.set(null)
     pixelGrid = null
@@ -142,7 +142,7 @@ internal class EditorPainterCache(
     debugWindow?.zonesChanged()
   }
 
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   fun invalidate(clip: Rectangle?) {
     if (!isCacheEnabled) {
       return
@@ -165,7 +165,7 @@ internal class EditorPainterCache(
     }
   }
 
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   override fun dispose() {
     requests.value = null
     clear()
@@ -195,7 +195,7 @@ internal class EditorPainterCache(
     }
   }
 
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   private fun cacheMissingAreas(request: CacheRequest) {
     if (editor.isDisposed || editor.isDumb) {
       return
@@ -218,7 +218,7 @@ internal class EditorPainterCache(
     return AnimationClock.now() < cooldownUntil
   }
 
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   private fun cacheRequestedArea(request: CacheRequest) {
     val visibleArea = editor.scrollingModel.visibleArea
     if (visibleArea.isEmpty) {
@@ -244,7 +244,7 @@ internal class EditorPainterCache(
   /**
    * Renders and stores the content behind [repaintedArea]. Returns `false` when the view was disposed while painting.
    */
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   private fun buildEntry(repaintedArea: Rectangle2D, grid: EditorPixelGrid, visibleArea: Rectangle): Boolean {
     val image = renderToImage(repaintedArea)
     // Building the cache paints editor content, which can run plugin code and dispose the view reentrantly.

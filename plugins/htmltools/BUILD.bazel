@@ -100,13 +100,15 @@ jvm_library(
         "//platform/util:util-ui_test_lib",
     ],
 )
+### auto-generated section `build intellij.html.tools` end
 
+### auto-generated section `plugin intellij.html.tools` start
 ij_plugin(
     name = "html-tools_plugin",
     descriptor_module = ":html-tools",
     visibility = ["//visibility:public"],
 )
-### auto-generated section `build intellij.html.tools` end
+### auto-generated section `plugin intellij.html.tools` end
 
 ### auto-generated section `iml intellij.html.tools` start
 exports_files(
@@ -133,6 +135,8 @@ jvm_library(
         "//xml/impl",
         "//spellchecker/xml/backend",
         "//platform/core-ui",
+        "//platform/main/intellij.platform.monolith.main:monolith-main",
+        "//community-resources:customization",
     ],
 )
 
@@ -154,6 +158,8 @@ jvm_library(
         ":html-tools-tests",
         "//spellchecker/xml/backend:backend_test_lib",
         "//platform/ide-core:ide-core_test_lib",
+        "//platform/main/intellij.platform.monolith.main:monolith-main_test_lib",
+        "//community-resources:customization_test_lib",
     ],
     deps = [
         # do not sort,

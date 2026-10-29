@@ -67,13 +67,15 @@ jvm_library(
         "//libraries/jackson3/jackson:libraries-jackson3_test_lib",
     ],
 )
+### auto-generated section `build intellij.gradle.declarativeSync` end
 
+### auto-generated section `plugin intellij.gradle.declarativeSync` start
 ij_plugin(
     name = "declarativeSync_plugin",
     descriptor_module = ":declarativeSync",
     visibility = ["//visibility:public"],
 )
-### auto-generated section `build intellij.gradle.declarativeSync` end
+### auto-generated section `plugin intellij.gradle.declarativeSync` end
 
 ### auto-generated section `iml intellij.gradle.declarativeSync` start
 exports_files(
@@ -154,6 +156,8 @@ jvm_library(
         "//platform/workspace/jps:jps_test_lib",
         "//libraries/junit4",
         "//libraries/junit4:junit4_test_lib",
+        "//platform/scratch/plugin",
+        "//platform/scratch/plugin:plugin_test_lib",
     ],
 )
 ### auto-generated section `build intellij.gradle.declarativeSync.tests` end

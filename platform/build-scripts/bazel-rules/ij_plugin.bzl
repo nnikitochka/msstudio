@@ -51,6 +51,10 @@ def _ij_plugin_impl(ctx):
 
     args.add("--packed_modules")
     args.add(packed_modules_file)
+
+    # the standalone community repository has no ultimate modules, so a community plugin is packed without them
+    if not ctx.attr._inside_ultimate[BuildSettingInfo].value:
+        args.add("--skip_unresolved_optional_modules")
     args.add_joined(
         "--descriptor_module",
         plugin_descriptor_jars,
@@ -207,13 +211,25 @@ This rule is experimental, and its API may change. Do not migrate plugins to it 
         "_force_exact_build_compatibility": attr.label(
             default = Label("@community//platform/build-scripts/bazel-rules/ij-ide-build-settings:ij_plugin_force_exact_build_compatibility"),
         ),
+        "_inside_ultimate": attr.label(
+            default = Label("@community//build:inside_ultimate"),
+        ),
         "descriptor_module": attr.label(
             doc = "A target containing the plugin descriptor (`META-INF/plugin.xml`).",
             providers = [[_PluginModuleInfo], [_KtJvmInfo]],
             mandatory = True,
         ),
         "content_modules": attr.label_list(
-            doc = "A list of targets that produce the plugin content modules registered in the plugin.",
+            doc = """\
+A list of targets that produce the plugin content modules registered in the plugin.
+
+If a content module with the `required` or `embedded` loading rule in `plugin.xml` is not in the list, the rule reports an error.
+For a module with the `optional` or `on-demand` loading rule, the result depends on the `inside_ultimate` setting:
+
+- If the community repository is loaded inside the ultimate repository, such a module causes an error.
+- In the standalone community repository, the rule skips such a module and removes its `module` tag from `plugin.xml`.
+  The ultimate modules of a community plugin are not available there.
+""",
             providers = [[_PluginModuleInfo], [_KtJvmInfo]],
         ),
         "since_build": attr.string(

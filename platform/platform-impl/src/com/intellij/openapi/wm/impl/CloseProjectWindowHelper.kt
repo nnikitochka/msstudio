@@ -65,7 +65,7 @@ open class CloseProjectWindowHelper {
     return frame.rootPane.getClientProperty(WindowTabsComponent.CLOSE_TAB_KEY) == true
   }
 
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   open fun windowClosing(project: Project?) {
     WriteIntentReadAction.run {
 
@@ -91,7 +91,7 @@ open class CloseProjectWindowHelper {
 
   protected open fun getNumberOfOpenedProjects(): Int = ProjectManager.getInstance().openProjects.size
 
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   protected open fun closeProjectAndShowWelcomeFrameIfNoProjectOpened(project: Project?) {
     SaveAndSyncHandler.getInstance().withDisabledAutoSaveBlocking {
       if (project != null && project.isOpen) {
@@ -122,13 +122,13 @@ open class CloseProjectWindowHelper {
  * opens the welcome screen project, or `false` if no welcome screen project opens.
  */
 internal fun opensWelcomeScreenProjectAfterClose(projectToClose: Project): Boolean {
+  return opensWelcomeScreenProject() && !WelcomeScreenProjectProvider.isWelcomeScreenProject(projectToClose)
+}
+
+/** Returns `true` if the product opens the welcome screen project when no project is open. */
+internal fun opensWelcomeScreenProject(): Boolean {
   // JetBrains Client doesn't have its own non-modal welcome screen.
-  if (PlatformUtils.isJetBrainsClient() ||
-      !WelcomeAccessPoint.isAvailable() ||
-      WelcomeScreenProjectProvider.isWelcomeScreenProject(projectToClose)) {
-    return false
-  }
-  return getWelcomeScreenProjectProvider() != null
+  return !PlatformUtils.isJetBrainsClient() && WelcomeAccessPoint.isAvailable() && getWelcomeScreenProjectProvider() != null
 }
 
 /**
@@ -137,7 +137,7 @@ internal fun opensWelcomeScreenProjectAfterClose(projectToClose: Project): Boole
  *
  * @return true on success. Returns `false` when a listener vetoes the close.
  */
-@RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+@RequiresEdt
 internal fun closeAndDisposeProject(project: Project, keepFrame: Boolean): Boolean {
   if (!keepFrame) {
     return ProjectManager.getInstance().closeAndDispose(project)

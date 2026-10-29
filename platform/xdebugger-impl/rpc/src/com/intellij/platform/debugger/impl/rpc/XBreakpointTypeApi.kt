@@ -7,8 +7,8 @@ import com.intellij.ide.ui.icons.IconId
 import com.intellij.ide.vfs.VirtualFileId
 import com.intellij.platform.project.ProjectId
 import com.intellij.platform.rpc.Id
+import com.intellij.platform.rpc.RemoteApiProviderService
 import com.intellij.platform.rpc.UID
-import com.intellij.platform.rpc.lite.LiteRemoteApiProviderService
 import com.intellij.xdebugger.breakpoints.SuspendPolicy
 import com.intellij.xdebugger.breakpoints.XBreakpointType
 import com.intellij.xdebugger.breakpoints.XLineBreakpointVerticalPlacement
@@ -33,9 +33,11 @@ interface XBreakpointTypeApi : RemoteApi<Unit> {
   suspend fun toggleLineBreakpoint(projectId: ProjectId, request: XLineBreakpointInstallationRequest): XToggleLineBreakpointResponse?
 
   suspend fun removeBreakpoint(breakpointId: XBreakpointId)
+  suspend fun removeBreakpointUndoable(breakpointId: XBreakpointId)
 
   suspend fun rememberRemovedBreakpoint(breakpointId: XBreakpointId)
   suspend fun restoreRemovedBreakpoint(projectId: ProjectId)
+  suspend fun restoreRemovedBreakpointById(projectId: ProjectId, breakpointId: XBreakpointId, line: Int?): XBreakpointId?
 
   suspend fun copyLineBreakpoint(breakpointId: XBreakpointId, fileId: VirtualFileId, line: Int)
   suspend fun onBreakpointRemoval(breakpointId: XBreakpointId, sessionId: XDebugSessionId)
@@ -51,8 +53,7 @@ interface XBreakpointTypeApi : RemoteApi<Unit> {
   companion object {
     @JvmStatic
     suspend fun getInstance(): XBreakpointTypeApi {
-      // TODO: IJPL-252054
-      return LiteRemoteApiProviderService.awaitConnectionAndResolve(remoteApiDescriptor<XBreakpointTypeApi>())
+      return RemoteApiProviderService.resolve(remoteApiDescriptor<XBreakpointTypeApi>())
     }
   }
 }

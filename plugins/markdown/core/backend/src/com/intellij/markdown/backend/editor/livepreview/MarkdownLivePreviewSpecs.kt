@@ -22,11 +22,13 @@ import org.intellij.plugins.markdown.lang.MarkdownElementTypes
 import org.intellij.plugins.markdown.lang.MarkdownTokenTypeSets
 import org.intellij.plugins.markdown.lang.MarkdownTokenTypes
 import org.intellij.plugins.markdown.lang.psi.impl.MarkdownAlertTitle
+import org.intellij.plugins.markdown.lang.psi.impl.MarkdownCodeFence
 import org.intellij.plugins.markdown.lang.psi.impl.MarkdownFile
 import org.intellij.plugins.markdown.lang.psi.impl.MarkdownHeader
 import org.intellij.plugins.markdown.lang.psi.impl.MarkdownImage
 import org.intellij.plugins.markdown.lang.psi.impl.MarkdownListItem
 import org.intellij.plugins.markdown.lang.psi.impl.MarkdownTable
+import org.intellij.plugins.markdown.ui.preview.MarkdownPreviewPathResolver
 import org.jetbrains.annotations.ApiStatus
 
 /**
@@ -93,6 +95,7 @@ private fun PsiElement.toDecorationSpecs(editor: Editor): MarkdownLivePreviewSpe
     MarkdownElementTypes.INLINE_LINK -> toInlineLinkSpecs()
     MarkdownElementTypes.FULL_REFERENCE_LINK, MarkdownElementTypes.SHORT_REFERENCE_LINK -> toReferenceLinkSpecs()
     MarkdownElementTypes.IMAGE -> if (isInsideTable()) null else toImageSpec(editor)
+    MarkdownElementTypes.CODE_FENCE -> (this as? MarkdownCodeFence)?.toCodeFenceSpec()
     // `<https://example.org>` becomes a composite holding the brackets, while `<name@example.org>` stays
     // flat and keeps them as siblings, so the two forms need different lookups.
     MarkdownElementTypes.AUTOLINK -> toAutolinkSpecs()
@@ -236,12 +239,20 @@ private fun PsiElement.toImageSpec(editor: Editor): MarkdownLivePreviewSpec.Imag
   val image = this as? MarkdownImage ?: return null
   val linkDestination = image.linkDestination ?: return null
   val destination = linkDestination.text.markdownDestination()
-  if (!destination.isLocalDestination()) return null
+  val isBrowserOwned = MarkdownPreviewPathResolver.isBrowserOwned(destination)
+  if (!destination.isLocalDestination() && !isBrowserOwned) return null
   val range = image.wholeLineRange() ?: image.textRange
   val altText = image.collectLinkDescriptionText()?.let(StringUtil::collapseWhiteSpace).orEmpty()
   val placeholderText = altText.ifEmpty { MarkdownBundle.message("markdown.live.preview.image.placeholder") }
   val source = editor.getOrCreateMarkdownLivePreviewImageManager().findImageData(destination)
-  return MarkdownLivePreviewSpec.Image(range.toMarkdownLivePreviewRange(), destination, placeholderText, source)
+  return MarkdownLivePreviewSpec.Image(range.toMarkdownLivePreviewRange(), destination, placeholderText, isBrowserOwned, source)
+}
+
+private fun MarkdownCodeFence.toCodeFenceSpec(): MarkdownLivePreviewSpec.CodeFence? {
+  val language = fenceLanguage ?: return null
+  if (node.findChildByType(MarkdownTokenTypes.CODE_FENCE_END) == null) return null
+  val source = MarkdownCodeFence.obtainFenceContent(this, withWhitespaces = false)?.joinToString("") { it.text } ?: return null
+  return MarkdownLivePreviewSpec.CodeFence(textRange.toMarkdownLivePreviewRange(), language, source)
 }
 
 /** Paints the `===` or `---` line under a Setext heading as a horizontal rule. */

@@ -113,6 +113,8 @@ jvm_library(
         "//java/plugin",
         "//aether-dependency-resolver/plugin",
         "//java/java-backend:backend",
+        "//platform/main/intellij.platform.monolith.main:monolith-main",
+        "//community-resources:customization",
     ],
 )
 
@@ -157,6 +159,8 @@ jvm_library(
         "//java/plugin:plugin_test_lib",
         "//aether-dependency-resolver/plugin:plugin_test_lib",
         "//java/java-backend:backend_test_lib",
+        "//platform/main/intellij.platform.monolith.main:monolith-main_test_lib",
+        "//community-resources:customization_test_lib",
     ],
     deps = [
         # do not sort,
@@ -174,6 +178,8 @@ jvm_library(
         "//platform/diff-api:diff_test_lib",
         "//plugins/git4idea:vcs-git",
         "//plugins/git4idea:vcs-git_test_lib",
+        "//platform/productMode",
+        "//platform/productMode:productMode_test_lib",
         "//platform/editor-ui-api:editor-ui",
         "//platform/editor-ui-api:editor-ui_test_lib",
         "//platform/lang-core",

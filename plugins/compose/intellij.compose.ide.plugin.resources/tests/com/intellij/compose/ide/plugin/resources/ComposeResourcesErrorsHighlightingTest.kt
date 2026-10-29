@@ -28,7 +28,7 @@ internal class ComposeResourcesErrorsHighlightingTest : ComposeResourcesCodeInsi
 
     val kotlinFiles = mutableListOf<VirtualFile>()
     VfsUtilCore.iterateChildrenRecursively(sourceSetRoot, null) { file ->
-      if (!file.isDirectory && file.extension == "kt" && file.isTestableSourceFile()) {
+      if (!file.isDirectory && file.extension == "kt") {
         kotlinFiles.add(file)
       }
       true
@@ -61,11 +61,5 @@ internal class ComposeResourcesErrorsHighlightingTest : ComposeResourcesCodeInsi
         "$fileName:\n${errors.joinToString("\n") { "  - $it" }}"
       }
     )
-  }
-
-  private fun VirtualFile.isTestableSourceFile(): Boolean {
-    // Android SDK is not configured in tests, so we can only verify files
-    // that don't depend on Android APIs.
-    return sourceSetName != ANDROID_MAIN || this.name == "test.$ANDROID_MAIN.kt"
   }
 }

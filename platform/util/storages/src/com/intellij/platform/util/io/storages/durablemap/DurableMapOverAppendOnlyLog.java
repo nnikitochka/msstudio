@@ -416,6 +416,6 @@ public class DurableMapOverAppendOnlyLog<K, V> implements DurableMap<K, V>, Comp
   private long appendEntry(@NotNull K key,
                            @Nullable V value) throws IOException {
     KnownSizeRecordWriter entryWriter = entryExternalizer.writerFor(key, value);
-    return keyValuesLog.append(entryWriter, entryWriter.recordSize());
+    return keyValuesLog.append(target -> entryWriter.write(target, 0), entryWriter.recordSize());
   }
 }

@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.configurationStore
 
 import com.fasterxml.aalto.UncheckedStreamException
@@ -11,6 +11,7 @@ import com.intellij.openapi.components.RoamingType
 import com.intellij.openapi.components.impl.stores.ComponentStorageUtil
 import com.intellij.openapi.diagnostic.debug
 import com.intellij.openapi.extensions.PluginId
+import com.intellij.openapi.progress.Cancellation
 import com.intellij.openapi.progress.ProcessCanceledException
 import com.intellij.openapi.util.JDOMUtil
 import com.intellij.openapi.util.SystemInfoRt
@@ -31,6 +32,7 @@ import org.jetbrains.annotations.ApiStatus.Internal
 import java.io.FileNotFoundException
 import java.io.InputStream
 import java.io.Writer
+import java.util.concurrent.CancellationException
 import javax.xml.stream.XMLStreamException
 import kotlin.math.min
 
@@ -60,8 +62,17 @@ abstract class XmlElementStorage protected constructor(
     pluginId: PluginId,
     stateClass: Class<S>,
     reload: Boolean,
+    archiveLoadedState: Boolean = true,
   ): StateGetter<S> {
-    return StateGetterImpl(component = component, componentName = componentName, pluginId = pluginId, storageData = getStorageData(reload), stateClass = stateClass, storage = this)
+    return StateGetterImpl(
+      component = component,
+      componentName = componentName,
+      pluginId = pluginId,
+      storageData = getStorageData(reload),
+      stateClass = stateClass,
+      storage = this,
+      archiveLoadedState = archiveLoadedState,
+    )
   }
 
   final override fun loadData(): StateMap = loadElement()?.let { loadState(it) } ?: StateMap.EMPTY
@@ -100,6 +111,11 @@ abstract class XmlElementStorage protected constructor(
     }
     catch (e: FileNotFoundException) {
       throw e
+    }
+    catch (e: CancellationException) {
+      // the caller of the read is canceled, so the storage must not keep the empty data
+      Cancellation.ensureActive()
+      LOG.error("Cannot load data for $fileSpec", RuntimeException(e))
     }
     catch (e: Throwable) {
       LOG.error("Cannot load data for $fileSpec", e)
@@ -439,8 +455,13 @@ private class StateGetterImpl<S : Any>(
   private val storageData: StateMap,
   private val stateClass: Class<S>,
   private val storage: XmlElementStorage,
+  private val archiveLoadedState: Boolean,
 ) : StateGetter<S> {
   private var serializedState: Element? = null
+  private val overrideTracker = ControllerOverrideTracker()
+
+  override val isStateChangedByController: Boolean
+    get() = overrideTracker.isLocalValueOverridden
 
   override suspend fun getState(mergeInto: S?): S? {
     LOG.assertTrue(serializedState == null)
@@ -453,11 +474,12 @@ private class StateGetterImpl<S : Any>(
       componentName = componentName,
       pluginId = pluginId,
       roamingType = storage.roamingType,
+      overrideTracker = overrideTracker,
     )
   }
 
   override fun archiveState(): S? {
-    if (serializedState == null) {
+    if (serializedState == null || !archiveLoadedState || isStateChangedByController) {
       return null
     }
 
@@ -524,6 +546,9 @@ enum class DataStateChanged { LOADED, SAVED }
 @Internal
 interface StateGetter<S : Any> {
   suspend fun getState(mergeInto: S? = null): S?
+
+  val isStateChangedByController: Boolean
+    get() = false
 
   fun archiveState(): S?
 }

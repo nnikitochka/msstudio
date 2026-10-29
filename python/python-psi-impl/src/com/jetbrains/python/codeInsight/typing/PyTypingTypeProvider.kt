@@ -113,6 +113,7 @@ import com.jetbrains.python.psi.types.PyCollectionTypeImpl
 import com.jetbrains.python.psi.types.PyConcatenateType
 import com.jetbrains.python.psi.types.PyInstantiableType
 import com.jetbrains.python.psi.types.PyIntersectionType.Companion.intersectionOrTop
+import com.jetbrains.python.psi.types.PyLegacyDocstringTypeParser
 import com.jetbrains.python.psi.types.PyLiteralStringType.Companion.create
 import com.jetbrains.python.psi.types.PyLiteralType
 import com.jetbrains.python.psi.types.PyModuleType
@@ -133,7 +134,6 @@ import com.jetbrains.python.psi.types.PyTypeChecker.collectGenerics
 import com.jetbrains.python.psi.types.PyTypeFormType
 import com.jetbrains.python.psi.types.PyTypeParameterMapping
 import com.jetbrains.python.psi.types.PyTypeParameterType
-import com.jetbrains.python.psi.types.PyLegacyDocstringTypeParser
 import com.jetbrains.python.psi.types.PyTypeUtil
 import com.jetbrains.python.psi.types.PyTypeUtil.convertToType
 import com.jetbrains.python.psi.types.PyTypeUtil.derefOrUnknown
@@ -1942,9 +1942,8 @@ class PyTypingTypeProvider : PyTypeProviderWithCustomContext<Context?>() {
     }
 
     fun isFinal(decoratable: PyDecoratable, context: TypeEvalContext): Boolean {
-      return PyKnownDecoratorUtil
-        .getKnownDecorators(decoratable, context)
-        .any { it === PyKnownDecorator.TYPING_FINAL || it === PyKnownDecorator.TYPING_FINAL_EXT }
+      return PyKnownDecoratorUtil.knownDecoratorsOf(decoratable, context)
+        .containsAny(PyKnownDecorator.TYPING_FINAL, PyKnownDecorator.TYPING_FINAL_EXT)
     }
 
     /**
@@ -2485,6 +2484,14 @@ class PyTypingTypeProvider : PyTypeProviderWithCustomContext<Context?>() {
       }
 
       // old-style type aliases of form `ListOf = list[T]` or `ListOf: TypeAlias = list[T]`
+      // Without the AST, the value of the alias is a fragment, and the target of the alias is its context.
+      if (typeHintContext is PyTargetExpression) {
+        val assignedValue = PyTypingAliasStubType.getAssignedValueStubLike(typeHintContext)
+        if (assignedValue != null && PsiTreeUtil.isAncestor(assignedValue, typeHint, false) && isTypeAliasValue(assignedValue, context)) {
+          return typeHintContext
+        }
+        return null
+      }
       val assignment = PsiTreeUtil.getParentOfType(
         typeHintContext,
         PyAssignmentStatement::class.java,
@@ -2495,17 +2502,19 @@ class PyTypingTypeProvider : PyTypeProviderWithCustomContext<Context?>() {
         val assignedValue = PyPsiUtils.flattenParens(assignment.assignedValue)
         if (PsiTreeUtil.isAncestor(assignedValue, typeHintContext, false)) {
           val target = PyPsiUtils.flattenParens(assignment.leftHandSideExpression)
-          if (target is PyTargetExpression) {
-            val isTypeParamDeclaration = assignedValue is PyCallExpression &&
-                                         getTypeParameterKindFromDeclaration(assignedValue, context.typeContext) != null
-            if (!isTypeParamDeclaration && PyTypingAliasStubType.looksLikeTypeHint(assignedValue!!)) {
-              return target
-            }
+          if (target is PyTargetExpression && isTypeAliasValue(assignedValue!!, context)) {
+            return target
           }
         }
       }
 
       return null
+    }
+
+    private fun isTypeAliasValue(assignedValue: PyExpression, context: Context): Boolean {
+      val isTypeParamDeclaration = assignedValue is PyCallExpression &&
+                                   getTypeParameterKindFromDeclaration(assignedValue, context.typeContext) != null
+      return !isTypeParamDeclaration && PyTypingAliasStubType.looksLikeTypeHint(assignedValue)
     }
 
     private fun isArgumentOfUnresolvedGenericInSignature(typeHint: PsiElement, function: PyFunction, context: TypeEvalContext): Boolean {

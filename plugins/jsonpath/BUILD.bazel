@@ -13,11 +13,15 @@ jps_test(
 
 ### auto-generated section `dev intellij.jsonpath` start
 dev_dist_plugin(
+    content_modules = ["intellij.jsonpath.scratch"],
     descriptor = "resources/META-INF/plugin.xml",
     jars = {
         "lib/jsonpath.jar": ["intellij.jsonpath"],
     },
     main_module = "intellij.jsonpath",
+    mode_refused_content_modules = {
+        "frontend": ["intellij.jsonpath.scratch"],
+    },
 )
 ### auto-generated section `dev intellij.jsonpath` end
 
@@ -94,13 +98,16 @@ jvm_library(
         "//libraries/kotlinx/collections-immutable:libraries-kotlinx-collections-immutable_test_lib",
     ],
 )
+### auto-generated section `build intellij.jsonpath` end
 
+### auto-generated section `plugin intellij.jsonpath` start
 ij_plugin(
     name = "jsonpath_plugin",
     descriptor_module = ":jsonpath",
+    content_modules = ["//plugins/jsonpath/scratch"],
     visibility = ["//visibility:public"],
 )
-### auto-generated section `build intellij.jsonpath` end
+### auto-generated section `plugin intellij.jsonpath` end
 
 ### auto-generated section `iml intellij.jsonpath` start
 exports_files(
@@ -124,6 +131,8 @@ jvm_library(
     runtime_deps = [
         # do not sort,
         "//libraries/byte-buddy",
+        "//platform/main/intellij.platform.monolith.main:monolith-main",
+        "//community-resources:customization",
         "//xml/plugin",
     ],
 )
@@ -147,8 +156,9 @@ jvm_library(
     runtime_deps = [
         # do not sort,
         ":jsonpath-tests",
-        "//platform/platform-impl:ide-impl_test_lib",
         "//libraries/byte-buddy:byte-buddy_test_lib",
+        "//platform/main/intellij.platform.monolith.main:monolith-main_test_lib",
+        "//community-resources:customization_test_lib",
         "//xml/plugin:plugin_test_lib",
     ],
     deps = [
@@ -162,37 +172,22 @@ jvm_library(
         "//platform/lang-api:lang_test_lib",
         "//platform/analysis-api:analysis",
         "//platform/analysis-api:analysis_test_lib",
-        "//platform/editor-ui-api:editor-ui",
-        "//platform/editor-ui-api:editor-ui_test_lib",
-        "//platform/platform-impl:ide-impl",
         "//json/backend",
         "//json/backend:backend_test_lib",
         "//platform/core-impl",
         "//platform/core-impl:core-impl_test_lib",
         "//platform/platform-api:ide",
         "//platform/platform-api:ide_test_lib",
-        "//platform/util:util-ui",
-        "//platform/util:util-ui_test_lib",
         "//libraries/assertj-core",
         "//libraries/assertj-core:assertj-core_test_lib",
         "//platform/lang-impl",
         "//platform/lang-impl:lang-impl_test_lib",
-        "//spellchecker",
-        "//spellchecker:spellchecker_test_lib",
-        "//platform/core-ui",
-        "//platform/core-ui:core-ui_test_lib",
-        "//libraries/fastutil",
-        "//libraries/fastutil:fastutil_test_lib",
-        "//libraries/guava",
-        "//libraries/guava:guava_test_lib",
         "//platform/testFramework",
         "//platform/testFramework:testFramework_test_lib",
         "//plugins/IntelliLang:langInjection",
         "//plugins/IntelliLang:langInjection_test_lib",
         "//platform/testFramework/extensions:testExtensions",
         "//platform/testFramework/extensions:testExtensions_test_lib",
-        "//libraries/kotlinx/collections-immutable:libraries-kotlinx-collections-immutable",
-        "//libraries/kotlinx/collections-immutable:libraries-kotlinx-collections-immutable_test_lib",
         "//platform/testFramework/junit5",
         "//platform/testFramework/junit5:junit5_test_lib",
         "//platform/testFramework/junit5/codeInsight",
@@ -201,6 +196,8 @@ jvm_library(
         "//libraries/junit6:junit6_test_lib",
         "//libraries/junit4",
         "//libraries/junit4:junit4_test_lib",
+        "//platform/scratch/plugin",
+        "//platform/scratch/plugin:plugin_test_lib",
     ],
 )
 ### auto-generated section `build intellij.jsonpath.tests` end

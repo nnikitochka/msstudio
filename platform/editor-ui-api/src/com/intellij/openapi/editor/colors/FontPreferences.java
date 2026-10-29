@@ -1,10 +1,11 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.editor.colors;
 
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.util.NlsSafe;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.SystemInfoRt;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -72,7 +73,27 @@ public class FontPreferences {
     return DEFAULT_LINE_SPACING;
   }
 
-  public static @NlsSafe String getDefaultFontName() {
+  /**
+   * @return a set of enabled font features (e.g. {@code zero}, {@code ss01}) for the default font.
+   */
+  public @Unmodifiable @NotNull Set<@NotNull String> getCharacterVariants() {
+    return Set.of();
+  }
+
+  /**
+   * Returns these preferences as a value that does not change.
+   * A reader that takes the value once sees one consistent version on any thread.
+   * The method returns the same value as long as the preferences do not change.
+   * So a reader can compare two values by identity to find a change.
+   * A new value usually means a change, but its values can still be equal.
+   * A subclass whose values can change must override this method.
+   */
+  @ApiStatus.Experimental
+  public @NotNull FontPreferences getSnapshot() {
+    return this;
+  }
+
+  private static @NlsSafe String getDefaultFontName() {
     if (SystemInfo.isJetBrainsJvm) {
       return JETBRAINS_MONO;
     }
@@ -91,9 +112,4 @@ public class FontPreferences {
     }
     return FALLBACK_FONT_FAMILY;
   }
-
-  /**
-   * @return a set of enabled font features (e.g. {@code zero}, {@code ss01}) for the default font.
-   */
-  public @Unmodifiable @NotNull Set<@NotNull String> getCharacterVariants() { return Set.of(); }
 }

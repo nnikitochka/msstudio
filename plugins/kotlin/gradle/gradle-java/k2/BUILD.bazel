@@ -97,6 +97,8 @@ jvm_library(
         "//plugins/kotlin:kotlin-plugin-community-main",
         "//libraries/kotlinc/analysis-api:libraries-kotlinc-analysis-api",
         "//libraries/kotlinc/symbol-light-classes:libraries-kotlinc-symbol-light-classes",
+        "//plugins/kotlin/gradle/gradle-java/k2:kotlin-gradle-java",
+        "//platform/main/intellij.platform.monolith.main:monolith-main",
         "//platform/problemsView/collector",
     ],
 )
@@ -112,16 +114,15 @@ jvm_library(
         ],
         allow_empty = True,
     ),
-    associates = [
-        "//plugins/kotlin/gradle/gradle-java/k2:kotlin-gradle-java",
-        "//plugins/kotlin/gradle/gradle-java/k2:kotlin-gradle-java_test_lib",
-    ],
+    module_name = "intellij.kotlin.gradle.java.tests",
     visibility = ["//visibility:public"],
     runtime_deps = [
         # do not sort,
         ":kotlin-gradle-java-tests",
         "//plugins/kotlin:kotlin-plugin-community-main_test_lib",
+        "//plugins/kotlin/gradle/gradle-java/k2:kotlin-gradle-java_test_lib",
         "//platform/ide-core:ide-core_test_lib",
+        "//platform/main/intellij.platform.monolith.main:monolith-main_test_lib",
         "//platform/problemsView/collector:collector_test_lib",
     ],
     deps = [
@@ -136,7 +137,6 @@ jvm_library(
         "//platform/indexing-api:indexing_test_lib",
         "//platform/projectModel-api:projectModel",
         "//platform/projectModel-api:projectModel_test_lib",
-        "@lib//:kotlin-stdlib",
         "//plugins/kotlin/gradle/gradle-java/tests.shared",
         "//plugins/kotlin/gradle/gradle-java/tests.shared:tests.shared_test_lib",
         "//libraries/kotlinc/kotlin-jps-common:libraries-kotlinc-kotlin-jps-common",
@@ -164,8 +164,6 @@ jvm_library(
         "//plugins/kotlin/intellij.kotlin.base.test:base-test_test_lib",
         "//java/testFramework",
         "//java/testFramework:testFramework_test_lib",
-        "//plugins/kotlin/highlighting/highlighting-k2:kotlin-highlighting",
-        "//plugins/kotlin/highlighting/highlighting-k2:kotlin-highlighting_test_lib",
         "//libraries/kotlinc/kotlin-compiler-common:libraries-kotlinc-kotlin-compiler-common",
         "//libraries/kotlinc/kotlin-compiler-common:libraries-kotlinc-kotlin-compiler-common_test_lib",
         "//libraries/kotlinc/analysis-api:libraries-kotlinc-analysis-api",
@@ -241,6 +239,8 @@ jvm_library(
         "//libraries/junit6:junit6_test_lib",
         "//libraries/junit6-params",
         "//libraries/junit6-params:junit6-params_test_lib",
+        "//platform/scratch/plugin",
+        "//platform/scratch/plugin:plugin_test_lib",
     ],
 )
 ### auto-generated section `build intellij.kotlin.gradle.java.tests` end

@@ -128,12 +128,6 @@ jvm_library(
         "//libraries/kotlinc/analysis-api:libraries-kotlinc-analysis-api_test_lib",
         "//android/android-templates:templates-tests",
         "//android/android-templates:templates-tests_test_lib",
-        "//images:images-tests",
-        "//images:images-tests_test_lib",
-        "//RegExpSupport:regexp-tests",
-        "//RegExpSupport:regexp-tests_test_lib",
-        "//platform/xdebugger-impl:debugger-impl-tests",
-        "//platform/xdebugger-impl:debugger-impl-tests_test_lib",
         "//platform/util:util-ui",
         "//platform/util:util-ui_test_lib",
         "//platform/util-ex",
@@ -144,6 +138,8 @@ jvm_library(
         "//platform/testFramework/junit5:junit5_test_lib",
         "//libraries/junit6",
         "//libraries/junit6:junit6_test_lib",
+        "//platform/scratch/plugin",
+        "//platform/scratch/plugin:plugin_test_lib",
     ],
 )
 ### auto-generated section `build intellij.kotlin.gradle.multiplatform.tests` end

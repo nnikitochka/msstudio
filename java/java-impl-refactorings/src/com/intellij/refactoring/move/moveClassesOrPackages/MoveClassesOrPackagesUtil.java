@@ -72,6 +72,7 @@ import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.VisibilityUtil;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.MultiMap;
+import one.util.streamex.StreamEx;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -576,7 +577,7 @@ public final class MoveClassesOrPackagesUtil {
     moveDestination.analyzeModuleConflicts(Arrays.asList(elementsToMove), conflicts, usageInfos);
     detectPackageLocalsMoved(usageInfos, conflicts, targetPackage, elementsToMove);
     detectPackageLocalsUsed(conflicts, elementsToMove, targetPackage);
-    detectMoveToDefaultPackage(usageInfos, conflicts, targetPackage);
+    detectMoveToDefaultPackage(usageInfos, elementsToMove, conflicts, targetPackage);
   }
 
   private static @NotNull String getNewQName(@NotNull PsiElement element, @NotNull PackageWrapper targetPackage) {
@@ -599,9 +600,12 @@ public final class MoveClassesOrPackagesUtil {
   }
 
   private static void detectMoveToDefaultPackage(UsageInfo[] infos,
+                                                 PsiElement @NotNull [] elementsToMove,
                                                  MultiMap<PsiElement, @DialogMessage String> conflicts,
                                                  PackageWrapper aPackage) {
     if (!aPackage.getQualifiedName().isEmpty()) return;
+
+    Set<@NotNull String> pkgNames = StreamEx.of(elementsToMove).select(PsiPackage.class).map(PsiPackage::getQualifiedName).toSet();
 
     Set<PsiFile> filesWithImports = new HashSet<>();
     for (UsageInfo info : infos) {
@@ -610,11 +614,32 @@ public final class MoveClassesOrPackagesUtil {
       PsiReference reference = info.getReference();
       if (reference == null) continue;
       PsiElement target = reference.resolve();
+      if (target == null) continue;
+      if (isInMovedPackage(target, pkgNames)) continue;
       PsiFile file = element.getContainingFile();
-      if (file instanceof PsiJavaFile && target != null && filesWithImports.add(file) && !((PsiJavaFile)file).getPackageName().isEmpty()) {
+      if (file instanceof PsiJavaFile javaFile && filesWithImports.add(javaFile) && !javaFile.getPackageName().isEmpty()) {
         conflicts.putValue(element, JavaBundle.message("move.class.import.from.default.package.conflict", RefactoringUIUtil.getDescription(target, false)));
       }
     }
+  }
+
+  private static boolean isInMovedPackage(@NotNull PsiElement target, @NotNull Set<String> packageNames) {
+    String pkgName;
+    if (target instanceof PsiPackage psiPackage) {
+      pkgName = psiPackage.getQualifiedName();
+    }
+    else if (target.getContainingFile() instanceof PsiJavaFile javaFile) {
+      pkgName = javaFile.getPackageName();
+    }
+    else {
+      return false;
+    }
+
+    while(!pkgName.isEmpty()) {
+      if (packageNames.contains(pkgName)) return true;
+      pkgName = StringUtil.getPackageName(pkgName, '.');
+    }
+    return false;
   }
 
   private static boolean isInsideMoved(PsiElement place, PsiElement[] elementsToMove) {

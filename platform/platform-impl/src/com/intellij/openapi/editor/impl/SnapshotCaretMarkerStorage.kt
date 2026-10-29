@@ -9,46 +9,104 @@ import com.intellij.openapi.editor.impl.marker.DefaultMarkerPolicy
 import com.intellij.openapi.editor.impl.marker.MarkerPolicy
 import com.intellij.openapi.editor.impl.marker.MarkerSpec
 import com.intellij.openapi.editor.impl.marker.MarkerTransformResult
+import com.intellij.openapi.editor.impl.marker.PMarkerResolution
 import com.intellij.openapi.editor.impl.marker.PMarkerRoot
 import com.intellij.openapi.editor.impl.marker.SnapshotMarkerEngineImpl
 import com.intellij.openapi.editor.impl.marker.SnapshotMarkerRootStore
 import com.intellij.openapi.editor.impl.marker.SnapshotRangeMarkerImpl
-import java.util.function.Consumer
+import com.intellij.openapi.util.TextRangeScalarUtil
+import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap
+import it.unimi.dsi.fastutil.longs.LongList
+import it.unimi.dsi.fastutil.longs.LongLists
 
 /** Stores caret position and selection markers for one editor. */
 internal class SnapshotCaretMarkerStorage(
   val document: DocumentImpl,
-  documentChanged: Consumer<DocumentEvent>,
 ) {
-  val rootStore: SnapshotMarkerRootStore = SnapshotMarkerRootStore(document, onDocumentChanged = documentChanged::accept)
+  private val markers: Long2ObjectOpenHashMap<SnapshotCaretMarker> = Long2ObjectOpenHashMap()
+  private var rootBeforeChange: PMarkerRoot? = null
+  private var affectedMarkerIds: LongList = LongLists.EMPTY_LIST
+  val rootStore: SnapshotMarkerRootStore = SnapshotMarkerRootStore(
+    document,
+    onDocumentChanged = ::documentChanged,
+    onMarkersAffected = { affectedMarkerIds = it },
+  )
+
+  fun beforeDocumentChange() {
+    rootBeforeChange = rootStore.root(currentSnapshot())
+  }
+
+  private fun documentChanged(event: DocumentEvent) {
+    val beforeRoot = rootBeforeChange
+    val affected = affectedMarkerIds
+    rootBeforeChange = null
+    affectedMarkerIds = LongLists.EMPTY_LIST
+    if (beforeRoot == null) return
+    for (index in affected.indices) {
+      val markerId = affected.getLong(index)
+      val marker = markers.get(markerId) ?: continue
+      val oldRange = beforeRoot.resolve(markerId)
+      val oldStart = PMarkerResolution.startOffset(oldRange)
+      if (oldStart <= event.offset + event.oldLength && PMarkerResolution.endOffset(oldRange) >= event.offset) {
+        marker.documentChanged(event, oldStart)
+      }
+    }
+  }
 
   fun dispose() {
     rootStore.dispose(document.snapshotMarkerStores)
+    markers.clear()
+    rootBeforeChange = null
+    affectedMarkerIds = LongLists.EMPTY_LIST
   }
 
   fun nextMarkerId(): Long = SnapshotMarkerEngineImpl.nextMarkerId()
 
-  fun positionSpec(): MarkerSpec = POSITION_SPEC
+  fun positionSpec(): Byte = POSITION_SPEC
 
-  fun selectionSpec(): MarkerSpec = SELECTION_SPEC
+  fun selectionSpec(): Byte = SELECTION_SPEC
 
-  fun add(marker: SnapshotRangeMarkerImpl, startOffset: Int, endOffset: Int, spec: MarkerSpec) {
+  fun positionPolicy(): MarkerPolicy = CaretPositionMarkerPolicy
+
+  fun selectionPolicy(): MarkerPolicy = CaretSelectionMarkerPolicy
+
+  fun add(marker: SnapshotCaretMarker, startOffset: Int, endOffset: Int, spec: Byte) {
+    markers.put(marker.id, marker)
     rootStore.updateRoot(currentSnapshot()) {
-      it.insert(marker.id, startOffset, endOffset, spec, marker.flavorFlags)
+      it.insert(marker.id, startOffset, endOffset, spec, marker.flavorFlags, policy = marker.policy)
     }
   }
 
-  fun relocate(marker: SnapshotRangeMarkerImpl, offset: Int, spec: MarkerSpec) {
-    rootStore.updateRoot(currentSnapshot()) {
-      it.remove(marker.id).insert(marker.id, offset, offset, spec, marker.flavorFlags)
-    }
+  fun remove(marker: SnapshotCaretMarker) {
+    markers.remove(marker.id)
   }
 
   fun currentSnapshot(): DocumentSnapshot = document.core.snapshot()
 
   companion object {
-    private val POSITION_SPEC: MarkerSpec = MarkerSpec(isGreedyToLeft = false, isGreedyToRight = false, policy = CaretPositionMarkerPolicy)
-    private val SELECTION_SPEC: MarkerSpec = MarkerSpec(isGreedyToLeft = false, isGreedyToRight = false, policy = CaretSelectionMarkerPolicy)
+    private val POSITION_SPEC: Byte = MarkerSpec.create(isGreedyToLeft = false, isGreedyToRight = false)
+    private val SELECTION_SPEC: Byte = MarkerSpec.create(isGreedyToLeft = false, isGreedyToRight = false)
+  }
+}
+
+internal abstract class SnapshotCaretMarker(
+  protected val storage: SnapshotCaretMarkerStorage,
+  startOffset: Int,
+  endOffset: Int,
+  spec: Byte,
+  policy: MarkerPolicy,
+) : SnapshotRangeMarkerImpl(
+  storage.document, storage.rootStore, storage.nextMarkerId(), spec,
+  TextRangeScalarUtil.toScalarRange(startOffset, endOffset), policy,
+) {
+  init {
+    storage.add(this, startOffset, endOffset, spec)
+  }
+
+  abstract fun documentChanged(event: DocumentEvent, oldOffset: Int)
+
+  override fun afterDispose() {
+    storage.remove(this)
   }
 }
 
@@ -114,6 +172,6 @@ private object CaretSelectionMarkerPolicy : MarkerPolicy {
 
 private fun alignToCodePointBoundary(offset: Int, text: DocumentText): Int {
   if (offset <= 0 || offset >= text.length()) return offset
-  val chars = text.cachedChars()
+  val chars = text.luckyChars()
   return if (Character.isHighSurrogate(chars[offset - 1]) && Character.isLowSurrogate(chars[offset])) offset - 1 else offset
 }

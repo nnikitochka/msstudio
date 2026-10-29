@@ -31,6 +31,7 @@ public abstract class AppFontOptions<F extends PersistentFontPreferences>
 
   protected static final int CURR_FONT_PREF_VERSION = 1;
   private int myFontPrefVersion;
+  private boolean myCacheResetListenerAdded;
 
   public AppFontOptions() {
     Application app = ApplicationManager.getApplication();
@@ -63,27 +64,29 @@ public abstract class AppFontOptions<F extends PersistentFontPreferences>
   public void loadState(@NotNull F state) {
     copyState(state, myFontPreferences);
     myFontPrefVersion = state.VERSION;
-    myFontPreferences.addChangeListener((source) -> EditorFontCache.getInstance().reset());
+    addCacheResetListener();
   }
 
   protected abstract F createFontState(@NotNull FontPreferences fontPreferences);
 
   private static void copyState(PersistentFontPreferences state, @NotNull ModifiableFontPreferences fontPreferences) {
-    fontPreferences.clear();
     // Check both float and integer font size for compatibility
     float stateFontSize = state.FONT_SIZE_2D != (float)FontPreferences.DEFAULT_FONT_SIZE ?
                           state.FONT_SIZE_2D : state.FONT_SIZE;
     float fontSize = UISettings.restoreFontSize(stateFontSize, state.FONT_SCALE);
     String[] names = migrateFamilyNameIfNeeded(state.FONT_FAMILY, state.FONT_REGULAR_SUB_FAMILY, state.FONT_BOLD_SUB_FAMILY);
-    fontPreferences.register(names[0], fontSize);
-    fontPreferences.setRegularSubFamily(names[1]);
-    fontPreferences.setBoldSubFamily(names[2]);
-    fontPreferences.setLineSpacing(state.LINE_SPACING);
-    fontPreferences.setUseLigatures(state.USE_LIGATURES);
-    fontPreferences.setCharacterVariants(state.CHARACTER_VARIANTS);
-    if (state.SECONDARY_FONT_FAMILY != null) {
-      fontPreferences.register(state.SECONDARY_FONT_FAMILY, fontSize);
-    }
+    fontPreferences.runBatchUpdate(draft -> {
+      draft.clear();
+      draft.register(names[0], fontSize);
+      draft.setRegularSubFamily(names[1]);
+      draft.setBoldSubFamily(names[2]);
+      draft.setLineSpacing(state.LINE_SPACING);
+      draft.setUseLigatures(state.USE_LIGATURES);
+      draft.setCharacterVariants(state.CHARACTER_VARIANTS);
+      if (state.SECONDARY_FONT_FAMILY != null) {
+        draft.register(state.SECONDARY_FONT_FAMILY, fontSize);
+      }
+    });
   }
 
   private static String[] migrateFamilyNameIfNeeded(String family, String regularSubFamily, String boldSubFamily) {
@@ -106,5 +109,23 @@ public abstract class AppFontOptions<F extends PersistentFontPreferences>
 
   public @NotNull FontPreferences getFontPreferences() {
     return myFontPreferences;
+  }
+
+  /**
+   * Adds the listener once, after the first state load, so that the first load does not reset the cache.
+   * The cache can be in its initialization at that time, because {@link EditorFontCacheImpl} creates these options.
+   */
+  private void addCacheResetListener() {
+    if (!myCacheResetListenerAdded) {
+      myCacheResetListenerAdded = true;
+      myFontPreferences.addChangeListener((_) -> resetEditorFontCache());
+    }
+  }
+
+  private static void resetEditorFontCache() {
+    EditorFontCache cache = ApplicationManager.getApplication().getServiceIfCreated(EditorFontCache.class);
+    if (cache != null) {
+      cache.reset();
+    }
   }
 }

@@ -16,7 +16,6 @@ import com.intellij.navigation.ItemPresentation
 import com.intellij.navigation.NavigationItem
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.edtWriteAction
-import com.intellij.openapi.project.DumbService
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.projectRoots.ProjectJdkTable
 import com.intellij.openapi.roots.ModuleRootModificationUtil
@@ -28,6 +27,7 @@ import com.intellij.openapi.vfs.newvfs.NewVirtualFile
 import com.intellij.platform.backend.workspace.toVirtualFileUrl
 import com.intellij.platform.backend.workspace.workspaceModel
 import com.intellij.testFramework.DumbModeTestUtils
+import com.intellij.testFramework.IndexingTestUtil
 import com.intellij.testFramework.junit5.TestDisposable
 import com.intellij.testFramework.junit5.fixture.pathInProjectFixture
 import com.intellij.testFramework.junit5.fixture.sourceRootFixture
@@ -36,6 +36,7 @@ import com.intellij.util.indexing.testEntities.ExcludedKindFileSetTestContributo
 import com.intellij.util.indexing.testEntities.ExcludedTestEntity
 import com.intellij.util.indexing.testEntities.NonIndexableKindFileSetTestContributor
 import com.intellij.util.indexing.testEntities.NonIndexableTestEntity
+import com.intellij.workspaceModel.core.fileIndex.WorkspaceFileIndexContributor
 import com.intellij.workspaceModel.core.fileIndex.impl.WorkspaceFileIndexImpl
 import com.intellij.workspaceModel.ide.NonPersistentEntitySource
 import kotlinx.coroutines.Dispatchers
@@ -191,6 +192,23 @@ class SearchToolsetTest : GeneralMcpToolsetTestBase() {
     }
   }
 
+  /**
+   * Registers [contributor] after its entity is in the workspace model. The registration resets the file index, and a thread
+   * without a read lock may rebuild it from an older snapshot and overwrite the incremental update of an entity added later.
+   */
+  private fun registerFileIndexContributor(contributor: WorkspaceFileIndexContributor<*>) {
+    WorkspaceFileIndexImpl.EP_NAME.point.registerExtension(contributor, testDisposable)
+  }
+
+  /**
+   * Waits for the scanning of the fixture roots. The fixtures add roots after the project is ready.
+   * Their scanning can still be queued when the test starts, and smart mode does not wait for it.
+   */
+  private suspend fun awaitIndexes() {
+    awaitExternalChangesAndIndexing(project)
+    IndexingTestUtil.suspendUntilIndexesAreReady(project)
+  }
+
   private fun assertChildrenNotCached(directory: VirtualFile) {
     assertThat((directory as NewVirtualFile).allChildrenCached())
       .describedAs("children of %s must not be cached, otherwise the excluded walk reads the cache instead of the disk", directory.path)
@@ -208,7 +226,6 @@ class SearchToolsetTest : GeneralMcpToolsetTestBase() {
    * The file is visible to content iteration but absent from [com.intellij.psi.search.FilenameIndex].
    */
   private suspend fun createNonIndexableFile(): VirtualFile {
-    WorkspaceFileIndexImpl.EP_NAME.point.registerExtension(NonIndexableKindFileSetTestContributor(), testDisposable)
     val nonIndexableDir = edtWriteAction {
       val projectRoot = sourceRootFixture.get().virtualFile.parent
       projectRoot.findChild(nonIndexableDirName) ?: projectRoot.createChildDirectory(this, nonIndexableDirName)
@@ -218,6 +235,7 @@ class SearchToolsetTest : GeneralMcpToolsetTestBase() {
     workspaceModel.update("add non-indexable root") { storage ->
       storage.addEntity(NonIndexableTestEntity(nonIndexableDirUrl, NonPersistentEntitySource))
     }
+    registerFileIndexContributor(NonIndexableKindFileSetTestContributor())
     return edtWriteAction {
       nonIndexableDir.findChild(nonIndexableFileName) ?: nonIndexableDir.createChildData(this, nonIndexableFileName).also {
         it.setBinaryContent("Non-indexable file content".toByteArray())
@@ -237,7 +255,7 @@ class SearchToolsetTest : GeneralMcpToolsetTestBase() {
   @Test
   fun search_text_in_compact_format_returns_one_line_per_hit_with_the_matched_text() =
     runBlocking(Dispatchers.Default) {
-      awaitExternalChangesAndIndexing(project)
+      awaitIndexes()
       System.setProperty(SEARCH_COMPACT_OUTPUT_PROPERTY, "true")
       try {
         testMcpTool(
@@ -259,7 +277,7 @@ class SearchToolsetTest : GeneralMcpToolsetTestBase() {
 
   @Test
   fun search_text_in_the_default_format_carries_no_matched_line() = runBlocking(Dispatchers.Default) {
-    awaitExternalChangesAndIndexing(project)
+    awaitIndexes()
     testMcpTool(
       SearchToolset::search_text.name,
       buildJsonObject { put("q", JsonPrimitive("Search Everywhere file content")) }
@@ -273,7 +291,7 @@ class SearchToolsetTest : GeneralMcpToolsetTestBase() {
 
   @Test
   fun search_text_finds_content_root_outside_project_directory() = runBlocking(Dispatchers.Default) {
-    awaitExternalChangesAndIndexing(project)
+    awaitIndexes()
     testMcpTool(
       SearchToolset::search_text.name,
       buildJsonObject { put("q", JsonPrimitive("Outside project directory content 5c1d")) }
@@ -287,7 +305,7 @@ class SearchToolsetTest : GeneralMcpToolsetTestBase() {
 
   @Test
   fun search_file_finds_content_root_outside_project_directory() = runBlocking(Dispatchers.Default) {
-    awaitExternalChangesAndIndexing(project)
+    awaitIndexes()
     testMcpTool(
       SearchToolset::search_file.name,
       buildJsonObject { put("q", JsonPrimitive(fileOutsideProjectDir.name)) }
@@ -301,7 +319,7 @@ class SearchToolsetTest : GeneralMcpToolsetTestBase() {
 
   @Test
   fun search_file_returns_file_path() = runBlocking(Dispatchers.Default) {
-    DumbService.getInstance(project).waitForSmartMode()
+    IndexingTestUtil.suspendUntilIndexesAreReady(project)
     val fileName = searchFile.name
     testMcpTool(
       SearchToolset::search_file.name,
@@ -321,7 +339,7 @@ class SearchToolsetTest : GeneralMcpToolsetTestBase() {
 
   @Test
   fun search_file_supports_explicit_globstar_prefix() = runBlocking(Dispatchers.Default) {
-    DumbService.getInstance(project).waitForSmartMode()
+    IndexingTestUtil.suspendUntilIndexesAreReady(project)
     val fileName = searchFile.name
     testMcpTool(
       SearchToolset::search_file.name,
@@ -336,7 +354,7 @@ class SearchToolsetTest : GeneralMcpToolsetTestBase() {
 
   @Test
   fun search_file_supports_exact_subpath_queries() = runBlocking(Dispatchers.Default) {
-    DumbService.getInstance(project).waitForSmartMode()
+    IndexingTestUtil.suspendUntilIndexesAreReady(project)
     val fileName = scopedFileInSubdir1.name
     testMcpTool(
       SearchToolset::search_file.name,
@@ -351,7 +369,7 @@ class SearchToolsetTest : GeneralMcpToolsetTestBase() {
 
   @Test
   fun search_file_respects_paths_scope() = runBlocking(Dispatchers.Default) {
-    DumbService.getInstance(project).waitForSmartMode()
+    IndexingTestUtil.suspendUntilIndexesAreReady(project)
     val fileName = scopedFileInSubdir1.name
     val otherFileName = scopedFileInSubdir2.name
     testMcpTool(
@@ -370,7 +388,7 @@ class SearchToolsetTest : GeneralMcpToolsetTestBase() {
 
   @Test
   fun search_file_respects_paths_excludes() = runBlocking(Dispatchers.Default) {
-    DumbService.getInstance(project).waitForSmartMode()
+    IndexingTestUtil.suspendUntilIndexesAreReady(project)
     val fileName = scopedFileInSubdir1.name
     testMcpTool(
       SearchToolset::search_file.name,
@@ -390,7 +408,7 @@ class SearchToolsetTest : GeneralMcpToolsetTestBase() {
 
   @Test
   fun search_file_supports_wildcard_file_name_with_paths_scope() = runBlocking(Dispatchers.Default) {
-    DumbService.getInstance(project).waitForSmartMode()
+    IndexingTestUtil.suspendUntilIndexesAreReady(project)
     testMcpTool(
       SearchToolset::search_file.name,
       buildJsonObject {
@@ -411,7 +429,7 @@ class SearchToolsetTest : GeneralMcpToolsetTestBase() {
   @Test
   fun search_file_includes_excluded_files_when_requested() = runBlocking(Dispatchers.Default) {
     val excludedFile = createExcludedFile()
-    DumbService.getInstance(project).waitForSmartMode()
+    IndexingTestUtil.suspendUntilIndexesAreReady(project)
     val fileName = excludedFile.name
 
     testMcpTool(
@@ -444,7 +462,7 @@ class SearchToolsetTest : GeneralMcpToolsetTestBase() {
       val nestedDir = Files.createDirectories(dir.resolve(nestedDirName))
       Files.writeString(nestedDir.resolve(fileName), "Excluded nested file content e4b1")
     }
-    DumbService.getInstance(project).waitForSmartMode()
+    IndexingTestUtil.suspendUntilIndexesAreReady(project)
     val nestedDirPath = excludedDir.toNioPath().resolve(nestedDirName)
     val nestedFilePath = nestedDirPath.resolve(fileName)
     assertChildrenNotCached(excludedDir)
@@ -479,7 +497,7 @@ class SearchToolsetTest : GeneralMcpToolsetTestBase() {
         Files.writeString(dir.resolve(siblingName), "Sibling next to the symlink c7d3")
         Files.createSymbolicLink(dir.resolve(linkName), outsideDir)
       }
-      DumbService.getInstance(project).waitForSmartMode()
+      IndexingTestUtil.suspendUntilIndexesAreReady(project)
       assertChildrenNotCached(excludedDir)
 
       testMcpTool(
@@ -506,7 +524,6 @@ class SearchToolsetTest : GeneralMcpToolsetTestBase() {
   @Test
   fun search_file_excluded_walk_covers_workspace_index_excluded_roots() = runBlocking(Dispatchers.Default) {
     // IDEs without modules exclude folders through a WorkspaceFileIndexContributor, not through module exclude folders.
-    WorkspaceFileIndexImpl.EP_NAME.point.registerExtension(ExcludedKindFileSetTestContributor(), testDisposable)
     val excludedDirName = "se_wsm_excluded_dir_9a2c"
     val fileName = "se_wsm_excluded_file_9a2c.txt"
     val rootDir = sourceRootFixture.get().virtualFile
@@ -518,11 +535,12 @@ class SearchToolsetTest : GeneralMcpToolsetTestBase() {
     workspaceModel.update("add workspace-index excluded root") { storage ->
       storage.addEntity(ExcludedTestEntity(excludedUrl, NonPersistentEntitySource))
     }
+    registerFileIndexContributor(ExcludedKindFileSetTestContributor())
     val excludedDir = edtWriteAction {
       LocalFileSystem.getInstance().refreshAndFindFileByNioFile(excludedDirPath)
       ?: error("Excluded directory is not visible to the VFS: $excludedDirPath")
     }
-    DumbService.getInstance(project).waitForSmartMode()
+    IndexingTestUtil.suspendUntilIndexesAreReady(project)
     assertChildrenNotCached(excludedDir)
 
     testMcpTool(
@@ -553,7 +571,7 @@ class SearchToolsetTest : GeneralMcpToolsetTestBase() {
   @Test
   fun search_file_finds_file_under_non_indexable_content_root() = runBlocking(Dispatchers.Default) {
     val nonIndexableFile = createNonIndexableFile()
-    awaitExternalChangesAndIndexing(project)
+    awaitIndexes()
     testMcpTool(
       SearchToolset::search_file.name,
       buildJsonObject {
@@ -567,7 +585,7 @@ class SearchToolsetTest : GeneralMcpToolsetTestBase() {
 
   @Test
   fun search_text_returns_match_coordinate_details() = runBlocking(Dispatchers.Default) {
-    awaitExternalChangesAndIndexing(project)
+    awaitIndexes()
     val query = "Search Everywhere file content"
     testMcpTool(
       SearchToolset::search_text.name,
@@ -587,7 +605,7 @@ class SearchToolsetTest : GeneralMcpToolsetTestBase() {
 
   @Test
   fun search_text_returns_match_coordinates() = runBlocking(Dispatchers.Default) {
-    awaitExternalChangesAndIndexing(project)
+    awaitIndexes()
     val query = "Search Everywhere file content"
     testMcpTool(
       SearchToolset::search_text.name,
@@ -607,7 +625,7 @@ class SearchToolsetTest : GeneralMcpToolsetTestBase() {
 
   @Test
   fun search_regex_returns_match_coordinates() = runBlocking(Dispatchers.Default) {
-    awaitExternalChangesAndIndexing(project)
+    awaitIndexes()
     testMcpTool(
       SearchToolset::search_regex.name,
       buildJsonObject {
@@ -626,7 +644,7 @@ class SearchToolsetTest : GeneralMcpToolsetTestBase() {
 
   @Test
   fun search_text_respects_paths_glob() = runBlocking(Dispatchers.Default) {
-    awaitExternalChangesAndIndexing(project)
+    awaitIndexes()
     val query = "Search Everywhere file mask content"
     testMcpTool(
       SearchToolset::search_text.name,
@@ -643,7 +661,7 @@ class SearchToolsetTest : GeneralMcpToolsetTestBase() {
 
   @Test
   fun search_text_respects_paths_and_exclude() = runBlocking(Dispatchers.Default) {
-    awaitExternalChangesAndIndexing(project)
+    awaitIndexes()
 
     testMcpTool(
       SearchToolset::search_text.name,
@@ -665,7 +683,7 @@ class SearchToolsetTest : GeneralMcpToolsetTestBase() {
   @Test
   fun search_text_respects_directory_excludes() = runBlocking(Dispatchers.Default) {
     val excludedByPathsFile = createFileInSubdir1(pathExcludedDirName, pathExcludedFileName, "Scoped file content")
-    DumbService.getInstance(project).waitForSmartMode()
+    IndexingTestUtil.suspendUntilIndexesAreReady(project)
     testMcpTool(
       SearchToolset::search_text.name,
       buildJsonObject {
@@ -687,7 +705,7 @@ class SearchToolsetTest : GeneralMcpToolsetTestBase() {
 
   @Test
   fun search_regex_respects_paths_scope() = runBlocking(Dispatchers.Default) {
-    awaitExternalChangesAndIndexing(project)
+    awaitIndexes()
     testMcpTool(
       SearchToolset::search_regex.name,
       buildJsonObject {
@@ -703,7 +721,7 @@ class SearchToolsetTest : GeneralMcpToolsetTestBase() {
 
   @Test
   fun search_symbol_returns_match_coordinate_details() = runBlocking(Dispatchers.Default) {
-    DumbService.getInstance(project).waitForSmartMode()
+    IndexingTestUtil.suspendUntilIndexesAreReady(project)
     val query = "${symbolPrefix}Alpha"
     testMcpTool(
       SearchToolset::search_symbol.name,
@@ -724,7 +742,7 @@ class SearchToolsetTest : GeneralMcpToolsetTestBase() {
 
   @Test
   fun search_symbol_reports_partial_result_during_indexing() = runBlocking(Dispatchers.Default) {
-    DumbService.getInstance(project).waitForSmartMode()
+    IndexingTestUtil.suspendUntilIndexesAreReady(project)
     // Touch the symbol fixture so its file exists in the project before flipping dumb mode on.
     symbolFileInSubdir1.name
     val query = "${symbolPrefix}Alpha"
@@ -748,7 +766,7 @@ class SearchToolsetTest : GeneralMcpToolsetTestBase() {
 
   @Test
   fun search_text_reports_partial_result_on_timeout() = runBlocking(Dispatchers.Default) {
-    awaitExternalChangesAndIndexing(project)
+    awaitIndexes()
     withSearchTimeoutOverride(project, Duration.ZERO) {
       testMcpTool(
         SearchToolset::search_text.name,
@@ -764,7 +782,7 @@ class SearchToolsetTest : GeneralMcpToolsetTestBase() {
 
   @Test
   fun search_file_reports_partial_result_on_timeout() = runBlocking(Dispatchers.Default) {
-    DumbService.getInstance(project).waitForSmartMode()
+    IndexingTestUtil.suspendUntilIndexesAreReady(project)
     withSearchTimeoutOverride(project, Duration.ZERO) {
       testMcpTool(
         SearchToolset::search_file.name,
@@ -780,7 +798,7 @@ class SearchToolsetTest : GeneralMcpToolsetTestBase() {
 
   @Test
   fun search_symbol_reports_partial_result_on_timeout() = runBlocking(Dispatchers.Default) {
-    DumbService.getInstance(project).waitForSmartMode()
+    IndexingTestUtil.suspendUntilIndexesAreReady(project)
     withSearchTimeoutOverride(project, Duration.ZERO) {
       testMcpTool(
         SearchToolset::search_symbol.name,
@@ -800,7 +818,7 @@ class SearchToolsetTest : GeneralMcpToolsetTestBase() {
     val fileName = "se_symbol_dir_4a1c.kt"
     val symbolName = "SeSymbolDir4a1c"
     createFileInSubdir1(directoryName, fileName, "class $symbolName {}\n")
-    DumbService.getInstance(project).waitForSmartMode()
+    IndexingTestUtil.suspendUntilIndexesAreReady(project)
 
     testMcpTool(
       SearchToolset::search_symbol.name,
@@ -816,7 +834,7 @@ class SearchToolsetTest : GeneralMcpToolsetTestBase() {
 
   @Test
   fun search_symbol_respects_paths_scope() = runBlocking(Dispatchers.Default) {
-    DumbService.getInstance(project).waitForSmartMode()
+    IndexingTestUtil.suspendUntilIndexesAreReady(project)
     testMcpTool(
       SearchToolset::search_symbol.name,
       buildJsonObject {
@@ -832,7 +850,7 @@ class SearchToolsetTest : GeneralMcpToolsetTestBase() {
 
   @Test
   fun search_symbol_respects_paths_excludes() = runBlocking(Dispatchers.Default) {
-    DumbService.getInstance(project).waitForSmartMode()
+    IndexingTestUtil.suspendUntilIndexesAreReady(project)
     testMcpTool(
       SearchToolset::search_symbol.name,
       buildJsonObject {
@@ -851,7 +869,7 @@ class SearchToolsetTest : GeneralMcpToolsetTestBase() {
     repeat(6) { index ->
       createFileInSubdir1("se_symbol_excluded_limit_$index", "se_symbol_excluded_limit_$index.kt", "class ${symbolPrefix}A$index {}\n")
     }
-    DumbService.getInstance(project).waitForSmartMode()
+    IndexingTestUtil.suspendUntilIndexesAreReady(project)
     testMcpTool(
       SearchToolset::search_symbol.name,
       buildJsonObject {
@@ -874,7 +892,7 @@ class SearchToolsetTest : GeneralMcpToolsetTestBase() {
     val mappedItem = FakeNonPsiNavigationItem(symbolName)
     ChooseByNameContributor.SYMBOL_EP_NAME.point.registerExtension(FakeSymbolContributor(symbolName, mappedItem), testDisposable)
     McpNavigationItemMapper.EP_NAME.point.registerExtension(FakeNavigationItemMapper(mappedItem, searchFile), testDisposable)
-    DumbService.getInstance(project).waitForSmartMode()
+    IndexingTestUtil.suspendUntilIndexesAreReady(project)
     testMcpTool(
       SearchToolset::search_symbol.name,
       buildJsonObject {
@@ -921,14 +939,13 @@ class SearchToolsetTest : GeneralMcpToolsetTestBase() {
       sdkTable.addJdk(sdk, project)
       ModuleRootModificationUtil.setModuleSdk(moduleFixture.get(), sdk)
     }
-    awaitExternalChangesAndIndexing(project)
-    DumbService.getInstance(project).waitForSmartMode()
+    awaitIndexes()
     return sourceFile
   }
 
   @Test
   fun search_symbol_respects_limit_and_sets_more() = runBlocking(Dispatchers.Default) {
-    DumbService.getInstance(project).waitForSmartMode()
+    IndexingTestUtil.suspendUntilIndexesAreReady(project)
     testMcpTool(
       SearchToolset::search_symbol.name,
       buildJsonObject {
@@ -948,7 +965,7 @@ class SearchToolsetTest : GeneralMcpToolsetTestBase() {
 
   @Test
   fun search_file_respects_limit_and_sets_more() = runBlocking(Dispatchers.Default) {
-    DumbService.getInstance(project).waitForSmartMode()
+    IndexingTestUtil.suspendUntilIndexesAreReady(project)
     val query = "se_max_results_8b1c_*.txt"
     testMcpTool(
       SearchToolset::search_file.name,

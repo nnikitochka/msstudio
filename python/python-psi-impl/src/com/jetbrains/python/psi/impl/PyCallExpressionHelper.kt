@@ -75,7 +75,6 @@ import com.jetbrains.python.psi.types.PyTupleType
 import com.jetbrains.python.psi.types.PyType
 import com.jetbrains.python.psi.types.PyTypeChecker
 import com.jetbrains.python.psi.types.PyTypeChecker.GenericSubstitutions
-import com.jetbrains.python.psi.types.PyTypeMember
 import com.jetbrains.python.psi.types.PyTypeParameterType
 import com.jetbrains.python.psi.types.PyTypeUtil
 import com.jetbrains.python.psi.types.PyTypeUtil.compositeMap
@@ -840,14 +839,6 @@ object PyCallExpressionHelper {
     return map.values.find { it.isKeywordContainer }
   }
 
-  fun getImplicitlyInvokedMethod(
-    type: PyClassType,
-    resolveContext: PyResolveContext,
-  ): List<PyTypeMember> {
-    return if (type.isDefinition()) getConstructorTypes(type, resolveContext)
-    else type.findMember(PyNames.CALL, resolveContext)
-  }
-
   /**
    * If [classType] is a class instance, resolves its `__call__` method.
    * If [classType] is a class definition, synthesizes the class constructor.
@@ -977,20 +968,6 @@ object PyCallExpressionHelper {
     callableType.callable,
     callableType.modifier,
   )
-
-  private fun getConstructorTypes(type: PyClassType, resolveContext: PyResolveContext): List<PyTypeMember> {
-    val initFunc = type.findMember(PyNames.INIT, resolveContext)
-    if (initFunc.isNotEmpty()) {
-      return initFunc
-    }
-
-    val newFunc = type.findMember(PyNames.NEW, resolveContext)
-    if (newFunc.isNotEmpty()) {
-      return newFunc
-    }
-
-    return emptyList()
-  }
 
   private fun isReturnTypeAnnotated(type: PyCallableType, context: TypeEvalContext): Boolean {
     val callable = type.callable
@@ -1279,6 +1256,43 @@ object PyCallExpressionHelper {
     }
     val type = parameter.getType(context)
     return type is PyParamSpecType || type is PyConcatenateType
+  }
+
+  /**
+   * Replaces the `*args: P.args, **kwargs: P.kwargs` parameters of [callableType] with the parameters that [call] gives to `P`.
+   *
+   * The other arguments of [call] solve `P`, for example the argument for `cls: Callable[P, T]`.
+   * Returns [callableType] if it has no such parameters, or if these arguments do not solve `P`.
+   */
+  @ApiStatus.Internal
+  @JvmStatic
+  fun expandParamSpecArgsKwargs(call: PyCallExpression, callableType: PyCallableType, context: TypeEvalContext): PyCallableType {
+    val parameters = callableType.getParameters(context) ?: return callableType
+    val argsIndex = parameters.indexOfFirst { it.isPositionalContainer }
+    if (argsIndex < 0 || argsIndex + 1 >= parameters.size) return callableType
+    val args = parameters[argsIndex]
+    val kwargs = parameters[argsIndex + 1]
+    if (!kwargs.isKeywordContainer || !isParamSpecOrConcatenate(args, context)) return callableType
+    val paramSpec = args.getType(context) as? PyParamSpecType ?: return callableType
+    if (kwargs.getType(context) != paramSpec) return callableType
+
+    val mapping = mapArguments(call, callableType, context)
+    val regularArguments = getRegularMappedParameters(mapping.mappedParameters).mapKeys { (argument, _) -> PyCallableArgument(argument) }
+    val substitutions = PyTypeChecker.unifyGenericCall(regularArguments, context) ?: return callableType
+    val paramSpecParameters = substitutions.paramSpecs[paramSpec] as? PyCallableParameterListType ?: return callableType
+
+    val forwardedParameters = paramSpecParameters.parameters
+    var prefix: List<PyCallableParameter> = parameters.subList(0, argsIndex)
+    // The parameters before a `/` of `P` are positional-only, so the prefix needs no `/` of its own.
+    if (forwardedParameters.any { it.isPositionOnlySeparator }) {
+      prefix = prefix.filterNot { it.isPositionOnlySeparator }
+    }
+    val expandedParameters = prefix + forwardedParameters + parameters.subList(argsIndex + 2, parameters.size)
+    return PyCallableTypeImpl(callableType.getTypeParameters(context),
+                              PyCallableParameterListTypeImpl(expandedParameters),
+                              callableType.getReturnType(context),
+                              callableType.callable,
+                              callableType.modifier)
   }
 
   private fun <E : ResolveResult> forEveryScopeTakeOverloadsOtherwiseImplementations(

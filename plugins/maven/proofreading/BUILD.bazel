@@ -5,6 +5,7 @@ load("//platform/build-scripts/bazel-rules:content_module_jar.bzl", "content_mod
 jps_test(
     name = "proofreading-tests_test",
     timeout = "moderate",
+    data = ["@community//plugins/grazie/src/test:testData"],
     tags = ["community-aggregator"],
     runtime_deps = [":proofreading-tests_test_lib"],
 )
@@ -83,6 +84,12 @@ jvm_library(
     ),
     module_name = "intellij.maven.proofreading.tests",
     visibility = ["//visibility:public"],
+    runtime_deps = [
+        # do not sort,
+        "//plugins/maven/proofreading",
+        "//community-resources:customization",
+        "//platform/main/intellij.platform.monolith.main:monolith-main",
+    ],
 )
 
 jvm_library(
@@ -96,33 +103,32 @@ jvm_library(
         ],
         allow_empty = True,
     ),
-    associates = [
-        "//plugins/maven/proofreading",
-        "//plugins/maven/proofreading:proofreading_test_lib",
-    ],
+    module_name = "intellij.maven.proofreading.tests",
     visibility = ["//visibility:public"],
-    runtime_deps = [":proofreading-tests"],
+    runtime_deps = [
+        # do not sort,
+        ":proofreading-tests",
+        "//plugins/maven/proofreading:proofreading_test_lib",
+        "//community-resources:customization_test_lib",
+        "//platform/main/intellij.platform.monolith.main:monolith-main_test_lib",
+    ],
     deps = [
         # do not sort,
         "@lib//:kotlin-stdlib",
-        "//plugins/grazie",
-        "//plugins/grazie:grazie_test_lib",
-        "//plugins/grazie/src:core",
-        "//plugins/grazie/src:core_test_lib",
-        "//platform/core-api:core",
-        "//platform/core-api:core_test_lib",
-        "//plugins/maven",
-        "//plugins/maven:maven_test_lib",
         "//plugins/maven/plugin",
         "//plugins/maven/plugin:plugin_test_lib",
-        "//xml/xml-psi-api:psi",
-        "//xml/xml-psi-api:psi_test_lib",
         "//platform/testFramework",
         "//platform/testFramework:testFramework_test_lib",
         "//plugins/grazie/src/test:grazie-tests",
         "//plugins/grazie/src/test:grazie-tests_test_lib",
-        "//libraries/junit4",
-        "//libraries/junit4:junit4_test_lib",
+        "//platform/core-api:core",
+        "//platform/core-api:core_test_lib",
+        "//platform/testFramework/junit5",
+        "//platform/testFramework/junit5:junit5_test_lib",
+        "//platform/testFramework/junit5/codeInsight",
+        "//platform/testFramework/junit5/codeInsight:codeInsight_test_lib",
+        "//libraries/junit6",
+        "//libraries/junit6:junit6_test_lib",
     ],
 )
 ### auto-generated section `build intellij.maven.proofreading.tests` end

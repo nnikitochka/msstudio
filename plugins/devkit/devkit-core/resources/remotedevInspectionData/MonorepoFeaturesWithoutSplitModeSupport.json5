@@ -67,7 +67,7 @@
     "intellij.database.completionMlRanking",
     "intellij.database.completionMlRanking.tests",
     "intellij.database.connectivity",
-    "intellij.database.connectivity.ex",
+    "intellij.database.connectivity.artifacts",
     "intellij.database.connectivity.tests",
     "intellij.database.core.impl",
     "intellij.database.crossQueries",
@@ -185,7 +185,6 @@
     "intellij.datagrip.frontend.split",
     "intellij.datagrip.impl",
     "intellij.datagrip.impl.tests",
-    "intellij.datagrip.llmInstaller",
     "intellij.datagrip.main",
     "intellij.datagrip.performanceTests",
     "intellij.dev.core",
@@ -201,6 +200,7 @@
     "intellij.android.streaming",
     "intellij.android.whats-new-assistant",
     "intellij.android.newProjectWizard",
-    "intellij.angular"
+    "intellij.angular",
+    "intellij.tbe.common"
   ],
 }

@@ -42,7 +42,7 @@ internal abstract class DocumentMutatorImpl(
   }
 
   override fun clearLineFlags(startLine: Int, endLine: Int, exceptLines: IntArray) {
-    val op = DocumentOp.unmodifiedLinesOp(startLine, endLine, exceptLines)
+    val op = DocumentOp.cleanLinesOp(startLine, endLine, exceptLines)
     updateAndGet { it.applyOp(op) }
   }
 
@@ -134,7 +134,7 @@ internal abstract class DocumentMutatorImpl(
     assert(!srcRange.containsOffset(dstOffset)) {
       "Can't perform text move from range [$srcStartOffset; $srcEndOffset) to offset $dstOffset"
     }
-    val replacement = snapshot.text().string(srcRange)
+    val replacement = snapshot.text().string(srcStartOffset, srcEndOffset)
     val shift = if (dstOffset < srcStartOffset) srcEndOffset - srcStartOffset else 0
     // a pair of insert/remove modifications
     val newSnapshot = replaceString(

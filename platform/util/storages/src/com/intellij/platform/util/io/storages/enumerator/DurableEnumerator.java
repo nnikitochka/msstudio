@@ -188,7 +188,7 @@ public final class DurableEnumerator<V> implements DurableDataEnumerator<V>,
       },
       _valueHash_ -> {
         DataExternalizerEx.KnownSizeRecordWriter writer = valueDescriptor.writerFor(value);
-        long logRecordId = valuesLog.append(writer, writer.recordSize());
+        long logRecordId = valuesLog.append(target -> writer.write(target, 0), writer.recordSize());
         return convertLogIdToEnumeratorId(logRecordId);
       });
   }

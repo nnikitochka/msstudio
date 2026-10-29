@@ -1,6 +1,7 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.vcs.changes.ui;
 
+import com.intellij.ide.DeleteProvider;
 import com.intellij.ide.FileSelectInContext;
 import com.intellij.ide.SelectInContext;
 import com.intellij.ide.dnd.DnDAware;
@@ -31,7 +32,9 @@ import com.intellij.platform.vcs.impl.shared.actions.VcsTransferableDataKeys;
 import com.intellij.platform.vcs.impl.shared.changes.ChangeListsViewModel;
 import com.intellij.platform.vcs.impl.shared.changes.ChangesViewSelection;
 import com.intellij.platform.vcs.impl.shared.commit.EditedCommitNode;
+import com.intellij.pom.Navigatable;
 import com.intellij.ui.PopupHandler;
+import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.JBIterable;
 import com.intellij.util.ui.tree.TreeUtil;
 import org.jetbrains.annotations.ApiStatus;
@@ -89,7 +92,7 @@ public abstract class ChangesListView extends ChangesTree implements DnDAware {
 
   @Override
   public int getToggleClickCount() {
-    return 2;
+    return getLastSelectedPathComponent() instanceof ChangesBrowserStructuralNode<?> ? -1 : 2;
   }
 
   @Override
@@ -105,6 +108,7 @@ public abstract class ChangesListView extends ChangesTree implements DnDAware {
 
   @Override
   protected boolean isInclusionVisible(@NotNull ChangesBrowserNode<?> node) {
+    if (node instanceof ChangesBrowserStructuralNode<?> structuralNode) return structuralNode.getHasInclusion();
     ChangesBrowserNode<?> subtreeRoot = getSubtreeRoot(node);
     Object subtreeRootObject = subtreeRoot != null ? subtreeRoot.getUserObject() : null;
 
@@ -115,6 +119,7 @@ public abstract class ChangesListView extends ChangesTree implements DnDAware {
 
   @Override
   protected boolean isIncludable(@NotNull ChangesBrowserNode<?> node) {
+    if (node instanceof ChangesBrowserStructuralNode<?> structuralNode) return structuralNode.getHasInclusion();
     if (VcsTreeModelDataExKt.isUnderTag(node, RESOLVED_CONFLICTS_NODE_TAG)) return true;
 
     return super.isIncludable(node);
@@ -150,7 +155,7 @@ public abstract class ChangesListView extends ChangesTree implements DnDAware {
     sink.set(DATA_KEY, this);
     sink.set(VcsSharedDataKeys.CHANGES, getSelectedChanges()
       .toArray(Change.EMPTY_CHANGE_ARRAY));
-    sink.set(VcsSharedDataKeys.CHANGE_LEAD_SELECTION, VcsTreeModelData.exactlySelected(this)
+    sink.set(VcsSharedDataKeys.CHANGE_LEAD_SELECTION, VcsTreeModelData.exactlySelectedForActions(this)
       .iterateUserObjects(Change.class)
       .toArray(Change.EMPTY_CHANGE_ARRAY));
     sink.set(VcsSharedDataKeys.CHANGE_LISTS, VcsTreeModelData.exactlySelected(this)
@@ -158,7 +163,14 @@ public abstract class ChangesListView extends ChangesTree implements DnDAware {
       .toList().toArray(ChangeList[]::new));
     JBIterable<FilePath> filePaths = VcsTreeModelData.mapToFilePath(VcsTreeModelData.selected(this));
     sink.set(VcsSharedDataKeys.FILE_PATHS, filePaths);
-    if (!IdeProductMode.isFrontend() && filePaths.isNotEmpty()) {
+    var navigationSelection = VcsTreeModelData.exactlySelected(this).iterateRawNodes().toList();
+    var hasStructuralSelection = ContainerUtil.exists(navigationSelection, node -> node instanceof ChangesBrowserStructuralNode<?>);
+    if (hasStructuralSelection) {
+      // A structural node belongs to its file, so Delete must not delete the file. It reverts the selected changes instead.
+      DeleteProvider rollback = StructuralRollbackDeleteProvider.create(navigationSelection);
+      if (rollback != null) sink.set(PlatformDataKeys.DELETE_ELEMENT_PROVIDER, rollback);
+    }
+    else if (!IdeProductMode.isFrontend() && filePaths.isNotEmpty()) {
       sink.set(PlatformDataKeys.DELETE_ELEMENT_PROVIDER, new VirtualFileDeleteProvider());
     }
     sink.set(UNVERSIONED_FILE_PATHS_DATA_KEY, getSelectedUnversionedFiles());
@@ -171,7 +183,7 @@ public abstract class ChangesListView extends ChangesTree implements DnDAware {
     sink.set(PlatformCoreDataKeys.HELP_ID, HELP_ID);
 
     VcsTreeModelData treeSelection = VcsTreeModelData.selected(this);
-    VcsTreeModelData exactSelection = VcsTreeModelData.exactlySelected(this);
+    VcsTreeModelData exactSelection = VcsTreeModelData.exactlySelectedForActions(this);
     sink.lazy(SelectInContext.DATA_KEY, () -> {
       VirtualFile file = VcsTreeModelData.mapObjectToVirtualFile(exactSelection.iterateRawUserObjects()).first();
       if (file == null) return null;
@@ -188,12 +200,25 @@ public abstract class ChangesListView extends ChangesTree implements DnDAware {
       return VcsTreeModelData.mapToVirtualFile(treeSelection);
     });
     sink.lazy(CommonDataKeys.NAVIGATABLE, () -> {
+      if (hasStructuralSelection) {
+        return navigationSelection.size() == 1
+               ? ((ChangesBrowserStructuralNode<?>)navigationSelection.getFirst()).getNavigatable()
+               : null;
+      }
       VirtualFile file = VcsTreeModelData.mapToNavigatableFile(treeSelection).single();
       return file != null && !file.isDirectory()
              ? PsiNavigationSupport.getInstance().createNavigatable(myProject, file, 0)
              : null;
     });
     sink.lazy(CommonDataKeys.NAVIGATABLE_ARRAY, () -> {
+      if (hasStructuralSelection) {
+        return JBIterable.from(navigationSelection).flatMap(node -> {
+          if (node instanceof ChangesBrowserStructuralNode<?> structuralNode) {
+            return JBIterable.of(structuralNode.getNavigatable()).filterNotNull();
+          }
+          return JBIterable.of(getNavigatableArray(myProject, VcsTreeModelData.mapToNavigatableFile(VcsTreeModelData.allUnder(node))));
+        }).toArray(Navigatable.EMPTY_NAVIGATABLE_ARRAY);
+      }
       return getNavigatableArray(myProject, VcsTreeModelData.mapToNavigatableFile(treeSelection));
     });
     sink.lazy(EXACTLY_SELECTED_FILES_DATA_KEY, () -> {

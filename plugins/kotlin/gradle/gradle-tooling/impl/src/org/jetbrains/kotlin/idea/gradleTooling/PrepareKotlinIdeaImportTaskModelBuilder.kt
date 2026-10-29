@@ -2,6 +2,8 @@
 package org.jetbrains.kotlin.idea.gradleTooling
 
 import com.intellij.gradle.toolingExtension.impl.telemetry.GradleOpenTelemetry
+import com.intellij.gradle.toolingExtension.modelAction.GradleModelController
+import com.intellij.gradle.toolingExtension.modelAction.GradleModelFetchPhase
 import com.intellij.gradle.toolingExtension.util.GradleReflectionUtil
 import com.intellij.gradle.toolingExtension.util.GradleVersionUtil
 import org.gradle.api.Project
@@ -10,10 +12,13 @@ import org.gradle.api.internal.project.ProjectInternal
 import org.gradle.api.logging.Logger
 import org.gradle.api.logging.Logging
 import org.gradle.internal.build.BuildState
+import org.gradle.tooling.model.gradle.GradleBuild
+import org.jetbrains.plugins.gradle.model.ProjectImportModelProvider
 import org.jetbrains.plugins.gradle.tooling.AbstractModelBuilderService
 import org.jetbrains.plugins.gradle.tooling.Message
 import org.jetbrains.plugins.gradle.tooling.ModelBuilderContext
 import java.io.Serializable
+import java.util.concurrent.ConcurrentHashMap
 
 interface PrepareKotlinIdeImportTaskModel : Serializable {
     val prepareKotlinIdeaImportTaskNames: Set<String>
@@ -26,26 +31,59 @@ interface PrepareKotlinIdeImportTaskModel : Serializable {
     ) : PrepareKotlinIdeImportTaskModel
 }
 
+class PrepareKotlinIdeImportModelProvider(
+    private val executionMode: GradleModelController.GradleModelFetchRequest.GradleExecutionMode,
+    private val isIsolatedProjectsEnabled: Boolean,
+) : ProjectImportModelProvider {
+    override fun populateModels(
+        modelController: GradleModelController,
+        buildModels: Collection<GradleBuild>,
+        modelConsumer: ProjectImportModelProvider.GradleModelConsumer
+    ) {
+        modelController.fetchRequest(buildModels, PrepareKotlinIdeImportTaskModel::class.java)
+            .executionMode(getEffectiveExecutionMode())
+            .execute(modelConsumer)
+    }
+
+    private fun getEffectiveExecutionMode(): GradleModelController.GradleModelFetchRequest.GradleExecutionMode {
+        // Workaround for https://github.com/gradle/gradle/issues/39040
+        if (isIsolatedProjectsEnabled && GradleVersionUtil.isCurrentGradleOlderThan("9.9")) {
+            return GradleModelController.GradleModelFetchRequest.GradleExecutionMode.SEQUENTIAL
+        }
+        return executionMode
+    }
+
+    override fun getPhase(): GradleModelFetchPhase = GradleModelFetchPhase.PROJECT_LOADED_PHASE
+
+    companion object {
+        val MODELS: Set<Class<*>> = setOf(PrepareKotlinIdeImportTaskModel::class.java)
+    }
+}
+
 class PrepareKotlinIdeaImportTaskModelBuilder : AbstractModelBuilderService() {
 
     override fun canBuild(modelName: String?): Boolean {
         return PrepareKotlinIdeImportTaskModel::class.java.name == modelName
     }
 
-    override fun buildAll(modelName: String, project: Project, context: ModelBuilderContext): PrepareKotlinIdeImportTaskModel? {
+    override fun buildAll(
+        modelName: String,
+        project: Project,
+        context: ModelBuilderContext
+    ): PrepareKotlinIdeImportTaskModel? {
         return GradleOpenTelemetry.callWithSpan("kotlin_import_daemon_prepare_kotlin_ide_import_buildAll") {
-            buildAllWithTelemetry(project)
+            buildAllWithTelemetry(project, context)
         }
     }
 
-    private fun buildAllWithTelemetry(project: Project): PrepareKotlinIdeImportTaskModel? {
+    private fun buildAllWithTelemetry(project: Project, context: ModelBuilderContext): PrepareKotlinIdeImportTaskModel? {
         val prepareKotlinIdeaImportTaskNames = project.tasks.names
             .filter { taskName -> taskName.startsWith(TaskNames.prepareKotlinIdeaImport) }
             .toSet()
 
         if (prepareKotlinIdeaImportTaskNames.isNotEmpty()) {
             logger.debug(Messages.prepareKotlinIdeaTaskFound(project.path))
-            project.addTasksToStartParameter(prepareKotlinIdeaImportTaskNames)
+            project.addTasksToStartParameter(context, prepareKotlinIdeaImportTaskNames)
             return PrepareKotlinIdeImportTaskModel.Impl(prepareKotlinIdeaImportTaskNames)
         }
 
@@ -55,7 +93,7 @@ class PrepareKotlinIdeaImportTaskModelBuilder : AbstractModelBuilderService() {
             val legacyTaskNames = project.findPrepareImportTasksForOlderGradlePlugins()
             if (legacyTaskNames.isNotEmpty()) {
                 logger.debug(Messages.oldPrepareKotlinIdeaImportTasksFound(project.path, legacyTaskNames))
-                project.addTasksToStartParameter(legacyTaskNames)
+                project.addTasksToStartParameter(context, legacyTaskNames)
                 return PrepareKotlinIdeImportTaskModel.Impl(emptySet(), legacyTaskNames = legacyTaskNames)
             }
         }
@@ -89,18 +127,34 @@ class PrepareKotlinIdeaImportTaskModelBuilder : AbstractModelBuilderService() {
         }
     }
 
-    private fun Project.addTasksToStartParameter(taskNames: Iterable<String>) {
-        if (project.gradle.parent == null) {
-            /* Root of composite build: We can just add the task name */
-            project.gradle.startParameter.setTaskNames(project.gradle.startParameter.taskNames.toSet() + taskNames)
+    private fun Project.addTasksToStartParameter(context: ModelBuilderContext, taskNames: Iterable<String>) {
+        val rootBuild = generateSequence(project.gradle) { it.parent }.last()
+        val entries = if (project.gradle.parent == null) {
+            /* Root of composite build: A bare task name selects the task in every project */
+            taskNames.toList()
         } else {
             /* This is an included build. Referencing the task path explicitly */
-            val rootBuild = generateSequence(project.gradle) { it.parent }.last()
             val buildId = (project as ProjectInternal).services.get(BuildState::class.java).buildIdentifier
             val projectPathPart = if (rootProject != project) project.path else ""
-            val absoluteTaskPaths = taskNames.map { taskName -> "${buildId.buildPathCompat}$projectPathPart:$taskName" }
-            rootBuild.startParameter.setTaskNames(rootBuild.startParameter.taskNames.toSet() + absoluteTaskPaths)
+            taskNames.map { taskName -> "${buildId.buildPathCompat}$projectPathPart:$taskName" }
         }
+
+        /* This builder runs for every project, possibly in parallel. Write each entry to the shared start parameter once. */
+        val registered = context.getData(RegisteredImportTasksProvider).taskNames
+        val startParameter = rootBuild.startParameter
+        synchronized(registered) {
+            val newEntries = entries.filter { registered.add(it) }
+            if (newEntries.isEmpty()) return
+            startParameter.setTaskNames(startParameter.taskNames.toSet() + newEntries)
+        }
+    }
+
+    private class RegisteredImportTasks {
+        val taskNames: MutableSet<String> = ConcurrentHashMap.newKeySet()
+    }
+
+    private object RegisteredImportTasksProvider : ModelBuilderContext.DataProvider<RegisteredImportTasks> {
+        override fun create(context: ModelBuilderContext): RegisteredImportTasks = RegisteredImportTasks()
     }
 
     override fun reportErrorMessage(modelName: String, project: Project, context: ModelBuilderContext, exception: Exception) {

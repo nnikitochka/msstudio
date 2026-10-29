@@ -39,6 +39,7 @@ import com.intellij.platform.eel.provider.getEelDescriptor
 import com.intellij.platform.eel.provider.localEel
 import com.intellij.platform.eel.provider.toEelApi
 import com.intellij.platform.eel.provider.utils.Path
+import com.intellij.platform.util.annotations.paths.OsPath
 import com.intellij.python.community.execService.Args
 import com.intellij.python.community.execService.BinOnEel
 import com.intellij.python.community.execService.BinOnTarget
@@ -191,7 +192,7 @@ data class EelFileSystem(
 
   override fun createTargetRequest(): TargetEnvironmentRequest = LocalTargetEnvironmentRequest()
 
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   override fun <T> configureFileBrowseEditor(
     fieldAccessor: TextComponentAccessor<ComboBox<T>>,
     comboBox: ComboBox<T>,
@@ -554,14 +555,14 @@ internal data class TargetFileSystem(
   private val targetUserInfoLock = Mutex()
   private var detectedEnvironments: List<TargetEnvironmentProbe>? = null
 
-  override fun parsePath(raw: String): PyResult<PathHolder.Target> {
+  override fun parsePath(raw: @OsPath String): PyResult<PathHolder.Target> {
     return PyResult.success(PathHolder.Target(raw))
   }
 
   override fun createTargetRequest(): TargetEnvironmentRequest =
     targetEnvironmentConfiguration.createEnvironmentRequest(project = null)
 
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   override fun <T> configureFileBrowseEditor(
     fieldAccessor: TextComponentAccessor<ComboBox<T>>,
     comboBox: ComboBox<T>,

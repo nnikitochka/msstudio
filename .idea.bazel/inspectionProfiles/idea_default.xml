@@ -23,6 +23,9 @@
       <scope name="swift" level="WARNING" enabled="true" />
       <scope name="swift-lang" level="WARNING" enabled="true" />
     </inspection_tool>
+    <inspection_tool class="4eb51d7d-e527-31f8-ab15-76a399786587" enabled="true" level="WARNING" enabled_by_default="false">
+      <scope name="Python" level="WARNING" enabled="true" />
+    </inspection_tool>
     <inspection_tool class="4ed1243f-91f1-388d-ba02-4dbef1721d3a" enabled="true" level="WEAK WARNING" enabled_by_default="true" editorAttributes="INFO_ATTRIBUTES">
       <scope name="IDE Testing Framework" level="WARNING" enabled="true" />
     </inspection_tool>
@@ -344,6 +347,23 @@
                   <option name="_fileType" value="Properties" />
                   <option name="searchContext" value="ANY" />
                   <option name="replacement" value="…" />
+                </InspectionPattern>
+              </list>
+            </option>
+          </RegExpInspectionConfiguration>
+          <RegExpInspectionConfiguration>
+            <option name="description" value="Use `java.nio.file.Path` for a path.&#10;If you must keep a path in a `String`, mark the type with `@OsPath` or `@NioPath` from `com.intellij.platform.util.annotations.paths`:&#10;`path: @OsPath String`." />
+            <option name="name" value="Do not represent paths as strings" />
+            <option name="problemDescriptor" value="Use java.nio.file.Path, or mark the String with @OsPath or @NioPath" />
+            <option name="suppressId" value="pathAsString" />
+            <option name="uuid" value="4eb51d7d-e527-31f8-ab15-76a399786587" />
+            <option name="patterns">
+              <list>
+                <InspectionPattern>
+                  <option name="regExp" value="[pP]ath\s*:\s*String\b" />
+                  <option name="_fileType" value="Kotlin" />
+                  <option name="searchContext" value="EXCEPT_COMMENTS_AND_STRING_LITERALS" />
+                  <option name="flags" value="64" />
                 </InspectionPattern>
               </list>
             </option>
@@ -3772,15 +3792,6 @@
       <searchConfiguration name="Use nio.Path instead of io.File" text="$File$" recursive="true" caseInsensitive="true" type="Kotlin" pattern_context="default">
         <constraint name="__context__" within="" contains="" />
         <constraint name="File" nameOfExprType="java\.io\.File" within="" contains="" />
-      </searchConfiguration>
-      <searchConfiguration name="use NotificationGroup.toolWindowGroup().createNotification().notify() instead" text="$Instance$.notifyByBalloon($Parameter$)" recursive="false" caseInsensitive="false" type="JAVA">
-        <constraint name="Instance" nameOfExprType="com.intellij.openapi.wm.ToolWindowManager" exprTypeWithinHierarchy="true" minCount="0" within="" contains="" />
-        <constraint name="Parameter" minCount="0" maxCount="2147483647" within="" contains="" />
-      </searchConfiguration>
-      <searchConfiguration name="use NotificationGroup.toolWindowGroup().createNotification().notify() instead" text="$Instance$.notifyByBalloon($Parameter$)" recursive="false" caseInsensitive="false" type="Kotlin" pattern_context="default">
-        <constraint name="Instance" nameOfExprType="com.intellij.openapi.wm.ToolWindowManager" exprTypeWithinHierarchy="true" minCount="0" within="" contains="" />
-        <constraint name="Parameter" minCount="0" maxCount="2147483647" within="" contains="" />
-        <constraint name="__context__" within="" contains="" />
       </searchConfiguration>
       <searchConfiguration name="Use of Toolkit.getSystemClipboard()" description="IntelliJ platform's CopyPasteManager should be used in most cases.&#10;It supports clipboard history and works in remote development scenarios." suppressId="SystemClipboardAccess" problemDescriptor="Consider using IntelliJ platform's CopyPasteManager instead. It supports clipboard history and works in remote development scenarios." text="$Instance$.getSystemClipboard()" recursive="true" caseInsensitive="true" type="JAVA" pattern_context="default">
         <constraint name="__context__" within="" contains="" />

@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 @file:Suppress("ReplaceJavaStaticMethodWithKotlinAnalog", "ReplaceGetOrSet")
 @file:Internal
 @file:OptIn(SettingsInternalApi::class)
@@ -41,6 +41,9 @@ import com.intellij.util.xmlb.deserializeNestedBindingToJson
 import com.intellij.util.xmlb.isPropertySkipped
 import com.intellij.util.xmlb.jdomToJson
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import org.jdom.Element
 import org.jetbrains.annotations.ApiStatus.Internal
 import java.util.concurrent.atomic.AtomicReference
@@ -297,6 +300,33 @@ private fun serializeWithController(
   return element
 }
 
+/**
+ * Records whether a [SettingsController] supplied a value that differs from the local stored value.
+ * The deserialized state then does not match the storage, so the storage must not use it as the saved state.
+ */
+internal class ControllerOverrideTracker {
+  var isLocalValueOverridden: Boolean = false
+    private set
+
+  /**
+   * [isLocalValueDefault] is called only if the controller value is `null` and the local value is not `null`.
+   * A `null` controller value means the default value, so it does not override a local value that is equal to the default.
+   */
+  fun onResolved(controllerValue: JsonElement?, localValue: JsonElement?, isLocalValueDefault: () -> Boolean = { false }) {
+    if (isLocalValueOverridden) {
+      return
+    }
+
+    val effectiveControllerValue = controllerValue.nullIfJsonNull()
+    val effectiveLocalValue = localValue.nullIfJsonNull()
+    if (effectiveControllerValue != effectiveLocalValue && !(effectiveControllerValue == null && isLocalValueDefault())) {
+      isLocalValueOverridden = true
+    }
+  }
+}
+
+private fun JsonElement?.nullIfJsonNull(): JsonElement? = if (this == JsonNull) null else this
+
 @Suppress("DEPRECATION", "UNCHECKED_CAST")
 internal fun <T : Any> deserializeStateWithController(
   stateElement: Element?,
@@ -306,13 +336,14 @@ internal fun <T : Any> deserializeStateWithController(
   componentName: String,
   pluginId: PluginId,
   roamingType: RoamingType?,
+  overrideTracker: ControllerOverrideTracker? = null,
 ): T? {
   if (stateClass === Element::class.java) {
     if (controller == null) {
       return stateElement as T? ?: mergeInto
     }
     else {
-      return deserializeAsJdomElement(
+      val element = deserializeAsJdomElement(
         localValue = stateElement,
         controller = controller,
         componentName = componentName,
@@ -322,7 +353,11 @@ internal fun <T : Any> deserializeStateWithController(
             jdomToJson(it)
           }
         })),
-      ) as T? ?: mergeInto
+      )
+      if (element !== stateElement) {
+        overrideTracker?.onResolved(controllerValue = element?.let(::elementToJsonForComparison), localValue = stateElement?.let(::elementToJsonForComparison))
+      }
+      return element as T? ?: mergeInto
     }
   }
   else if (com.intellij.openapi.util.JDOMExternalizable::class.java.isAssignableFrom(stateClass)) {
@@ -354,6 +389,7 @@ internal fun <T : Any> deserializeStateWithController(
             pluginId = pluginId,
             controller = controller,
             roamingType = roamingType,
+            overrideTracker = overrideTracker,
           )
         }
         else if (rootBinding is KotlinxSerializationBinding) {
@@ -365,6 +401,7 @@ internal fun <T : Any> deserializeStateWithController(
             pluginId = pluginId,
             controller = controller,
             roamingType = roamingType,
+            overrideTracker = overrideTracker,
           )
         }
       }
@@ -387,6 +424,7 @@ internal fun <T : Any> deserializeStateWithController(
           pluginId = pluginId,
           controller = controller,
           roamingType = roamingType,
+          overrideTracker = overrideTracker,
         )
       }
       return mergeInto
@@ -402,6 +440,11 @@ internal fun <T : Any> deserializeStateWithController(
 
 private val NULL_OLD_LOCAL_VALUE_SUPPLIER = OldLocalValueSupplierTag { null }
 
+private fun elementToJsonForComparison(element: Element): JsonElement = JsonObject(jdomToJson(element) - "name")
+
+private fun JsonElement?.normalizePrimitiveForComparison(): JsonElement? =
+  if (this is JsonPrimitive && !isString && this != JsonNull) JsonPrimitive(content) else this
+
 private fun <T : Any> getXmlSerializedState(
   oldData: Element?,
   mergeInto: T?,
@@ -411,6 +454,7 @@ private fun <T : Any> getXmlSerializedState(
   pluginId: PluginId,
   controller: SettingsController,
   roamingType: RoamingType?,
+  overrideTracker: ControllerOverrideTracker?,
 ): T? {
   var result = mergeInto
   val bindings = rootBinding.bindings!!
@@ -458,6 +502,14 @@ private fun <T : Any> getXmlSerializedState(
 
     if (value.isResolved) {
       val jsonElement = value.get()
+      if (overrideTracker != null && !overrideTracker.isLocalValueOverridden) {
+        overrideTracker.onResolved(
+          controllerValue = jsonElement.normalizePrimitiveForComparison(),
+          localValue = (oldDataSupplierLazyValue?.value).normalizePrimitiveForComparison(),
+        ) {
+          isStoredValueDefault(element = oldData!!, binding = binding, rootBinding = rootBinding)
+        }
+      }
       if (jsonElement != null) {
         if (result == null) {
           // create a result only if we have some data - do not return empty state class
@@ -481,6 +533,17 @@ private fun <T : Any> getXmlSerializedState(
 }
 
 
+private fun isStoredValueDefault(element: Element, binding: NestedBinding, rootBinding: BeanBinding): Boolean {
+  val bean = rootBinding.newInstance()
+  deserializeNestedBindingInto(result = bean, element = element, binding = binding)
+  val filter = jdomSerializer.getDefaultSerializationFilter()
+  return rootBinding.equalByFields(
+    currentValue = bean,
+    defaultValue = filter.getDefaultValue(bean.javaClass) { rootBinding.newInstance() },
+    filter = filter,
+  )
+}
+
 private fun <T : Any> getKotlinxSerializedState(
   oldData: Element?,
   rootBinding: KotlinxSerializationBinding,
@@ -489,6 +552,7 @@ private fun <T : Any> getKotlinxSerializedState(
   pluginId: PluginId,
   controller: SettingsController,
   roamingType: RoamingType?,
+  overrideTracker: ControllerOverrideTracker?,
 ): T? {
   val oldValueTagSupplier = if (oldData == null) {
     NULL_OLD_LOCAL_VALUE_SUPPLIER
@@ -523,6 +587,7 @@ private fun <T : Any> getKotlinxSerializedState(
 
   if (value.isResolved) {
     val jsonElement = value.get()
+    overrideTracker?.onResolved(controllerValue = jsonElement, localValue = oldValueTagSupplier.value)
     if (jsonElement != null) {
       @Suppress("UNCHECKED_CAST")
       return rootBinding.fromJson(currentValue = null, element = jsonElement) as T?

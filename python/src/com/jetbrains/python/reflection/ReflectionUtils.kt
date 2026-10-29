@@ -1,12 +1,16 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.jetbrains.python.reflection
 
+import org.jetbrains.annotations.ApiStatus
 import java.beans.Introspector
 import java.beans.PropertyDescriptor
+import java.lang.reflect.Type
 import kotlin.reflect.KClass
 import kotlin.reflect.KMutableProperty
 import kotlin.reflect.KProperty
 import kotlin.reflect.full.memberProperties
+import kotlin.reflect.jvm.javaField
+import kotlin.reflect.jvm.javaGetter
 import kotlin.reflect.jvm.javaType
 
 /**
@@ -19,14 +23,14 @@ import kotlin.reflect.jvm.javaType
 
 interface Property {
   fun getName(): String
-  fun getType(): java.lang.reflect.Type
+  fun getType(): Type
   fun get(): Any?
   fun set(value: Any?)
 }
 
 private class KotlinProperty(val property: KMutableProperty<*>, val instance: Any?) : Property {
   override fun getName() = property.name
-  override fun getType() = property.returnType.javaType
+  override fun getType() = property.javaReturnType
   override fun get() = property.getter.call(instance)
   override fun set(value: Any?) = property.setter.call(instance, value)
 }
@@ -78,6 +82,14 @@ class Properties(val properties: List<Property>, val instance: Any) {
 }
 
 
+/**
+ * The Java type of the property value, from the getter or the field.
+ * Kotlin reflection 2.5.0-Beta2 throws a [ClassCastException] in [javaType] for a mutable collection property that a Java class implements.
+ * Remove the workaround when KT-90525 is fixed.
+ */
+private val KProperty<*>.javaReturnType: Type
+  get() = javaGetter?.genericReturnType ?: javaField?.genericType ?: returnType.javaType
+
 private fun KProperty<*>.isAnnotated(annotation: KClass<*>): Boolean {
   return this.annotations.find { annotation.java.isAssignableFrom(it.javaClass) } != null
 }
@@ -87,6 +99,18 @@ private val membersCache = object : ClassValue<Collection<KProperty<*>>>() {
 }
 
 private fun KClass<*>.memberPropertiesCached(): Collection<KProperty<*>> = membersCache.get(this.java)
+
+/**
+ * Computes the Kotlin properties of [type], their annotations and their types, so that later [getProperties] calls are fast.
+ * The first computation for a class runs Kotlin reflection over the whole class hierarchy and can take seconds.
+ */
+@ApiStatus.Internal
+fun preloadProperties(type: Class<*>) {
+  for (property in membersCache.get(type)) {
+    val _ = property.annotations
+    val _ = property.javaReturnType
+  }
+}
 
 
 /**

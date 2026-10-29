@@ -22,7 +22,7 @@ import com.intellij.openapi.editor.impl.marker.SnapshotMarkerRootStore
 import com.intellij.openapi.editor.impl.marker.SnapshotRangeMarkerImpl
 import com.intellij.openapi.editor.markup.GutterIconRenderer
 import com.intellij.openapi.util.Key
-import com.intellij.openapi.util.TextRange
+import com.intellij.openapi.util.TextRangeScalarUtil
 import com.intellij.util.Processor
 import com.intellij.util.concurrency.ThreadingAssertions
 import com.intellij.util.concurrency.annotations.RequiresEdt
@@ -59,17 +59,19 @@ internal class SnapshotFoldingRegionStorage(
     neverExpands: Boolean,
   ): FoldRegionMarker {
     val markerId = SnapshotMarkerEngineImpl.nextMarkerId()
-    val spec = MarkerSpec(isGreedyToLeft = false, isGreedyToRight = false, policy = foldRegionMarkerPolicy)
+    val spec = MarkerSpec.create(isGreedyToLeft = false, isGreedyToRight = false)
     val region = SnapshotFoldRegion(
       storage = this,
       markerId = markerId,
       spec = spec,
-      initialRange = TextRange(startOffset, endOffset),
+      initialRange = TextRangeScalarUtil.toScalarRange(startOffset, endOffset),
       placeholder = placeholder,
       group = group,
       neverExpands = neverExpands,
+      policy = foldRegionMarkerPolicy,
     )
-    return register(region, startOffset, endOffset, spec)
+    register(region, startOffset, endOffset, spec)
+    return region
   }
 
   override fun createCustomFoldRegion(
@@ -78,15 +80,16 @@ internal class SnapshotFoldingRegionStorage(
     renderer: CustomFoldRegionRenderer,
   ): CustomFoldRegionMarker {
     val markerId = SnapshotMarkerEngineImpl.nextMarkerId()
-    val spec = MarkerSpec(isGreedyToLeft = false, isGreedyToRight = false, policy = CustomFoldRegionMarkerPolicy)
+    val spec = MarkerSpec.create(isGreedyToLeft = false, isGreedyToRight = false)
     val region = SnapshotCustomFoldRegion(
       storage = this,
       markerId = markerId,
       spec = spec,
-      initialRange = TextRange(startOffset, endOffset),
+      initialRange = TextRangeScalarUtil.toScalarRange(startOffset, endOffset),
       renderer = renderer,
     )
-    return register(region, startOffset, endOffset, spec)
+    register(region, startOffset, endOffset, spec)
+    return region
   }
 
   override fun removeRegion(region: FoldRegionMarker): Boolean {
@@ -217,18 +220,17 @@ internal class SnapshotFoldingRegionStorage(
 
   fun currentSnapshot(): DocumentSnapshot = document.core.snapshot()
 
-  private fun <T : SnapshotFoldRegion> register(
-    region: T,
+  private fun register(
+    region: SnapshotFoldRegion,
     startOffset: Int,
     endOffset: Int,
-    spec: MarkerSpec,
-  ): T {
+    spec: Byte,
+  ) {
     check(regionsById.putIfAbsent(region.id, region) == null) { "Fold region ${region.id} is already registered" }
     val markerReference = SnapshotMarkerEngineImpl.createMarkerReference(region, retainStrong = true)
     rootStore.updateRoot(currentSnapshot()) {
-      it.insert(region.id, startOffset, endOffset, spec, region.flavorFlags, markerReference)
+      it.insert(region.id, startOffset, endOffset, spec, region.flavorFlags, markerReference, policy = region.policy)
     }
-    return region
   }
 
   private fun processAffectedRegions(markerIds: LongList) {
@@ -274,6 +276,7 @@ internal class SnapshotFoldingRegionStorage(
   private fun invalidateDuplicate(region: SnapshotFoldRegion) {
     rootStore.updateRoot(currentSnapshot()) { it.remove(region.id) }
     if (regionsById.remove(region.id, region)) {
+      region.markDisposed()
       model.snapshotFoldRegionInvalidated(region)
     }
   }
@@ -286,6 +289,7 @@ internal class SnapshotFoldingRegionStorage(
       val markerId = markerIds.getLong(index)
       val region = regionsById.get(markerId) ?: continue
       if (regionsById.remove(markerId, region)) {
+        region.markDisposed()
         model.snapshotFoldRegionInvalidated(region)
       }
     }
@@ -310,12 +314,13 @@ internal class SnapshotFoldingRegionStorage(
 internal open class SnapshotFoldRegion(
   internal val storage: SnapshotFoldingRegionStorage,
   markerId: Long,
-  spec: MarkerSpec,
-  initialRange: TextRange,
+  spec: Byte,
+  initialRange: Long,
   private var placeholder: String,
   private val group: FoldingGroup?,
   private val neverExpands: Boolean,
-) : SnapshotRangeMarkerImpl(storage.document, storage.rootStore, markerId, spec, initialRange), FoldRegionMarker {
+  policy: MarkerPolicy,
+) : SnapshotRangeMarkerImpl(storage.document, storage.rootStore, markerId, spec, initialRange, policy), FoldRegionMarker {
   protected val editorImpl: EditorImpl
     get() = storage.editor
 
@@ -326,12 +331,12 @@ internal open class SnapshotFoldRegion(
 
   override fun isExpanded(): Boolean = expanded
 
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   override fun setExpanded(expanded: Boolean) {
     setExpanded(expanded, true)
   }
 
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   override fun setExpanded(expanded: Boolean, notify: Boolean) {
     val foldingModel = storage.model
     val group = group
@@ -355,8 +360,9 @@ internal open class SnapshotFoldRegion(
     this.expanded = expanded
   }
 
-  override fun isValidResolution(resolution: PMarkerResolution): Boolean {
-    return super.isValidResolution(resolution) && !resolution.isEmpty
+  override fun isValidInRoot(root: PMarkerRoot): Boolean {
+    val resolution = root.resolve(id)
+    return PMarkerResolution.isValid(resolution) && PMarkerResolution.startOffset(resolution) != PMarkerResolution.endOffset(resolution)
   }
 
   override fun getPlaceholderText(): String = placeholder
@@ -437,10 +443,10 @@ internal open class SnapshotFoldRegion(
 internal class SnapshotCustomFoldRegion(
   storage: SnapshotFoldingRegionStorage,
   markerId: Long,
-  spec: MarkerSpec,
-  initialRange: TextRange,
+  spec: Byte,
+  initialRange: Long,
   private val renderer: CustomFoldRegionRenderer,
-) : SnapshotFoldRegion(storage, markerId, spec, initialRange, "", null, true), CustomFoldRegionMarker {
+) : SnapshotFoldRegion(storage, markerId, spec, initialRange, "", null, true, CustomFoldRegionMarkerPolicy), CustomFoldRegionMarker {
   private var width: Int = 0
   private var height: Int = 0
   private var gutterIconRenderer: GutterIconRenderer? = null
@@ -604,7 +610,7 @@ private fun alignToCharacterBoundaries(entry: PMarkerRoot.MarkerEntry, text: Doc
 
 private fun isInsideCharacterPair(offset: Int, text: DocumentText): Boolean {
   if (offset <= 0 || offset >= text.length()) return false
-  val chars = text.cachedChars()
+  val chars = text.luckyChars()
   val previous = chars[offset - 1]
   return previous == '\r' && chars[offset] == '\n' || Character.isHighSurrogate(previous) && Character.isLowSurrogate(chars[offset])
 }

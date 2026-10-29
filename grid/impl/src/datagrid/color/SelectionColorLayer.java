@@ -11,11 +11,9 @@ import com.intellij.util.ObjectUtils;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.JTable;
 import java.awt.Color;
 
 import static com.intellij.database.util.DataGridUIUtil.softHighlightOf;
-import static com.intellij.ui.hover.TableHoverListener.getHoveredRow;
 
 public class SelectionColorLayer implements ColorLayer {
   private final DataGrid myGrid;
@@ -59,8 +57,7 @@ public class SelectionColorLayer implements ColorLayer {
   }
 
   private static boolean isHoveredRow(@NotNull ViewIndex<?> viewRow, @NotNull DataGrid grid) {
-    return grid.getResultView().isHoveredRowBgHighlightingEnabled() && grid.getResultView() instanceof JTable &&
-           getHoveredRow((JTable)grid.getResultView()) == viewRow.asInteger();
+    return grid.getResultView().isHoveredRowBgHighlightingEnabled() && grid.getResultView().getHoveredRow() == viewRow.asInteger();
   }
 
   private static boolean isStripedRow(@NotNull ViewIndex<?> viewRow, @NotNull DataGrid grid) {

@@ -19,7 +19,10 @@ content_module_jar(module = ":community-execService")
 ### auto-generated section `build intellij.python.community.execService` start
 create_kotlinc_options(
     name = "custom_community-execService",
-    opt_in = ["kotlin.time.ExperimentalTime"],
+    opt_in = [
+        "kotlin.time.ExperimentalTime",
+        "com.jetbrains.python.PyInternalExecApi",
+    ],
     warn = "error",
     x_warning_level = ["DEPRECATION:warning"],
 )
@@ -41,6 +44,7 @@ jvm_library(
         ["resources/**/*"],
     ),
     visibility = ["//visibility:public"],
+    exports = ["//platform/eel"],
     deps = [
         # do not sort,
         "//libraries/caffeine",
@@ -65,6 +69,7 @@ jvm_library(
         "//platform/eel-impl-base",
         "//platform/platform-impl:ide-impl",
         "//platform/projectModel-impl",
+        "//platform/util/annotations",
     ],
 )
 
@@ -78,6 +83,11 @@ jvm_library(
     kotlinc_opts = ":custom_community-execService",
     module_name = "intellij.python.community.execService",
     visibility = ["//visibility:public"],
+    exports = [
+        # do not sort,
+        "//platform/eel",
+        "//platform/eel:eel_test_lib",
+    ],
     runtime_deps = [
         # do not sort,
         ":community-execService",
@@ -102,6 +112,7 @@ jvm_library(
         "//platform/eel-impl-base:eel-impl-base_test_lib",
         "//platform/platform-impl:ide-impl_test_lib",
         "//platform/projectModel-impl:projectModel-impl_test_lib",
+        "//platform/util/annotations:annotations_test_lib",
     ],
 )
 ### auto-generated section `build intellij.python.community.execService` end
@@ -119,7 +130,10 @@ exports_files(
 ### auto-generated section `build intellij.python.community.execService.tests` start
 create_kotlinc_options(
     name = "custom_community-execService-tests",
-    opt_in = ["kotlin.time.ExperimentalTime"],
+    opt_in = [
+        "kotlin.time.ExperimentalTime",
+        "com.jetbrains.python.PyInternalExecApi",
+    ],
     warn = "error",
     x_warning_level = ["DEPRECATION:warning"],
 )
@@ -132,6 +146,11 @@ jvm_library(
     ),
     module_name = "intellij.python.community.execService.tests",
     visibility = ["//visibility:public"],
+    runtime_deps = [
+        # do not sort,
+        "//platform/main/intellij.platform.monolith.main:monolith-main",
+        "//community-resources:customization",
+    ],
 )
 
 jvm_library(
@@ -155,12 +174,17 @@ jvm_library(
         ["testResources/**/*"],
     ),
     visibility = ["//visibility:public"],
-    runtime_deps = [":community-execService-tests"],
+    runtime_deps = [
+        # do not sort,
+        ":community-execService-tests",
+        "//platform/main/intellij.platform.monolith.main:monolith-main_test_lib",
+        "//community-resources:customization_test_lib",
+    ],
     deps = [
         # do not sort,
+        "//libraries/assertj-core",
+        "//libraries/assertj-core:assertj-core_test_lib",
         "@lib//:kotlin-stdlib",
-        "//libraries/jetbrains/annotations",
-        "//libraries/jetbrains/annotations:annotations_test_lib",
         "//python/openapi:community",
         "//python/openapi:community_test_lib",
         "//platform/eel-provider",
@@ -187,20 +211,14 @@ jvm_library(
         "//libraries/junit5-pioneer:junit5-pioneer_test_lib",
         "//platform/testFramework/common",
         "//platform/testFramework/common:common_test_lib",
-        "//platform/util/progress",
-        "//platform/util/progress:progress_test_lib",
         "//platform/execution",
         "//platform/execution:execution_test_lib",
-        "//platform/projectModel-api:projectModel",
-        "//platform/projectModel-api:projectModel_test_lib",
         "//libraries/kotlinx/serialization/json",
         "//libraries/kotlinx/serialization/json:json_test_lib",
         "//libraries/kotlinx/serialization/core",
         "//libraries/kotlinx/serialization/core:core_test_lib",
         "//platform/remote-servers/impl",
         "//platform/remote-servers/impl:impl_test_lib",
-        "//libraries/guava",
-        "//libraries/guava:guava_test_lib",
         "//python/python-process-output/common",
         "//python/python-process-output/common:common_test_lib",
         "//python/pluginCore:community-plugin",

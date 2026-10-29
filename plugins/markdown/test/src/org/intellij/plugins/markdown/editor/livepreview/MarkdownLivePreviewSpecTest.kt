@@ -77,6 +77,19 @@ class MarkdownLivePreviewSpecTest : BasePlatformTestCase() {
     assertEquals(placeholder, images("![   ](image.png)").single().placeholderText)
   }
 
+  fun testOnlyAClosedMermaidFenceIsSpec() {
+    val fence = "```mermaid\ngraph LR\n  A --> B\n```"
+    val content = "Some `mermaid` code\n\n```\nval a = 1\n```\n\n$fence\n\n```mermaid\nopen\n"
+    myFixture.configureByText("test.md", content)
+
+    val spec = computeLivePreviewSpecs(myFixture.file, myFixture.editor).elements
+      .filterIsInstance<MarkdownLivePreviewSpec.CodeFence>()
+      .single()
+
+    assertEquals(fence, content.substring(spec.range.startOffset, spec.range.endOffset))
+    assertEquals("graph LR\n  A --> B", spec.source)
+  }
+
   fun testImagesBetweenHeadersAreBothSpecs() {
     val content = "# Markdown WYSIWYG Demo\n\n![logo](image.png)\n\n![logo](image.png)\n\n# Markdown WYSIWYG Demo"
 
@@ -108,16 +121,33 @@ class MarkdownLivePreviewSpecTest : BasePlatformTestCase() {
   }
 
   fun testUnsupportedImageDestinationsAreNotConcealed() {
-    assertEmpty(elements("![alt](https://example.org/image.png)"))
-    assertEmpty(elements("![alt](//example.org/image.png)"))
-    assertEmpty(elements("![alt](data:image/png;base64,AAAA)"))
     assertEmpty(elements("![alt][image]\n\n[image]: image.png"))
+  }
+
+  fun testRemoteAndDataImagesAreSpecsWithoutSource() {
+    val logo = "https://upload.wikimedia.org/wikipedia/commons/4/4f/SVG_Logo.svg"
+    val badge = "https://img.shields.io/badge/markdown-preview-blue.svg"
+    val data = "data:image/png;base64,AAAA"
+    val content = "![svg image]($logo)\n\n![svg image]($badge)(https://example.com)\n\n![dot](HTTP://example.org/a.png) ![dot]($data)"
+    val images = images(content)
+
+    assertEquals(listOf(logo, badge, "HTTP://example.org/a.png", data), images.map { it.destination })
+    assertEquals(listOf("svg image", "svg image", "dot", "dot"), images.map { it.placeholderText })
+    assertTrue(images.all { it.isBrowserOwned })
+    assertTrue("The backend loads no browser-owned image", images.all { it.source == null })
+    assertEquals(
+      listOf("![svg image]($logo)", "![svg image]($badge)", "![dot](HTTP://example.org/a.png)", "![dot]($data)"),
+      imageRanges(content),
+    )
+    val other = images("![a](//example.org/a.png) ![b](data:text/plain,text)")
+    assertEquals(listOf("//example.org/a.png", "data:text/plain,text"), other.map { it.destination })
   }
 
   fun testFileUriIsALocalImageDestination() {
     val image = images("![alt](file:///project/image.png)").single()
 
     assertEquals("file:///project/image.png", image.destination)
+    assertFalse(image.isBrowserOwned)
   }
 
   fun testReferenceLinksAreConcealed() {
@@ -550,6 +580,7 @@ class MarkdownLivePreviewSpecTest : BasePlatformTestCase() {
     is MarkdownLivePreviewSpec.HorizontalRule -> listOf(range)
     is MarkdownLivePreviewSpec.Heading -> listOf(range)
     is MarkdownLivePreviewSpec.Image -> listOf(range)
+    is MarkdownLivePreviewSpec.CodeFence -> emptyList()
     is MarkdownLivePreviewSpec.Bullet -> listOf(range)
     is MarkdownLivePreviewSpec.TaskCheckbox -> listOf(range)
   }
@@ -559,7 +590,9 @@ class MarkdownLivePreviewSpecTest : BasePlatformTestCase() {
     val elements = computeLivePreviewSpecs(myFixture.file, myFixture.editor).elements
     for (element in elements) {
       val conceals = element.concealedRanges()
-      assertFalse("An element with nothing to conceal must not be reported: $element", conceals.isEmpty())
+      if (element !is MarkdownLivePreviewSpec.CodeFence) {
+        assertFalse("An element with nothing to conceal must not be reported: $element", conceals.isEmpty())
+      }
       assertTrue("An element must contain the markup it conceals: $element", conceals.all { element.range.contains(it) })
       if (element is MarkdownLivePreviewSpec.BlockQuote) {
         assertEquals("A rule must start at its marker: $element", element.markerRange.startOffset, element.ruleRange.startOffset)

@@ -18,10 +18,7 @@ dev_dist_plugin(
     },
     main_module = "intellij.platform.todo.plugin",
     mode_refused_content_modules = {
-        "frontend": [
-            "intellij.platform.todo.backend",
-            "intellij.platform.vcs.impl.lang.todo",
-        ],
+        "frontend": ["intellij.platform.todo.backend"],
     },
 )
 ### auto-generated section `dev intellij.platform.todo.plugin` end
@@ -52,7 +49,9 @@ jvm_library(
     visibility = ["//visibility:public"],
     runtime_deps = [":plugin"],
 )
+### auto-generated section `build intellij.platform.todo.plugin` end
 
+### auto-generated section `plugin intellij.platform.todo.plugin` start
 ij_plugin(
     name = "plugin_plugin",
     descriptor_module = ":plugin",
@@ -66,7 +65,7 @@ ij_plugin(
     ],
     visibility = ["//visibility:public"],
 )
-### auto-generated section `build intellij.platform.todo.plugin` end
+### auto-generated section `plugin intellij.platform.todo.plugin` end
 
 ### auto-generated section `iml intellij.platform.todo.plugin` start
 exports_files(

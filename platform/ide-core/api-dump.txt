@@ -497,6 +497,7 @@ com.intellij.openapi.actionSystem.IdeActions
 - sf:ACTION_FOCUS_EDITOR:java.lang.String
 - sf:ACTION_GOTO_BACK:java.lang.String
 - sf:ACTION_GOTO_DECLARATION:java.lang.String
+- sf:ACTION_GOTO_DECLARATION_ONLY:java.lang.String
 - sf:ACTION_GOTO_FORWARD:java.lang.String
 - sf:ACTION_GOTO_IMPLEMENTATION:java.lang.String
 - sf:ACTION_GOTO_LAST_CHANGE:java.lang.String
@@ -584,6 +585,7 @@ com.intellij.openapi.actionSystem.IdeActions
 - sf:CHANGES_VIEW_ROLLBACK:java.lang.String
 - sf:CONSOLE_CLEAR_ALL:java.lang.String
 - sf:DIFF_VIEWER_POPUP:java.lang.String
+- sf:DIFF_VIEWER_RIGHT_TOOLBAR:java.lang.String
 - sf:DIFF_VIEWER_TOOLBAR:java.lang.String
 - sf:EXTRACT_METHOD_TOOL_WINDOW_TREE_POPUP:java.lang.String
 - sf:GROUP_ANALYZE:java.lang.String
@@ -777,7 +779,8 @@ a:com.intellij.openapi.fileTypes.FileTypeManager
 - a:setIgnoredFilesList(java.lang.String):V
 f:com.intellij.openapi.fileTypes.NativeFileType
 - com.intellij.openapi.fileTypes.INativeFileType
-- s:openAssociatedApplication(com.intellij.openapi.vfs.VirtualFile):Z
+- bf:getINSTANCE():com.intellij.openapi.fileTypes.NativeFileType
+- sf:openAssociatedApplication(com.intellij.openapi.vfs.VirtualFile):Z
 f:com.intellij.openapi.fileTypes.StdFileTypes
 - com.intellij.openapi.fileTypes.FileTypes
 com.intellij.openapi.fileTypes.TemplateLanguageFileType

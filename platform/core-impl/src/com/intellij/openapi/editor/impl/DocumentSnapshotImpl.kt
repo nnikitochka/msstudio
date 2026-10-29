@@ -5,6 +5,7 @@ import com.intellij.openapi.editor.ex.DocumentModState
 import com.intellij.openapi.editor.ex.DocumentOp
 import com.intellij.openapi.editor.ex.DocumentSnapshot
 import com.intellij.openapi.editor.ex.DocumentText
+import com.intellij.openapi.editor.ex.applyOp
 
 internal class DocumentSnapshotImpl private constructor(
   private val text: DocumentText,
@@ -28,31 +29,15 @@ internal class DocumentSnapshotImpl private constructor(
   }
 
   override fun applyOp(op: DocumentOp): DocumentSnapshot {
-    val newText = text.applyOp(op)
+    val newText = when (op) {
+      is DocumentOp.Text -> text.applyOp(op)
+      is DocumentOp.ModStamp, is DocumentOp.CleanLines -> text
+    }
     val newModState = modState.applyOp(text, newText, op)
     if (newText === text && newModState === modState) {
       return this
     }
     return DocumentSnapshotImpl(newText, newModState)
-  }
-
-  override fun dumpState(): String {
-    val dump = StringBuilder()
-    dump.append("intervals:\n")
-    val lineCount: Int = text.lineCount()
-    for (line in 0..<lineCount) {
-      dump
-        .append(line)
-        .append(": ")
-        .append(text.lineStartOffset(line))
-        .append("-")
-        .append(text.lineEndOffset(line))
-        .append(", ")
-    }
-    if (lineCount > 0) {
-      dump.setLength(dump.length - 2)
-    }
-    return dump.toString()
   }
 
   override fun toString(): String {

@@ -24,7 +24,8 @@ use serde_json::{Value, json};
 
 use super::channel::{Daemon, log};
 use super::context::option_files_digest;
-use super::ide::{ContextPlugin, KillTarget, LaneLaunch, Records, Relaunch};
+use super::evidence;
+use super::ide::{ContextPlugin, KillTarget, LaneLaunch, Records, Relaunch, RelaunchParts};
 use super::identity::{BRIDGE_PORT, BRIDGE_TOKEN_PURPOSE, KeyInputs, LaneIdentity};
 use super::inputs::TraceInputs;
 use super::live::LiveRun;
@@ -34,7 +35,7 @@ use super::readiness::{self, Bridge, READY_TIMEOUT, request};
 use super::services::cloud::spawner::ControlEndpoint;
 use super::session_logs;
 use super::stream::Stream;
-use super::trace::{RecorderProcess, Trace};
+use super::trace::{MAX_LOOSE_BYTES, RecorderProcess, Trace};
 use super::watchdog::{self, DISMISS_TIMEOUT, INTRUDER_GRACE_MS, PROBE_TIMEOUT, Policy, Probes, WATCHDOG_THREAD, Watch};
 use crate::cli::{CancelArgs, RootArgs, RunArgs};
 use crate::clock::now_stamp;
@@ -636,23 +637,23 @@ fn execute_selection(
 }
 
 /// The trace of the iteration: the recorder of `inputs`, or a quiet session when there is none or it does not start. A
-/// recorder that does not start is a failure of the session, which the runner says on the stream.
+/// recorder that does not start is a failure of the session, which the runner says on the stream. Under a Bazel test the
+/// attachments outside a recorded scenario go to the outputs directory of the test.
 fn start_trace(inputs: &TraceInputs, iteration_dir: &Path, iteration_id: &str, bridge: Option<protocol::Bridge>) -> Trace {
+    let loose = inputs.bazel_outputs.as_deref().map(evidence::attachments_dir);
     let Some(recorder) = &inputs.recorder else {
         log("no recorder is named, so the iteration records no trace");
-        return Trace::off();
+        return Trace::off().keep_loose_attachments_in(loose, MAX_LOOSE_BYTES);
     };
-    match RecorderProcess::start(recorder) {
-        Ok(process) => Trace::open(
-            Box::new(process),
-            Trace::hello(iteration_dir, inputs.bazel_outputs.as_deref(), iteration_id, inputs.screen, bridge),
-        ),
+    let trace = match RecorderProcess::start(recorder) {
+        Ok(process) => Trace::open(Box::new(process), Trace::hello(iteration_dir, iteration_id, inputs, bridge)),
         Err(error) => {
             let reason = format!("{error}; the iteration records no trace");
             log(&reason);
             Trace::failed(reason)
         }
-    }
+    };
+    trace.keep_loose_attachments_in(loose, MAX_LOOSE_BYTES)
 }
 
 /// The lane of the daemon: its IDE owner, its bridge and its lane services.
@@ -685,13 +686,19 @@ impl Lane for DaemonLane<'_, '_> {
         self.bridge.post(request, within)
     }
 
-    fn relaunch(&self, cause: Relaunch, while_down: &mut dyn FnMut(&Path) -> Result<(), String>) -> Result<(), String> {
+    fn relaunch(
+        &self,
+        cause: Relaunch,
+        while_down: &mut dyn FnMut(&Path) -> Result<(), String>,
+        parts: &mut dyn RelaunchParts,
+    ) -> Result<(), String> {
         let restarted = self.daemon.with_ide(|owner| {
             owner.restart(
                 self.launch,
                 cause,
                 while_down,
                 &mut Records(&mut |record| self.stream.emit(&record)),
+                parts,
             )
         });
         restarted.map_err(|refusal| format!("{}: {}", refusal.code, refusal.message))

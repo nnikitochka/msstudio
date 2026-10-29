@@ -9403,16 +9403,6 @@ public abstract class HighLevelQuickFixTestGenerated extends AbstractHighLevelQu
             runTest("../../../idea/tests/testData/quickfix/expressions/replaceIsCheckWithNullCheckKeepsComment.kt");
         }
 
-        @TestMetadata("replaceIsCheckWithNullCheckRelyingOnNullInWhen.kt")
-        public void testReplaceIsCheckWithNullCheckRelyingOnNullInWhen() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/expressions/replaceIsCheckWithNullCheckRelyingOnNullInWhen.kt");
-        }
-
-        @TestMetadata("replaceIsCheckWithNullCheckRelyingOnNullNegatedInWhen.kt")
-        public void testReplaceIsCheckWithNullCheckRelyingOnNullNegatedInWhen() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/expressions/replaceIsCheckWithNullCheckRelyingOnNullNegatedInWhen.kt");
-        }
-
         @TestMetadata("replaceIsCheckWithNullCheckSmartCastUsed.kt")
         public void testReplaceIsCheckWithNullCheckSmartCastUsed() throws Exception {
             runTest("../../../idea/tests/testData/quickfix/expressions/replaceIsCheckWithNullCheckSmartCastUsed.kt");
@@ -15046,6 +15036,16 @@ public abstract class HighLevelQuickFixTestGenerated extends AbstractHighLevelQu
             runTest("../../../idea/tests/testData/quickfix/specifyAllRemainingArgumentsByName/class.kt");
         }
 
+        @TestMetadata("classWithCompanionObjectAndInvoke.kt")
+        public void testClassWithCompanionObjectAndInvoke() throws Exception {
+            runTest("../../../idea/tests/testData/quickfix/specifyAllRemainingArgumentsByName/classWithCompanionObjectAndInvoke.kt");
+        }
+
+        @TestMetadata("classWithoutCompanionObjectAndInvoke.kt")
+        public void testClassWithoutCompanionObjectAndInvoke() throws Exception {
+            runTest("../../../idea/tests/testData/quickfix/specifyAllRemainingArgumentsByName/classWithoutCompanionObjectAndInvoke.kt");
+        }
+
         @TestMetadata("conflictingSignatures.kt")
         public void testConflictingSignatures() throws Exception {
             runTest("../../../idea/tests/testData/quickfix/specifyAllRemainingArgumentsByName/conflictingSignatures.kt");
@@ -17836,6 +17836,31 @@ public abstract class HighLevelQuickFixTestGenerated extends AbstractHighLevelQu
                 runTest("../../../idea/tests/testData/quickfix/typeMismatch/changeVariableTypeToMatchExpectedTypeOfCall.kt");
             }
 
+            @TestMetadata("collectionLiteralUnresolvedArgument.kt")
+            public void testCollectionLiteralUnresolvedArgument() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/typeMismatch/collectionLiteralUnresolvedArgument.kt");
+            }
+
+            @TestMetadata("collectionLiteralUnresolvedArgument2.kt")
+            public void testCollectionLiteralUnresolvedArgument2() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/typeMismatch/collectionLiteralUnresolvedArgument2.kt");
+            }
+
+            @TestMetadata("collectionLiteralUnresolvedArgument3.kt")
+            public void testCollectionLiteralUnresolvedArgument3() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/typeMismatch/collectionLiteralUnresolvedArgument3.kt");
+            }
+
+            @TestMetadata("collectionLiteralUnresolvedInitializer.kt")
+            public void testCollectionLiteralUnresolvedInitializer() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/typeMismatch/collectionLiteralUnresolvedInitializer.kt");
+            }
+
+            @TestMetadata("collectionLiteralUnresolvedReturnValue.kt")
+            public void testCollectionLiteralUnresolvedReturnValue() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/typeMismatch/collectionLiteralUnresolvedReturnValue.kt");
+            }
+
             @TestMetadata("compareToTypeMismatch.kt")
             public void testCompareToTypeMismatch() throws Exception {
                 runTest("../../../idea/tests/testData/quickfix/typeMismatch/compareToTypeMismatch.kt");
@@ -17989,6 +18014,11 @@ public abstract class HighLevelQuickFixTestGenerated extends AbstractHighLevelQu
             @TestMetadata("resolvableTypeParams.kt")
             public void testResolvableTypeParams() throws Exception {
                 runTest("../../../idea/tests/testData/quickfix/typeMismatch/resolvableTypeParams.kt");
+            }
+
+            @TestMetadata("returnTypeFixForLambda.kt")
+            public void testReturnTypeFixForLambda() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/typeMismatch/returnTypeFixForLambda.kt");
             }
 
             @TestMetadata("returnTypeMismatch.kt")

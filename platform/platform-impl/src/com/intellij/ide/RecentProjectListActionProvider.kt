@@ -427,7 +427,7 @@ internal class RemoteRecentProjectActionGroup(val projectId: String, val project
   override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
 
   override fun update(e: AnActionEvent) {
-    e.presentation.isPerformGroup = project.additionalActions.isEmpty() || e.place == ActionPlaces.DOCK_MENU
+    e.presentation.isPerformGroup = true
     e.presentation.isPopupGroup = true
   }
 
@@ -521,7 +521,7 @@ private val EP_NAME: ExtensionPointName<RecentProjectsBranchesProvider> = Extens
 private const val RECENT_PROJECT_VCS_ACTIONS_ENABLED = "ide.welcome.screen.recent.project.vcs.actions"
 
 private fun vcsActionsEnabled(projectPath: String): Boolean =
-  Registry.`is`(RECENT_PROJECT_VCS_ACTIONS_ENABLED) && EP_NAME.findFirstSafe { it.hasRepository(projectPath) } != null
+  Registry.`is`(RECENT_PROJECT_VCS_ACTIONS_ENABLED) && EP_NAME.findFirstSafe { it.hasRepository(projectPath) != false } != null
 
 private fun getCurrentBranch(projectPath: String, nameIsDistinct: Boolean): String? {
   for (provider in EP_NAME.extensionList) {

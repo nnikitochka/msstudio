@@ -4,36 +4,9 @@ c:com.intellij.diagnostic.logging.DefaultLogFilterModel
 - getLogFilters():java.util.List
 - selectFilter(com.intellij.diagnostic.logging.LogFilter):V
 - setCheckStandartFilters(Z):V
-c:com.intellij.diagnostic.logging.DefaultLogFormatter
-- com.intellij.diagnostic.logging.LogFormatter
-- <init>():V
 f:com.intellij.diagnostic.logging.LogConfigurationPanel
 - com.intellij.openapi.options.SettingsEditor
 - <init>():V
-a:com.intellij.diagnostic.logging.LogConsoleBase
-- com.intellij.diagnostic.logging.AdditionalTabComponent
-- com.intellij.diagnostic.logging.LogConsole
-- com.intellij.diagnostic.logging.LogFilterListener
-- activate():V
-- p:addMessage(java.lang.String):V
-- attachStopLogConsoleTrackingListener(com.intellij.execution.process.ProcessHandler):V
-- clear():V
-- dispose():V
-- getComponent():javax.swing.JComponent
-- getConsole():com.intellij.execution.ui.ConsoleView
-- getConsoleNotNull():com.intellij.execution.ui.ConsoleView
-- getFilterModel():com.intellij.diagnostic.logging.LogFilterModel
-- getOrCreateActions():com.intellij.openapi.actionSystem.ActionGroup
-- getOriginalDocument():java.lang.StringBuffer
-- getPreferredFocusableComponent():javax.swing.JComponent
-- getSearchComponent():javax.swing.JComponent
-- p:getTextFilterComponent():java.awt.Component
-- getTitle():java.lang.String
-- getToolbarActions():com.intellij.openapi.actionSystem.ActionGroup
-- getToolbarContextComponent():javax.swing.JComponent
-- isContentBuiltIn():Z
-- onTextFilterChange():V
-- setFilterModel(com.intellij.diagnostic.logging.LogFilterModel):V
 a:com.intellij.diagnostic.logging.LogConsoleManagerBase
 - com.intellij.execution.configurations.AdditionalTabComponentManager
 - com.intellij.openapi.Disposable
@@ -333,24 +306,16 @@ f:com.intellij.execution.lineMarker.ExecutorAction
 f:com.intellij.execution.lineMarker.ExecutorAction$Companion
 - f:getActionList(I):java.util.List
 - f:getActions(I):com.intellij.openapi.actionSystem.AnAction[]
-c:com.intellij.execution.lineMarker.LineMarkerActionWrapper
-- com.intellij.openapi.actionSystem.ActionGroup
-- com.intellij.codeInsight.intention.PriorityAction
-- com.intellij.openapi.actionSystem.ActionWithDelegate
-- com.intellij.openapi.actionSystem.DataSnapshotProvider
 a:com.intellij.execution.lineMarker.RunLineMarkerContributor
-- com.intellij.openapi.project.PossiblyDumbAware
+- com.intellij.execution.lineMarker.RunLineMarkerContributorBase
 - <init>():V
 - a:getInfo(com.intellij.psi.PsiElement):com.intellij.execution.lineMarker.RunLineMarkerContributor$Info
 - getSlowInfo(com.intellij.psi.PsiElement):com.intellij.execution.lineMarker.RunLineMarkerContributor$Info
 - s:withExecutorActions(javax.swing.Icon):com.intellij.execution.lineMarker.RunLineMarkerContributor$Info
 c:com.intellij.execution.lineMarker.RunLineMarkerContributor$Info
+- com.intellij.execution.lineMarker.RunLineMarkerContributorBase$InfoBase
 - <init>(com.intellij.openapi.actionSystem.AnAction):V
 - shouldReplace(com.intellij.execution.lineMarker.RunLineMarkerContributor$Info):Z
-c:com.intellij.execution.lineMarker.RunLineMarkerProvider
-- com.intellij.codeInsight.daemon.LineMarkerProviderDescriptor
-- com.intellij.openapi.project.DumbAware
-- <init>():V
 a:com.intellij.execution.options.LifetimedSettingsEditor
 - com.intellij.openapi.options.SettingsEditor
 - <init>():V

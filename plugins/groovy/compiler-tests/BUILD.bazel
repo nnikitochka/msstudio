@@ -10,6 +10,11 @@ jvm_library(
     ),
     module_name = "intellij.groovy.compiler.tests",
     visibility = ["//visibility:public"],
+    runtime_deps = [
+        # do not sort,
+        "//platform/main/intellij.platform.monolith.main:monolith-main",
+        "//community-resources:customization",
+    ],
 )
 
 jvm_library(
@@ -23,10 +28,7 @@ jvm_library(
         ],
         allow_empty = True,
     ),
-    associates = [
-        "//plugins/groovy",
-        "//plugins/groovy:groovy_test_lib",
-    ],
+    module_name = "intellij.groovy.compiler.tests",
     resource_strip_prefix = "testResources",
     resources = glob(
         ["testResources/**/*"],
@@ -37,6 +39,8 @@ jvm_library(
         ":compiler-tests",
         "//platform/ide-core:ide-core_test_lib",
         "//platform/platform-util-io:ide-util-io_test_lib",
+        "//platform/main/intellij.platform.monolith.main:monolith-main_test_lib",
+        "//community-resources:customization_test_lib",
     ],
     deps = [
         # do not sort,
@@ -88,6 +92,8 @@ jvm_library(
         "//platform/testFramework:testFramework_test_lib",
         "//platform/execution",
         "//platform/execution:execution_test_lib",
+        "//plugins/groovy",
+        "//plugins/groovy:groovy_test_lib",
         "//platform/statistics",
         "//platform/statistics:statistics_test_lib",
         "//libraries/junit4",

@@ -10,6 +10,7 @@ import com.intellij.openapi.util.UserDataHolderBase
 import com.intellij.openapi.vfs.VirtualFile
 import org.jetbrains.annotations.ApiStatus
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater
+import java.util.concurrent.atomic.AtomicLongFieldUpdater
 import java.util.concurrent.atomic.AtomicReference
 
 /**
@@ -21,8 +22,11 @@ open class SnapshotRangeMarkerImpl private constructor(
   internal val fileRoot: VirtualFileMarkerRoot?,
   private val rootStorage: MarkerRootUpdater,
   internal val markerId: Long,
-  initialSpec: MarkerSpec,
-  internal val initialRange: TextRange,
+  @Volatile
+  private var spec: Byte, /** see [MarkerSpec]*/
+  initialRange: Long,
+  /** Defines how document edits transform this marker. */
+  val policy: MarkerPolicy,
 ) : UserDataHolderBase(), SnapshotMarker, RangeMarkerEx {
   /**
    * Creates a marker in the range marker store for [document]. A non-null [fileRoot] stores it in that root instead.
@@ -31,17 +35,21 @@ open class SnapshotRangeMarkerImpl private constructor(
     document: DocumentImpl,
     fileRoot: VirtualFileMarkerRoot?,
     markerId: Long,
-    initialSpec: MarkerSpec,
-    initialRange: TextRange,
-  ) : this(fileRoot?.file ?: document, fileRoot, fileRoot ?: document.rangeMarkers.rootStore(), markerId, initialSpec, initialRange)
+    initialSpec: Byte,
+    initialRange: Long,
+    policy: MarkerPolicy = DefaultMarkerPolicy,
+  ) : this(
+    fileRoot?.file ?: document, fileRoot, fileRoot ?: document.rangeMarkers.rootStore(), markerId, initialSpec, initialRange, policy,
+  )
 
   /** Creates a marker in [fileRoot] before the document is available. */
   internal constructor(
     fileRoot: VirtualFileMarkerRoot,
     markerId: Long,
-    initialSpec: MarkerSpec,
-    initialRange: TextRange,
-  ) : this(fileRoot.file, fileRoot, fileRoot, markerId, initialSpec, initialRange)
+    initialSpec: Byte,
+    initialRange: Long,
+    policy: MarkerPolicy = DefaultMarkerPolicy,
+  ) : this(fileRoot.file, fileRoot, fileRoot, markerId, initialSpec, initialRange, policy)
 
   /**
    * Creates a marker in the supplied [rootStore]. Use this constructor for markers that an editor or a markup model owns.
@@ -50,22 +58,26 @@ open class SnapshotRangeMarkerImpl private constructor(
     document: Document,
     rootStore: SnapshotMarkerRootStore,
     markerId: Long,
-    initialSpec: MarkerSpec,
-    initialRange: TextRange,
-  ) : this(document, null, rootStore.currentRootUpdater, markerId, initialSpec, initialRange)
+    initialSpec: Byte,
+    initialRange: Long,
+    policy: MarkerPolicy = DefaultMarkerPolicy,
+  ) : this(document, null, rootStore.currentRootUpdater, markerId, initialSpec, initialRange, policy)
 
   @Volatile
   private var disposalState: Int = ACTIVE
 
-  internal val disposed: Boolean
-    get() = disposalState == DISPOSED
+  @Volatile
+  internal var fallbackRange: Long = initialRange
+    private set
 
-  internal fun markDisposed() {
+  fun isDisposed(): Boolean = disposalState == DISPOSED
+
+  @Synchronized
+  fun markDisposed() {
+    if (isDisposed()) return
+    fallbackRange = currentRange()
     disposalState = DISPOSED
   }
-
-  @Volatile
-  private var spec: MarkerSpec = initialSpec
 
   override fun getId(): Long {
     return markerId
@@ -83,35 +95,36 @@ open class SnapshotRangeMarkerImpl private constructor(
     }
   }
 
-  override fun getStartOffset(): Int = currentResolution().startOffset
+  override fun getStartOffset(): Int = PMarkerResolution.startOffset(currentRange())
 
-  override fun getEndOffset(): Int = currentResolution().endOffset
+  override fun getEndOffset(): Int = PMarkerResolution.endOffset(currentRange())
 
-  override fun getTextRange(): TextRange = currentResolution()
+  override fun getTextRange(): TextRange = PMarkerResolution.toTextRange(currentRange())
 
   override fun isValid(): Boolean {
-    return !disposed && isValidResolution(currentResolution()) && (documentOrFile is Document || (documentOrFile as VirtualFile).isValid)
+    return !isDisposed() && isValidInRoot(currentRootReference().get()) &&
+           (documentOrFile is Document || (documentOrFile as VirtualFile).isValid)
   }
 
-  protected open fun isValidResolution(resolution: PMarkerResolution): Boolean = resolution.isValid
+  protected open fun isValidInRoot(root: PMarkerRoot): Boolean = root.isValid(markerId)
 
-  override fun isGreedyToLeft(): Boolean = spec.isGreedyToLeft
+  override fun isGreedyToLeft(): Boolean = MarkerSpec.isGreedyToLeft(spec)
 
-  override fun isGreedyToRight(): Boolean = spec.isGreedyToRight
+  override fun isGreedyToRight(): Boolean = MarkerSpec.isGreedyToRight(spec)
 
   override fun setGreedyToLeft(greedy: Boolean) {
-    updateSpec { it.withGreedyToLeft(greedy) }
+    updateSpec { MarkerSpec.withGreedyToLeft(it, greedy) }
   }
 
   override fun setGreedyToRight(greedy: Boolean) {
-    updateSpec { it.withGreedyToRight(greedy) }
+    updateSpec { MarkerSpec.withGreedyToRight(it, greedy) }
   }
 
   override fun setStickingToRight(value: Boolean) {
-    updateSpec { it.withStickyToRight(value) }
+    updateSpec { MarkerSpec.withStickyToRight(it, value) }
   }
 
-  fun isStickingToRight(): Boolean = spec.isStickingToRight
+  fun isStickingToRight(): Boolean = MarkerSpec.isStickingToRight(spec)
 
   override fun dispose() {
     if (DISPOSAL_STATE_UPDATER.compareAndSet(this, ACTIVE, DISPOSING)) {
@@ -136,46 +149,62 @@ open class SnapshotRangeMarkerImpl private constructor(
   /**
    * Replaces this marker's specification in the current snapshot without changing its ID or range.
    */
-  private fun updateSpec(transform: (MarkerSpec) -> MarkerSpec) {
+  private inline fun updateSpec(transform: (Byte) -> Byte) {
     synchronized(this) {
-      if (disposed) return
+      if (isDisposed()) return
 
       val oldSpec = spec
       val newSpec = transform(oldSpec)
       if (newSpec == oldSpec) return
 
-      if (!updateCurrentRoot { root -> if (disposed) root else root.updateSpec(markerId, newSpec) }) return
+      if (!updateCurrentRoot { root -> if (isDisposed()) root else root.updateSpec(markerId, newSpec) }) return
       spec = newSpec
     }
   }
 
-  private data class CachedResolution(val cacheIdentity: Any, val resolution: PMarkerResolution)
+  /** An even version identifies a complete cache entry. An odd version identifies an update in progress. */
+  @Volatile
+  private var cachedResolutionVersion: Long = 0
+  @Volatile
+  private var cachedResolutionIdentity: Any? = null
+  @Volatile
+  private var cachedResolution: Long = PMarkerResolution.UNRESOLVED
 
-  private var cachedResolution: CachedResolution? = null
+  private fun currentRange(): Long {
+    val resolution = currentResolution()
+    return if (PMarkerResolution.isAbsent(resolution)) fallbackRange else resolution
+  }
 
-  internal fun cacheResolution(root: PMarkerRoot, resolution: PMarkerResolution) {
-    cachedResolution = CachedResolution(cacheIdentity(root), resolution)
+  internal fun cacheResolution(root: PMarkerRoot, resolution: Long) {
+    val version = cachedResolutionVersion
+    if (version and 1L != 0L || !CACHED_RESOLUTION_VERSION_UPDATER.compareAndSet(this, version, version + 1)) return
+    cachedResolutionIdentity = cacheIdentity(root)
+    cachedResolution = resolution
+    cachedResolutionVersion = version + 2
   }
 
   /**
    * Resolves this marker in the current root. Reuses cached offsets for the same identity or advances them across one direct edit.
    * Traverses the tree when neither shortcut applies.
    */
-  private fun currentResolution(): PMarkerResolution {
+  private fun currentResolution(): Long {
     val root = currentRootReference().get()
     val cacheIdentity = cacheIdentity(root)
+    val version = cachedResolutionVersion
+    val cachedIdentity = cachedResolutionIdentity
     val cached = cachedResolution
-    if (cached != null && cached.cacheIdentity === cacheIdentity) {
-      return cached.resolution
+    val cacheIsStable = version and 1L == 0L && version == cachedResolutionVersion
+    if (cacheIsStable && cached != PMarkerResolution.UNRESOLVED && cachedIdentity === cacheIdentity) {
+      return cached
     }
-    val advanced = if (cached != null && !disposed) {
-      (root as? PMarkerRootImpl)?.advanceResolution(cached.cacheIdentity, cached.resolution)
+    val advanced = if (cacheIsStable && cachedIdentity != null && !isDisposed() && root is PMarkerRootImpl) {
+      root.advanceResolution(cachedIdentity, cached)
     }
     else {
-      null
+      PMarkerResolution.UNRESOLVED
     }
-    val resolution = advanced ?: SnapshotMarkerEngineImpl.resolveRangeMarker(this, root)
-    cachedResolution = CachedResolution(cacheIdentity, resolution)
+    val resolution = if (advanced != PMarkerResolution.UNRESOLVED) advanced else SnapshotMarkerEngineImpl.resolveRangeMarker(this, root)
+    cacheResolution(root, resolution)
     return resolution
   }
 
@@ -185,10 +214,19 @@ open class SnapshotRangeMarkerImpl private constructor(
     return rootStorage.updateCurrentRoot(update)
   }
 
-  fun currentRootReference(): AtomicReference<PMarkerRoot> = rootStorage.currentRootReference()
+  fun currentRootReference(): AtomicReference<PMarkerRoot> {
+    val document = documentOrFile
+    val store = rootStorage
+    return if (document is DocumentImpl && store is SnapshotMarkerRootStore) {
+      store.rootReference(document.core.snapshot())
+    }
+    else {
+      store.currentRootReference()
+    }
+  }
 
   override fun toString(): String = "SnapshotRangeMarker(id=$markerId" +
-                                    (if (disposed) ", disposed" else "") +
+                                    (if (isDisposed()) ", disposed" else "") +
                                     ")"
 
   private companion object {
@@ -197,5 +235,7 @@ open class SnapshotRangeMarkerImpl private constructor(
     private const val DISPOSED: Int = 2
     private val DISPOSAL_STATE_UPDATER: AtomicIntegerFieldUpdater<SnapshotRangeMarkerImpl> =
       AtomicIntegerFieldUpdater.newUpdater(SnapshotRangeMarkerImpl::class.java, "disposalState")
+    private val CACHED_RESOLUTION_VERSION_UPDATER: AtomicLongFieldUpdater<SnapshotRangeMarkerImpl> =
+      AtomicLongFieldUpdater.newUpdater(SnapshotRangeMarkerImpl::class.java, "cachedResolutionVersion")
   }
 }

@@ -11,7 +11,7 @@ import com.intellij.openapi.editor.impl.EditorImpl
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
 import com.intellij.platform.util.coroutines.childScope
-import com.intellij.terminal.actions.TerminalActionUtil
+import com.intellij.terminal.actions.TerminalPlatformDataKeys
 import com.intellij.terminal.frontend.view.TerminalView
 import com.intellij.terminal.frontend.view.activeOutputModel
 import com.intellij.terminal.frontend.view.impl.TerminalInput
@@ -82,7 +82,7 @@ internal class TerminalViewFixture(private val project: Project, emulatorType: T
    *
    * Does not wait for the session to apply it. Use [resizeAndAwait] to assert a model state afterward.
    */
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   fun resize(columns: Int, rows: Int) {
     val editor = activeEditor
     val characterGrid = checkNotNull(editor.characterGrid) { "Character grid is not initialized" }
@@ -92,21 +92,21 @@ internal class TerminalViewFixture(private val project: Project, emulatorType: T
       rows * editor.lineHeight
     )
 
-    // The viewport change above isn't a resize of the top component TerminalViewImpl listens on, so nudge that
-    // separately; its listener re-reads the (already correct) grid size from the editor and reports it, exactly
+    // The viewport change above isn't a resize of the editor's container that TerminalViewImpl listens on, so nudge
+    // that separately; its listener re-reads the (already correct) grid size from the editor and reports it, exactly
     // as it would for a real window resize.
-    val panel = view.component
-    panel.setSize(panel.width + 1, panel.height + 1)
+    val container = checkNotNull(editor.component.parent) { "The editor is not added to the terminal view" }
+    container.setSize(container.width + 1, container.height + 1)
     dispatchAllEventsInIdeEventQueue()
   }
 
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   fun invokeAction(actionId: String) {
     val action = ActionManager.getInstance().getAction(actionId) ?: error("Unknown action: $actionId")
     val editor = activeEditor
     val context = SimpleDataContext.builder()
       .add(CommonDataKeys.PROJECT, project)
-      .add(TerminalActionUtil.EDITOR_KEY, editor)
+      .add(TerminalPlatformDataKeys.EDITOR_KEY, editor)
       .add(TerminalOutputModel.DATA_KEY, view.activeOutputModel())
       .add(TerminalView.DATA_KEY, view)
       .add(TerminalInput.DATA_KEY, editor.getUserData(TerminalInput.KEY))

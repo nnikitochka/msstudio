@@ -4,6 +4,7 @@ description: Stable behavior for plugin changes started or presented by the Plug
 targets:
   - ../../src/com/intellij/ide/plugins/UnifiedPluginsPageApplyState.kt
   - ../../src/com/intellij/ide/plugins/UnifiedPluginsPageSession.kt
+  - ../../src/com/intellij/ide/plugins/newui/DefaultPluginUpdatesProvider.kt
   - ../../src/com/intellij/ide/plugins/newui/DefaultUiPluginManagerController.kt
   - ../../src/com/intellij/ide/plugins/newui/LegacyPluginUiHost.kt
   - ../../src/com/intellij/ide/plugins/newui/ListPluginComponent.kt
@@ -11,6 +12,7 @@ targets:
   - ../../src/com/intellij/ide/plugins/newui/PluginManagerCustomizer.kt
   - ../../src/com/intellij/ide/plugins/newui/PluginModelAsyncOperationsExecutor.kt
   - ../../src/com/intellij/ide/plugins/newui/PluginModelEvents.kt
+  - ../../src/com/intellij/ide/plugins/newui/PluginUpdateSourceFilter.kt
   - ../../src/com/intellij/ide/plugins/newui/SelectionBasedPluginModelAction.java
   - ../../src/com/intellij/ide/plugins/newui/UninstallAction.kt
   - ../../src/com/intellij/ide/plugins/unified/LegacyPluginRowFactory.kt
@@ -24,9 +26,11 @@ targets:
   - ../../testSrc/com/intellij/ide/plugins/UnifiedPluginsPageApplyStateTest.kt
   - ../../testSrc/com/intellij/ide/plugins/UnifiedPluginsPageSessionTest.kt
   - ../../testSrc/com/intellij/ide/plugins/newui/InstallPluginTerminalStateTest.kt
+  - ../../testSrc/com/intellij/ide/plugins/newui/DefaultPluginUpdatesProviderTest.kt
   - ../../testSrc/com/intellij/ide/plugins/newui/LegacyPluginUiHostTest.kt
   - ../../testSrc/com/intellij/ide/plugins/newui/PluginManagerButtonUsageTest.kt
   - ../../testSrc/com/intellij/ide/plugins/newui/PluginModelEventPublisherTest.kt
+  - ../../testSrc/com/intellij/ide/plugins/newui/PluginUpdateSourceFilterTest.kt
   - ../../testSrc/com/intellij/ide/plugins/unified/LegacyPluginRowFactoryTest.kt
   - ../../testSrc/com/intellij/ide/plugins/unified/UnifiedPluginInstallingLedgerTest.kt
   - ../../testSrc/com/intellij/ide/plugins/unified/UnifiedPluginLocalSourceCoordinatorTest.kt
@@ -39,7 +43,7 @@ targets:
 # Plugin Operations
 
 Status: Active
-Date: 2026-10-16
+Date: 2026-10-27
 
 ## Purpose
 
@@ -161,6 +165,54 @@ Untested: No focused test verifies complete Apply and OK result handling.
 Untested: No focused test verifies state isolation across two page sessions.
 
 ## Install and Update
+
+- A completed update check for the current IDE build must refresh the plugin manager's cached updates.
+- Open pages and pages opened later must receive the completed result, including an empty result.
+- A completed result must replace version, repository, and download data even when the plugin IDs stay the same.
+- A check for another IDE build must preserve the current update snapshot.
+  [@test] ../../testSrc/com/intellij/ide/plugins/newui/DefaultPluginUpdatesProviderTest.kt (
+    `completed checks reach current and later subscribers`;
+    `completed checks replace versions for the same plugin ids`;
+    `completed checks replace repositories for the same plugin ids`;
+    `an empty completed check clears cached updates`;
+    `checks for another IDE build keep the current snapshot`
+  )
+
+- A saved update source change must request a new plugin update check.
+- Saving the same source again must not request another check.
+  [@test] ../../testSrc/com/intellij/ide/plugins/newui/DefaultPluginUpdatesProviderTest.kt (
+    `saved source changes refresh updates`
+  )
+
+- A check must deliver fresh updates to UI callbacks while a modal task is active.
+  [@test] ../../../platform-tests/testSrc/com/intellij/openapi/application/PluginUpdateFilteringBasedOnPluginUpdateSourceTest.kt (
+    `applying source changes publishes fresh results from the selected repository`
+  )
+
+- A plugin with a pending update source change must not offer Update in its rows or details.
+- Update All must exclude this plugin until the source change is applied or reverted.
+- Reverting the source change or resetting the session must restore the latest cached update.
+- Pending source changes must not affect another page session or the shared update snapshot.
+  [@test] ../../testSrc/com/intellij/ide/plugins/UnifiedPluginsPageSessionTest.kt (
+    `pending source changes suppress row details and Update All availability`;
+    `Update All excludes plugins with pending source changes`
+  )
+  [@test] ../../testSrc/com/intellij/ide/plugins/newui/PluginUpdateSourceFilterTest.kt (
+    `pending sources suppress enabled and disabled updates without changing the shared snapshot`;
+    `returning to the initial source restores updates after several source changes`;
+    `unknown sources participate in pending changes`;
+    `reset restores the latest snapshot and persistence clears only its plugin`
+  )
+
+- When source filtering is enabled, the page must accept cached updates only from the saved update source.
+- Apply must not restore an update from the previous source while a fresh check runs.
+  [@test] ../../testSrc/com/intellij/ide/plugins/UnifiedPluginsPageSessionTest.kt (
+    `Apply keeps updates from the previous source hidden`
+  )
+  [@test] ../../testSrc/com/intellij/ide/plugins/newui/PluginUpdateSourceFilterTest.kt (
+    `cached updates must match the saved source when filtering is enabled`;
+    `disabled source filtering retains cached updates after pending changes clear`
+  )
 
 - Before the trust check starts, an operation must load incomplete Marketplace details.
 - An operation must stop before the trust check when complete Marketplace details are unavailable.

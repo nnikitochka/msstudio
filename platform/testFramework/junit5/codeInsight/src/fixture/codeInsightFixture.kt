@@ -22,6 +22,7 @@ import com.intellij.testFramework.junit5.fixture.pathInProjectFixture
 import com.intellij.testFramework.junit5.fixture.projectFixture
 import com.intellij.testFramework.junit5.fixture.tempPathFixture
 import com.intellij.testFramework.junit5.fixture.testFixture
+import com.intellij.testFramework.junit5.fixture.vfsDeletedTempPathFixture
 import org.jetbrains.annotations.TestOnly
 import java.nio.file.Path
 import kotlin.io.path.Path
@@ -181,9 +182,12 @@ fun codeInsightModuleFixture(
   moduleTypeId: String = "",
 ): TestFixture<CodeInsightTestFixture> =
   testFixture("codeInsightModuleFixture") {
-    val pathFixture = tempPathFixture()
-    projectFixture.moduleFixture(pathFixture, addPathToSourceRoot = true, moduleTypeId = moduleTypeId).init()
-    initialized(codeInsightFixture(projectFixture, pathFixture).init()) {}
+    val pathFixture = vfsDeletedTempPathFixture()
+    val moduleFixture = projectFixture.moduleFixture(pathFixture, addPathToSourceRoot = true, moduleTypeId = moduleTypeId)
+    // The editors of the test must close before the module is disposed.
+    // Otherwise, the roots change of the module starts editor jobs that run in the next test.
+    val codeInsightFixture = codeInsightFixture(projectFixture, pathFixture).dependsOn(moduleFixture)
+    initialized(codeInsightFixture.init()) {}
   }
 
 private fun getTestDataPathString(context: TestContext): String {

@@ -38,6 +38,7 @@ jvm_library(
         ["resources/**/*"],
     ),
     visibility = ["//visibility:public"],
+    runtime_deps = ["//platform/backend"],
     deps = [
         # do not sort,
         "@lib//:kotlin-stdlib",
@@ -87,6 +88,7 @@ jvm_library(
         "//platform/projectModel-api:projectModel_test_lib",
         "//platform/statistics:statistics_test_lib",
         "//platform/core-ui:core-ui_test_lib",
+        "//platform/backend:backend_test_lib",
     ],
 )
 ### auto-generated section `build intellij.statsCollector` end
@@ -113,6 +115,8 @@ jvm_library(
     runtime_deps = [
         # do not sort,
         "//platform/core-ui",
+        "//platform/main/intellij.platform.monolith.main:monolith-main",
+        "//community-resources:customization",
         "//xml/plugin",
     ],
 )
@@ -134,6 +138,8 @@ jvm_library(
         # do not sort,
         ":statsCollector-tests",
         "//platform/ide-core:ide-core_test_lib",
+        "//platform/main/intellij.platform.monolith.main:monolith-main_test_lib",
+        "//community-resources:customization_test_lib",
         "//xml/plugin:plugin_test_lib",
     ],
     deps = [

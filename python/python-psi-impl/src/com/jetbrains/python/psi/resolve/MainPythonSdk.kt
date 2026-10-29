@@ -9,6 +9,7 @@ import com.intellij.psi.PsiElement
 import com.intellij.python.pyproject.model.evolution.findEvoPyProjectIfReady
 import com.intellij.python.pyproject.model.evolution.findMainEvoPyProjectIfReady
 import com.intellij.python.sdk.backend.getSdkAPI
+import com.jetbrains.python.sdk.legacy.PythonSdkUtil
 
 /**
  * The interpreter of the module at the project root, for a file that belongs to no module, such as a scratch file.
@@ -33,5 +34,12 @@ internal fun Project.mainPythonSdk(): Sdk? = findMainEvoPyProjectIfReady()?.inte
 @Suppress("DEPRECATION") // Resolve still reads the roots of an SDK.
 internal fun Module.pythonSdkIfReady(): Sdk? = findEvoPyProjectIfReady()?.interpreter?.getSdkAPI()
 
-/** [pythonSdkIfReady] for the module of this element, as `PythonSdkUtil.findPythonSdk(PsiElement)` found it. */
+/** [pythonSdkIfReady] for the module of this element. */
 internal fun PsiElement.pythonSdkIfReady(): Sdk? = ModuleUtilCore.findModuleForPsiElement(this)?.pythonSdkIfReady()
+
+/** Whether the file of [element] is in the skeletons of the interpreter of its module, see [pythonSdkIfReady]. */
+internal fun isElementInSkeletons(element: PsiElement): Boolean {
+  val virtualFile = element.containingFile?.virtualFile ?: return false
+  val sdk = element.pythonSdkIfReady() ?: return false
+  return PythonSdkUtil.isFileInSkeletons(virtualFile, sdk)
+}

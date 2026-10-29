@@ -2,51 +2,36 @@
 package com.intellij.openapi.editor.impl.marker
 
 import com.intellij.openapi.util.TextRange
+import com.intellij.openapi.util.TextRangeScalarUtil
 
 /**
- * Result of resolving a marker against one [PMarkerRoot].
+ * Packs marker offsets and state into a [Long]. The offsets use the layout from [TextRangeScalarUtil].
+ * An unused sign bit identifies invalid markers. Invalidation reasons remain in the [PMarkerRoot].
+ * [ABSENT] and [UNRESOLVED] have no offsets.
  */
-sealed class PMarkerResolution(startOffset: Int, endOffset: Int) : TextRange(startOffset, endOffset) {
-  /**
-   * Whether the marker is valid in the resolved root.
-   */
-  val isValid: Boolean
-    get() = this is Valid
+object PMarkerResolution {
+  /** No cached resolution is available. This value cannot represent a marker. */
+  const val UNRESOLVED: Long = -1L
 
-  /**
-   * Whether the marker is absent from the root.
-   */
-  val isAbsent: Boolean
-    get() = this is Absent
+  /** The marker is absent from the root. This value has no offsets. */
+  const val ABSENT: Long = -2L
 
-  /**
-   * A marker with usable offsets.
-   *
-   * The represented range is half-open:
-   *
-   *     [startOffset, endOffset)
-   */
-  class Valid(startOffset: Int, endOffset: Int) : PMarkerResolution(startOffset, endOffset)
+  private const val INVALID_FLAG: Long = 0x80000000L
+  private const val STATE_MASK: Long = INVALID_FLAG or Long.MIN_VALUE
 
-  /**
-   * A marker that exists but no longer has valid offsets in the resolved snapshot.
-   *
-   * The inherited range contains the offsets immediately before invalidation.
-   */
-  class Invalid(
-    val reason: String,
-    startOffset: Int,
-    endOffset: Int,
-  ) : PMarkerResolution(startOffset, endOffset) {
-    init {
-      require(reason.isNotBlank()) {
-        "reason must not be blank"
-      }
-    }
-  }
+  /** Returns a packed range for a valid marker with the half-open range `[startOffset, endOffset)`. */
+  fun valid(range:Long): Long = range
 
-  /**
-   * A marker that is not part of the root. The inherited range contains its last known or creation-time offsets.
-   */
-  class Absent(startOffset: Int, endOffset: Int) : PMarkerResolution(startOffset, endOffset)
+  /** Returns a packed range for an invalid marker with its offsets immediately before invalidation. */
+  fun invalid(range: Long): Long = range or INVALID_FLAG
+
+  fun isValid(range: Long): Boolean = range and STATE_MASK == 0L
+
+  fun isAbsent(range: Long): Boolean = range == ABSENT
+
+  fun startOffset(range: Long): Int = TextRangeScalarUtil.startOffset(range)
+
+  fun endOffset(range: Long): Int = TextRangeScalarUtil.endOffset(range)
+
+  fun toTextRange(range: Long): TextRange = TextRangeScalarUtil.create(range and INVALID_FLAG.inv())
 }

@@ -2,8 +2,9 @@
 package org.jetbrains.kotlin.idea.core.script.settings
 
 import com.intellij.diagnostic.rethrowControlFlowException
-import com.intellij.ide.BrowserUtil
 import com.intellij.icons.AllIcons
+import com.intellij.ide.BrowserUtil
+import com.intellij.ide.setToolTipText
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.ModalityState
@@ -11,6 +12,7 @@ import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.fileChooser.FileChooser
 import com.intellij.openapi.fileChooser.FileChooserDescriptor
 import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory
+import com.intellij.openapi.options.Configurable
 import com.intellij.openapi.options.SearchableConfigurable
 import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.project.Project
@@ -19,7 +21,6 @@ import com.intellij.openapi.ui.MessageType
 import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.ui.popup.Balloon
 import com.intellij.openapi.ui.popup.JBPopupFactory
-import com.intellij.ide.setToolTipText
 import com.intellij.openapi.ui.setEmptyState
 import com.intellij.openapi.util.NlsContexts
 import com.intellij.openapi.util.text.HtmlChunk
@@ -29,9 +30,9 @@ import com.intellij.platform.ide.progress.ModalTaskOwner
 import com.intellij.platform.ide.progress.TaskCancellation
 import com.intellij.platform.ide.progress.runWithModalProgressBlocking
 import com.intellij.ui.CollectionListModel
-import com.intellij.ui.awt.RelativePoint
+import com.intellij.ui.ScrollPaneFactory
 import com.intellij.ui.ToolbarDecorator
-import com.intellij.ui.components.JBLabel
+import com.intellij.ui.awt.RelativePoint
 import com.intellij.ui.components.JBList
 import com.intellij.ui.components.panels.Wrapper
 import com.intellij.ui.dsl.builder.Align
@@ -43,21 +44,24 @@ import com.intellij.ui.dsl.builder.panel
 import com.intellij.ui.dsl.gridLayout.UnscaledGaps
 import com.intellij.ui.dsl.gridLayout.UnscaledGapsY
 import com.intellij.ui.table.TableView
-import com.intellij.util.ui.JBFont
 import com.intellij.util.ui.JBUI
-import com.intellij.util.ui.UIUtil
 import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
 import org.jetbrains.kotlin.idea.configuration.KOTLIN_SCRIPTING_SETTINGS_ID
 import org.jetbrains.kotlin.idea.core.script.KotlinBaseScriptingBundle
 import org.jetbrains.kotlin.idea.core.script.configurations.KotlinScriptService
 import org.jetbrains.kotlin.idea.core.script.statistics.KotlinScriptingSettingsCollector
+import java.awt.BorderLayout
 import java.awt.Component
 import java.awt.Dimension
+import java.awt.Rectangle
 import javax.swing.DefaultListCellRenderer
-import javax.swing.JList
 import javax.swing.JButton
 import javax.swing.JComponent
+import javax.swing.JList
+import javax.swing.JPanel
 import javax.swing.ListSelectionModel
+import javax.swing.Scrollable
+import javax.swing.SwingConstants
 import javax.swing.event.ListDataEvent
 import javax.swing.event.ListDataListener
 
@@ -68,7 +72,12 @@ private val reloadDisabledTooltip: HtmlChunk
 
 internal const val DISCOVERY_DOCUMENTATION_URL: String = "https://kotlinlang.org/docs/custom-script-deps-tutorial.html"
 
-internal class KotlinScriptingSettingsConfigurable(val project: Project) : SearchableConfigurable {
+/**
+ * The settings page owns its scroll pane, so the page always takes the width of the viewport. A wider
+ * page would push the Reload button past the right edge.
+ */
+internal class KotlinScriptingSettingsConfigurable(val project: Project) : SearchableConfigurable, Configurable.NoScroll,
+                                                                         Configurable.NoMargin {
 
     private val tableView = TableView(ScriptDefinitionTable(mutableListOf())).apply {
         // A header and a column grid read as a spreadsheet. A definition row carries its own detail.
@@ -139,7 +148,7 @@ internal class KotlinScriptingSettingsConfigurable(val project: Project) : Searc
                         .align(Align.FILL)
                 }.customize(UnscaledGapsY(top = 12))
                 row {
-                    cell(hint(KotlinBaseScriptingBundle.message("script.definitions.precedence.comment")))
+                    comment(KotlinBaseScriptingBundle.message("script.definitions.precedence.comment"))
                 }.customize(UnscaledGapsY(top = 8))
 
                 group(KotlinBaseScriptingBundle.message("manual.loading.title"), indent = false) {
@@ -158,11 +167,14 @@ internal class KotlinScriptingSettingsConfigurable(val project: Project) : Searc
         }
 
 
+        // The margin that the settings dialog gives a GridLayout page it scrolls itself.
+        panel.border = JBUI.Borders.empty(5, 16, 10, 16)
+
         installDirtyListeners()
         bindCompactHeight(definitionClassesList, definitionClassesModel, definitionClassesPanel)
         bindCompactHeight(classpathList, classpathModel, classpathPanel)
         reset()
-        return panel
+        return ScrollPaneFactory.createScrollPane(ViewportWidthPanel(panel), true)
     }
 
     override fun reset() {
@@ -308,12 +320,12 @@ internal class KotlinScriptingSettingsConfigurable(val project: Project) : Searc
 
     private fun Panel.definitionField(
         @NlsContexts.Label labelText: String,
-        @NlsContexts.Label hintText: String,
+        @NlsContexts.DetailedDescription hintText: String,
         editor: JComponent,
     ) {
         row {
             label(labelText).customize(UnscaledGaps(right = 8))
-            cell(hint(hintText))
+            comment(hintText).resizableColumn()
         }.customize(UnscaledGapsY(top = 16))
         row { cell(editor).align(AlignX.FILL) }.customize(UnscaledGapsY(top = 4))
     }
@@ -324,11 +336,6 @@ internal class KotlinScriptingSettingsConfigurable(val project: Project) : Searc
         ): Component = super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus).apply {
             (this as JComponent).border = JBUI.Borders.empty(2, DEFINITION_ROW_LEFT_INSET)
         }
-    }
-
-    private fun hint(@NlsContexts.Label text: String): JBLabel = JBLabel(text).apply {
-        font = JBFont.small()
-        foreground = UIUtil.getContextHelpForeground()
     }
 
     private fun addDefinitionClass() {
@@ -406,4 +413,22 @@ internal class KotlinScriptingSettingsConfigurable(val project: Project) : Searc
         )?.trim()?.takeIf { it.isNotEmpty() } ?: return
         classpathModel.setElementAt(edited, index)
     }
+}
+
+/** Takes the width of the viewport, so the content wraps instead of scrolling sideways. Below its minimum it scrolls. */
+private class ViewportWidthPanel(content: JComponent) : JPanel(BorderLayout()), Scrollable {
+    init {
+        add(content)
+    }
+
+    override fun getPreferredScrollableViewportSize(): Dimension = preferredSize
+
+    override fun getScrollableUnitIncrement(visibleRect: Rectangle, orientation: Int, direction: Int): Int = JBUI.scale(16)
+
+    override fun getScrollableBlockIncrement(visibleRect: Rectangle, orientation: Int, direction: Int): Int =
+        if (orientation == SwingConstants.VERTICAL) visibleRect.height else visibleRect.width
+
+    override fun getScrollableTracksViewportWidth(): Boolean = (parent?.width ?: 0) >= minimumSize.width
+
+    override fun getScrollableTracksViewportHeight(): Boolean = false
 }

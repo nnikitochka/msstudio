@@ -15,11 +15,13 @@ import com.jetbrains.python.psi.PyDecoratorList;
 import com.jetbrains.python.psi.PyFile;
 import com.jetbrains.python.psi.PyFunction;
 import com.jetbrains.python.psi.PyKnownDecoratorUtil;
+import com.jetbrains.python.psi.PyKnownDecorators;
 import com.jetbrains.python.psi.PyNamedParameter;
 import com.jetbrains.python.psi.PyTypedElement;
 import com.jetbrains.python.psi.impl.ParamHelper;
 import com.jetbrains.python.psi.impl.PyCallExpressionHelper;
 import com.jetbrains.python.psi.types.PyAnyType;
+import com.jetbrains.python.psi.types.PyCallableArgument;
 import com.jetbrains.python.psi.types.PyCallableParameter;
 import com.jetbrains.python.psi.types.PyCallableParameterImpl;
 import com.jetbrains.python.psi.types.PyCallableType;
@@ -29,7 +31,6 @@ import com.jetbrains.python.psi.types.PyClassTypeImpl;
 import com.jetbrains.python.psi.types.PyConcatenateType;
 import com.jetbrains.python.psi.types.PyParamSpecType;
 import com.jetbrains.python.psi.types.PyType;
-import com.jetbrains.python.psi.types.PyCallableArgument;
 import com.jetbrains.python.psi.types.PyTypeChecker;
 import com.jetbrains.python.psi.types.PyTypeProviderBase;
 import com.jetbrains.python.psi.types.TypeEvalContext;
@@ -70,7 +71,7 @@ public final class PyDecoratedFunctionTypeProvider extends PyTypeProviderBase {
     // are skipped too.
     for (int i = decorators.length - 1; i >= 0; i--) {
       PyDecorator decorator = decorators[i];
-      if (!PyKnownDecoratorUtil.asKnownDecorators(decorator, context).isEmpty()) continue;
+      if (PyKnownDecoratorUtil.knownDecoratorsOf(decorator, context).isKnown()) continue;
 
       List<PyCallableParameter> expectedParams = getExpectedFunctionParameters(decorator, context);
       if (expectedParams == null) continue;
@@ -88,7 +89,7 @@ public final class PyDecoratedFunctionTypeProvider extends PyTypeProviderBase {
       // When the expected parameter type is a free type variable of a generic decorator, bind it from the
       // type the surrounding decorator chain expects of this decorator's result.
       if (type != null && PyTypeChecker.hasGenerics(type, context)) {
-        PyType resolved = resolveGenericParamFromDecoratorChain(func, decorators, i, decorator, type, context);
+        PyType resolved = resolveGenericParamFromDecoratorChain(func, decorators, i, type, context);
         if (resolved != null) type = resolved;
       }
       return type != null ? Ref.create(type) : null;
@@ -104,13 +105,12 @@ public final class PyDecoratedFunctionTypeProvider extends PyTypeProviderBase {
   private static @Nullable PyType resolveGenericParamFromDecoratorChain(@NotNull PyDecoratable decorated,
                                                                         PyDecorator @NotNull [] decorators,
                                                                         int decoratorIndex,
-                                                                        @NotNull PyDecorator decorator,
                                                                         @NotNull PyType expectedParamType,
                                                                         @NotNull TypeEvalContext context) {
     PyType expectedResultType = expectedResultType(decorated, decorators, decoratorIndex, context);
     if (expectedResultType == null) return null;
 
-    PyCallableType decoratorType = getDecoratorType(decorator, null, context);
+    PyCallableType decoratorType = getDecoratorType(decorators[decoratorIndex], null, context);
     PyType decoratorReturnType = decoratorType != null ? decoratorType.getReturnType(context) : null;
     return bindGenerics(decoratorReturnType, expectedResultType, expectedParamType, context);
   }
@@ -196,9 +196,10 @@ public final class PyDecoratedFunctionTypeProvider extends PyTypeProviderBase {
   private static boolean isTransparentDecorator(@NotNull PyDecoratable decorated,
                                                 @NotNull PyDecorator decorator,
                                                 @NotNull TypeEvalContext context) {
-    return !PyKnownDecoratorUtil.asKnownDecorators(decorator, context).isEmpty()
-           || isUntypedDecorator(decorator, context)
-           || decorated instanceof PyClass && PyDataclassTransformResolverKt.isDataclassTransform(decorator, context);
+    PyKnownDecorators knownDecorators = PyKnownDecoratorUtil.knownDecoratorsOf(decorator, context);
+    if (knownDecorators.isKnown()) return true;
+    if (isUntypedDecorator(decorator, context)) return true;
+    return decorated instanceof PyClass && PyDataclassTransformResolverKt.isDataclassTransform(decorator, context);
   }
 
   private static boolean isUntypedDecorator(@NotNull PyDecorator decorator, @NotNull TypeEvalContext context) {
@@ -231,16 +232,12 @@ public final class PyDecoratedFunctionTypeProvider extends PyTypeProviderBase {
                                                     @NotNull TypeEvalContext context,
                                                     @NotNull List<PyDecorator> decorators) {
     @Nullable PyCallableType currentType = null;
+    PyType undecoratedType = context.getType((PyTypedElement)referenceTarget);
 
     for (int i = decorators.size() - 1; i >= 0; i--) {
       PyDecorator decorator = decorators.get(i);
-      PyType argument;
-      if (currentType != null) {
-        argument = currentType;
-      }
-      else {
-        argument = context.getType((PyTypedElement)referenceTarget);
-      }
+      // The innermost decorator wraps the element itself; each outer one wraps what the previous returned.
+      PyType argument = currentType != null ? currentType : undecoratedType;
 
       PyCallableType decoratorType = getDecoratorType(decorator, argument, context);
       if (decoratorType != null) {
@@ -279,13 +276,7 @@ public final class PyDecoratedFunctionTypeProvider extends PyTypeProviderBase {
         return getDecoratorCallType(decorator, typedElement, context);
       }
 
-      List<PyFunction> overloads;
-      if (typedElement instanceof PyFunction resolvedFunction) {
-        overloads = PyiUtil.getOverloads(resolvedFunction, context);
-      }
-      else {
-        overloads = Collections.emptyList();
-      }
+      List<PyFunction> overloads = overloadsOf(typedElement, context);
       return getDecoratorCalleeType(typedElement, Collections.singletonList(new PyCallableArgument(decoratedFunctionType)), overloads,
                                     context);
     }
@@ -293,14 +284,15 @@ public final class PyDecoratedFunctionTypeProvider extends PyTypeProviderBase {
     return null;
   }
 
+  private static @NotNull List<PyFunction> overloadsOf(@NotNull PyTypedElement typedElement, @NotNull TypeEvalContext context) {
+    return typedElement instanceof PyFunction function ? PyiUtil.getOverloads(function, context) : Collections.emptyList();
+  }
+
   private static @Nullable PyCallableType getDecoratorCallType(@NotNull PyDecorator decorator,
                                                                @NotNull PyTypedElement typedElement,
                                                                @NotNull TypeEvalContext context) {
     PyType typedElementType = context.getType(typedElement);
-    List<PyFunction> overloads = Collections.emptyList();
-    if (typedElement instanceof PyFunction resolvedFunction) {
-      overloads = PyiUtil.getOverloads(resolvedFunction, context);
-    }
+    List<PyFunction> overloads = overloadsOf(typedElement, context);
 
 
     // Shortcircuit:

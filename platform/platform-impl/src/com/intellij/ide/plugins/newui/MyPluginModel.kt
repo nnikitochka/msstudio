@@ -108,6 +108,7 @@ open class MyPluginModel @JvmOverloads constructor(
   private val myUninstalled: MutableSet<PluginId> = HashSet()
   private val myPluginManagerCustomizer: PluginManagerCustomizer?
   private val myEventPublisher = PluginModelEventPublisher(eventSink)
+  internal val updateSourceFilter = PluginUpdateSourceFilter()
 
   private var myInstallSource: FUSEventSource? = null
 
@@ -186,6 +187,7 @@ open class MyPluginModel @JvmOverloads constructor(
       throw ConfigurationException(XmlStringUtil.wrapInHtml(error)).withHtmlMessage()
     }
     applyResult.pluginsToEnable.forEach { id -> super.setEnabled(id, PluginEnabledState.ENABLED) }
+    updateSourceFilter.clear()
     myUninstalled.clear()
     updateButtons(applyResult)
     myPluginManagerCustomizer?.updateAfterModificationAsync {}
@@ -195,6 +197,7 @@ open class MyPluginModel @JvmOverloads constructor(
 
   fun clear(parentComponent: JComponent?) {
     UiPluginManager.getInstance().resetSession(mySessionId.toString(), false, parentComponent) {
+      updateSourceFilter.clear()
       applyChangedStates(it.changedEnabledStates)
       updateEnabledStateInUi()
       applyChangedUpdateSourcesToUI(it.updateSourceStatesToRevert)
@@ -204,6 +207,7 @@ open class MyPluginModel @JvmOverloads constructor(
 
   fun cancel(parentComponent: JComponent?, removeSession: Boolean): Job {
     return UiPluginManager.getInstance().resetSession(mySessionId.toString(), removeSession, parentComponent) {
+      updateSourceFilter.clear()
       applyChangedStates(it.changedEnabledStates)
       applyChangedUpdateSourcesToUI(it.updateSourceStatesToRevert)
       myEventPublisher.inventoryInvalidated(PluginInventoryChangeReason.RESET)
@@ -754,19 +758,19 @@ open class MyPluginModel @JvmOverloads constructor(
     }
   }
 
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   fun addDetailPanel(detailPanel: PluginDetailsPageComponent) {
     ThreadingAssertions.assertEventDispatchThread()
     myDetailPanels.add(detailPanel)
   }
 
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   fun removeDetailPanel(detailPanel: PluginDetailsPageComponent) {
     ThreadingAssertions.assertEventDispatchThread()
     myDetailPanels.remove(detailPanel)
   }
 
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   private fun forEachDetailPanel(action: (PluginDetailsPageComponent) -> Unit) {
     ThreadingAssertions.assertEventDispatchThread()
     for (panel in myDetailPanels.toList()) {
@@ -774,7 +778,7 @@ open class MyPluginModel @JvmOverloads constructor(
     }
   }
 
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   private suspend fun forEachDetailPanelSuspending(action: suspend (PluginDetailsPageComponent) -> Unit) {
     ThreadingAssertions.assertEventDispatchThread()
     for (panel in myDetailPanels.toList()) {

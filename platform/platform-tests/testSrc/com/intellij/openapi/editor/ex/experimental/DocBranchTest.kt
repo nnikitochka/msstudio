@@ -3,7 +3,7 @@ package com.intellij.openapi.editor.ex.experimental
 
 import com.intellij.openapi.editor.ex.DocumentOp
 import com.intellij.openapi.editor.ex.DocumentText
-import com.intellij.openapi.util.TextRange
+import com.intellij.openapi.editor.ex.applyOp
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotSame
@@ -147,7 +147,7 @@ class DocBranchTest {
     val base = DocumentBranch.createBranch("abc", agent("a"))
     val sameStamp = modStampOp(base.modState().stamp(), false)
     // A new branch has no modified lines to clear.
-    val noModifiedLines = unmodifiedLinesOp(0, 1, IntArray(0))
+    val noModifiedLines = cleanLinesOp(0, 1, IntArray(0))
     assertSame(base, base.applyOp(sameStamp))
     assertSame(base, base.applyOp(noModifiedLines))
   }
@@ -778,12 +778,12 @@ internal fun modStampOp(stamp: Long, incSequence: Boolean): DocumentOp.ModStamp 
   return DocumentOp.modStampOp(stamp, incSequence)
 }
 
-internal fun unmodifiedLinesOp(
+internal fun cleanLinesOp(
   startLine: Int,
   endLine: Int,
   exceptLines: IntArray,
-): DocumentOp.UnmodifiedLines {
-  return DocumentOp.unmodifiedLinesOp(startLine, endLine, exceptLines)
+): DocumentOp.CleanLines {
+  return DocumentOp.cleanLinesOp(startLine, endLine, exceptLines)
 }
 
 /**
@@ -876,9 +876,8 @@ private fun pairedDeleteOf(op: DocumentOp.Text, after: DocumentText): DocumentOp
   return when (op) {
     is DocumentOp.Insert -> {
       val sourceStart = op.moveOffset()
-      val source = TextRange(sourceStart, sourceStart + op.length())
       val fragment = op.fragment().toString()
-      assertEquals(fragment, after.string(source)) { "the source of $op" }
+      assertEquals(fragment, after.string(sourceStart, sourceStart + op.length())) { "the source of $op" }
       DocumentOp.deleteOp(op.moveOffset(), op.length(), op.offset())
     }
     is DocumentOp.Delete -> fail("a move delete without its insert: $op")
@@ -899,7 +898,7 @@ internal fun assertSameText(expected: DocumentText, actual: DocumentText) {
     assertEquals(expected.lineNumber(offset), actual.lineNumber(offset)) { "lineNumber($offset)" }
   }
   if (expected.length() > 2) {
-    val range = TextRange(1, expected.length() - 1)
-    assertEquals(expected.string(range), actual.string(range))
+    val endOffset = expected.length() - 1
+    assertEquals(expected.string(1, endOffset), actual.string(1, endOffset))
   }
 }

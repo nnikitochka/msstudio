@@ -2,12 +2,7 @@ package com.intellij.database.run.ui.table;
 
 import com.intellij.database.DataGridBundle;
 import com.intellij.database.datagrid.DataGrid;
-import com.intellij.database.datagrid.GridColumn;
-import com.intellij.database.datagrid.GridRow;
-import com.intellij.database.datagrid.ModelIndexSet;
 import com.intellij.database.datagrid.ResultView;
-import com.intellij.database.datagrid.SelectionModel;
-import com.intellij.database.datagrid.SelectionModelUtil;
 import com.intellij.database.run.ui.ResultViewFactory;
 import com.intellij.database.util.DataGridUIUtil;
 import com.intellij.openapi.actionSystem.ActionGroup;
@@ -30,16 +25,12 @@ import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NotNull;
 
 import javax.swing.JComponent;
-import javax.swing.JTable;
 import javax.swing.ListSelectionModel;
-import javax.swing.SwingUtilities;
 import javax.swing.event.ListSelectionEvent;
 import javax.swing.event.ListSelectionListener;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Graphics;
-import java.awt.event.MouseAdapter;
-import java.awt.event.MouseEvent;
 import java.awt.event.MouseWheelEvent;
 
 public class TableResultViewFactory implements ResultViewFactory {
@@ -47,41 +38,19 @@ public class TableResultViewFactory implements ResultViewFactory {
 
   @Override
   public @NotNull ResultView createResultView(@NotNull DataGrid resultPanel, @NotNull ActionGroup columnHeaderActions, @NotNull ActionGroup rowHeaderActions) {
-    TableResultView table = new PrimaryTableResultView(resultPanel, columnHeaderActions, rowHeaderActions);
-    table.getEmptyText().setText(""); //DatabaseMessages.message("table.result.data.loading"));
-    table.setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION);
-    table.setCellSelectionEnabled(true);
-    table.setAutoResizeMode(JTable.AUTO_RESIZE_OFF);
-    table.setBackground(resultPanel.getColorsScheme().getDefaultBackground());
-    // fixes missing (or plain white) grid on mac
-    table.setShowGrid(true);
-
-    table.addMouseListener(new MouseAdapter() {
-      @Override
-      public void mousePressed(@NotNull MouseEvent e) {
-        if (SwingUtilities.isRightMouseButton(e)) {
-          int rowIndex = table.isTransposed() ? table.columnAtPoint(e.getPoint()) : table.rowAtPoint(e.getPoint());
-          int columnIndex = table.isTransposed() ? table.rowAtPoint(e.getPoint()) : table.columnAtPoint(e.getPoint());
-          if (rowIndex >= 0 && columnIndex >= 0 && !table.isCellSelected(rowIndex, columnIndex)) {
-            int modelRow = table.getRawIndexConverter().row2Model().applyAsInt(rowIndex);
-            int modelColumn = table.getRawIndexConverter().column2Model().applyAsInt(columnIndex);
-            SelectionModel<GridRow, GridColumn> selectionModel = resultPanel.getSelectionModel();
-            selectionModel.setSelection(ModelIndexSet.forRows(resultPanel, modelRow), ModelIndexSet.forColumns(resultPanel, modelColumn));
-          }
-        }
-      }
-    });
-
-    return table;
+    return new TableResultView(resultPanel, columnHeaderActions, rowHeaderActions);
   }
 
   @Override
   public @NotNull JComponent wrap(@NotNull DataGrid grid, @NotNull ResultView resultView) {
-    TableResultView table = (TableResultView)resultView;
+    return ((TableResultView)resultView).getScrollPane();
+  }
+
+  static TableScrollPane createScrollPane(DataGrid grid, GridTable table, TableResultView view) {
     Ref<Boolean> myTransparentHeaderBg = new Ref<>(false);
     MyCornerToolsComponent cornerComponent = new MyCornerToolsComponent(grid.getProject()) {
       @Override
-      TableResultView getTable() {
+      GridTable getTable() {
         return table;
       }
 
@@ -99,11 +68,21 @@ public class TableResultViewFactory implements ResultViewFactory {
 
     TableScrollPane scrollPane = new TableScrollPane(table, grid, cornerComponent, grid.getAutoscrollLocker()) {
       @Override
+      public boolean requestFocusInWindow() {
+        return table.requestFocusInWindow();
+      }
+
+      @Override
+      public void requestFocus() {
+        table.requestFocus();
+      }
+
+      @Override
       protected void processMouseWheelEvent(MouseWheelEvent e) {
         if (EditorSettingsExternalizable.getInstance().isWheelFontChangeEnabled() &&
             !MouseGestureManager.getInstance().hasTrackpad() && EditorUtil.isChangeFontSize(e)) {
           int rotation = e.getWheelRotation();
-          if (rotation != 0) table.changeFontSize(-rotation, 1);
+          if (rotation != 0) view.changeFontSize(-rotation, 1);
           return;
         }
         super.processMouseWheelEvent(e);
@@ -111,12 +90,12 @@ public class TableResultViewFactory implements ResultViewFactory {
 
       @Override
       public void paint(Graphics g) {
-        table.startPaintingSession();
+        view.startPaintingSession();
         try {
           super.paint(g);
         }
         finally {
-          table.endPaintingSession();
+          view.endPaintingSession();
         }
       }
     };
@@ -145,7 +124,7 @@ public class TableResultViewFactory implements ResultViewFactory {
       view.setBorder(IdeBorderFactory.createBorder(SideBorder.BOTTOM | SideBorder.RIGHT));
     }
 
-    abstract TableResultView getTable();
+    abstract GridTable getTable();
 
     abstract DataGrid getGrid();
 
@@ -162,7 +141,7 @@ public class TableResultViewFactory implements ResultViewFactory {
       }
       else {
         getGrid().getAutoscrollLocker().runWithLock(() -> {
-          TableSelectionModel model = ObjectUtils.tryCast(SelectionModelUtil.get(getGrid(), getTable()), TableSelectionModel.class);
+          TableSelectionModel model = ObjectUtils.tryCast(getTable().gridSelectionModel(), TableSelectionModel.class);
           if (model != null) {
             model.setRowSelectionInterval(0, getTable().getRowCount());
             model.setColumnSelectionInterval(0, getTable().getColumnCount());

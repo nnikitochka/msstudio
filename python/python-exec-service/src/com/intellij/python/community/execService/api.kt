@@ -30,6 +30,7 @@ import com.intellij.util.concurrency.annotations.RequiresBackgroundThread
 import com.jetbrains.python.PythonBinary
 import com.jetbrains.python.Result
 import com.jetbrains.python.errorProcessing.ExecError
+import com.jetbrains.python.errorProcessing.MessageError
 import com.jetbrains.python.errorProcessing.PyResult
 import com.jetbrains.python.venvReader.Directory
 import org.jetbrains.annotations.ApiStatus
@@ -306,7 +307,7 @@ data class UploadConfig(
  * To download a directory that is not the working directory, see [DirScope.downloadAfterExecution].
  */
 data class ExecOptions(
-  override val env: Map<String, String> = emptyMap(),
+  override val env: List<EnvVar> = emptyList(),
   override val processDescription: @Nls String? = null,
   val timeout: Duration = 5.minutes,
   override val tty: TtySize? = null,
@@ -322,7 +323,7 @@ data class ExecOptions(
  * Do not remove the `emptyMap()` argument. It selects the real constructor.
  * Without it this initializer calls the function below and reads an uninitialized value.
  */
-private val defaultExecOptions = ExecOptions(emptyMap())
+private val defaultExecOptions = ExecOptions(emptyList())
 
 /**
  * Returns the shared default [ExecOptions] instead of a new instance.
@@ -335,12 +336,18 @@ fun ExecOptions(): ExecOptions = defaultExecOptions
  * See [ExecOptions]
  */
 data class ExecGetProcessOptions(
-  override val env: Map<String, String> = emptyMap(),
+  override val env: List<EnvVar> = emptyList(),
   override val processDescription: @Nls String? = null,
   override val tty: TtySize? = null,
   override val uploadBeforeExecution: UploadConfig? = null,
   override val downloadAfterExecution: DownloadConfig? = null,
-) : ExecOptionsBase
+) : ExecOptionsBase {
+  @Deprecated("Use the one with envVars")
+  constructor(
+    env: Map<String, String>,
+    tty: TtySize? = null,
+  ) : this(env = env.toEnvVars(), tty = tty)
+}
 
 /**
  * The default [ExecGetProcessOptions].
@@ -349,7 +356,7 @@ data class ExecGetProcessOptions(
  * Do not remove the `emptyMap()` argument. It selects the real constructor.
  * Without it this initializer calls the function below and reads an uninitialized value.
  */
-private val defaultExecGetProcessOptions = ExecGetProcessOptions(emptyMap())
+private val defaultExecGetProcessOptions = ExecGetProcessOptions(emptyList())
 
 /**
  * Returns the shared default [ExecGetProcessOptions] instead of a new instance.
@@ -361,7 +368,7 @@ data class TtySize(val rows: UShort, val cols: UShort)
 
 
 /**
- * When we uploaded a [Args.addLocalFile] to a remote machine, how should we report it to a process?
+ * When we uploaded a [Args.addPath] to a remote machine, how should we report it to a process?
  */
 fun interface FileReporter {
   /**
@@ -372,7 +379,7 @@ fun interface FileReporter {
 }
 
 /**
- * Local file provided to [Args.addLocalFile] will magically be available on a remote side.
+ * Local file provided to [Args.addPath] will magically be available on a remote side.
  * How would you like to pass it to a binary?
  */
 sealed interface HowToReportFile {
@@ -384,7 +391,7 @@ sealed interface HowToReportFile {
   /**
    * As a value of env variable [varName]
    */
-  class EnvVar(internal val varName: String) : HowToReportFile
+  class AsEnvVar(internal val varName: String) : HowToReportFile
 }
 
 
@@ -414,8 +421,8 @@ interface DirScope {
 /**
  * ```kotlin
  *   val args = Args()
- *   args.addLocalFile(helper)
- *   args.addTextArgs("-v")
+ *   args.addPath(helper)
+ *   args.addArgs("-v")
  * ```
  */
 class Args(vararg initialArgs: String) {
@@ -428,11 +435,12 @@ class Args(vararg initialArgs: String) {
   fun addArgs(args: List<String>): Args = addArgs(*args.toTypedArray())
 
   /**
-   * This file will be copied to remote machine, and its remote name will be added to the list of arguments or env.
+   * If [path] is on the eel that runs the process, the eel path (without the MRFS prefix) is reported.
+   * If this file is local and eel is remote, it will be copied to remote machine, and its remote name will be added to the list of arguments or env.
    * Use [fileReporter] to control it.
    */
-  fun addLocalFile(localFile: Path, fileReporter: FileReporter = FileReporter { Pair(it, HowToReportFile.AnArgument) }): Args {
-    _args.add(Arg.FileArg(localFile, fileReporter))
+  fun addPath(path: Path, fileReporter: FileReporter = FileReporter { Pair(it, HowToReportFile.AnArgument) }): Args {
+    _args.add(Arg.FileArg(path, fileReporter))
     return this
   }
 
@@ -480,7 +488,7 @@ class Args(vararg initialArgs: String) {
   }
 
   /**
-   * Arguments from [addLocalFile] and [addLocalDir].
+   * Arguments from [addPath] and [addLocalDir].
    */
   internal val localArgs: List<Arg.LocalArg>
     get() = _args.mapNotNull {
@@ -493,7 +501,7 @@ class Args(vararg initialArgs: String) {
   /**
    * An eel or a target implementation calls this function. It must supply an [Uploader].
    */
-  internal suspend fun getArgsAndEnv(uploader: Uploader): ArgsAndEnv = ArgsAndEnv.create(_args, uploader)
+  internal suspend fun getArgsAndEnv(uploader: Uploader): Result<ArgsAndEnv, MessageError> = ArgsAndEnv.create(_args, uploader)
 }
 
 
@@ -501,3 +509,47 @@ fun BinaryToExec.asGeneralCommandLine(): PyResult<GeneralCommandLine> = when (th
   is BinOnEel -> PyResult.success(GeneralCommandLine(path.toString()).withWorkingDirectory(workDir?.asNioPath()))
   is BinOnTarget -> PyResult.localizedError(message("py.exec.target.binaries.are.not.supported"))
 }
+
+
+/**
+ * Environment variable with [name] and [value].
+ * The API represents vars a list of this class. They will be merged right before execution.
+ * [name] is case-sensitive on POSIX and insensitive on Windows (the platform we execute the code on is taken into account)
+ * The merge logic depends on the [value] type.
+ */
+data class EnvVar(internal val name: String, internal val value: EnvVarVal) {
+  constructor(name: String, value: String) : this(name, EnvVarVal.BareStr(value))
+}
+
+/**
+ * Possible values for [EnvVar]
+ */
+sealed interface EnvVarVal {
+  /**
+   * Just a bare string: latter will rewrite the former.
+   */
+  data class BareStr(internal val str: String) : EnvVarVal
+
+  /**
+   * A path on the eel/target we execute command on (e.g. `/foo/`). [com.intellij.platform.util.annotations.paths.OsPath] string.
+   * These paths will be merged using os-specific separator.
+   *
+   * Only use if you have no [Path]. Use [NioPath] otherwise.
+   */
+  data class RemotePath(internal val path: FullPathOnTarget) : EnvVarVal
+
+  /**
+   * Same as [RemotePath], but also converts [path] to the right format. The preferred approach to represent paths.
+   */
+  data class NioPath(internal val path: Path) : EnvVarVal
+}
+
+/**
+ * Add[name] and [value] ([EnvVarVal.BareStr]) and return a new list
+ */
+fun List<EnvVar>.withVar(name: String, value: String): List<EnvVar> = this + listOf(EnvVar(name, value))
+
+/**
+ * Give a map of string/string ([EnvVarVal.BareStr]) convert it a list of [EnvVar] for an API.
+ */
+fun Map<String, String>.toEnvVars(): List<EnvVar> = map { EnvVar(it.key, it.value) }

@@ -1,0 +1,257 @@
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+package com.intellij.platform.util.io.storages.database.storages.appenablerecords;
+
+import com.intellij.platform.util.io.storages.database.spi.BlocksDatabaseFactory;
+import com.intellij.platform.util.io.storages.database.spi.BlocksStore;
+import com.intellij.util.io.CorruptedException;
+import org.jetbrains.annotations.NotNull;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import java.io.IOException;
+import java.lang.foreign.MemorySegment;
+import java.lang.foreign.ValueLayout;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+public class AppendableRecordsOverBlockTest {
+  private static final int CHUNK_SIZE = 1024 * 1024;
+  private static final int ARBITRARY_BLOCK_ROLE = 42;
+  private static final int BLOCK_CONTENT_LENGTH = 64;
+
+  @Test
+  public void createActivatesAllocatedBlock() {
+    var block = new TestBlock(BLOCK_CONTENT_LENGTH);
+
+    var log = AppendableRecordsOverBlock.create(block);
+
+    assertSame(block, log.block());
+    assertEquals(BlocksStore.Block.LifecycleState.ACTIVE, block.state());
+  }
+
+  @Test
+  public void failedCreateDiscardsAllocatedBlock() {
+    var contentLength = AppendableRecordsOverBlock.minimumBlockContentLengthFor(0) - 1;
+    var block = new TestBlock(contentLength);
+
+    assertThrows(IllegalArgumentException.class, () -> AppendableRecordsOverBlock.create(block));
+
+    assertEquals(BlocksStore.Block.LifecycleState.RETIRED, block.state());
+  }
+
+  @Test
+  public void packedHeaderRecoversPayloadLengthForEachPaddingSize(@TempDir Path databaseDirectory) throws Exception {
+    assertEquals(Integer.BYTES, RecordHeaderLayout.HEADER_SIZE);
+    try (var database = new BlocksDatabaseFactory(CHUNK_SIZE).open(databaseDirectory)) {
+      var store = database.openStore("log", 1);
+      var block = store.allocateBlock(ARBITRARY_BLOCK_ROLE, BLOCK_CONTENT_LENGTH);
+      var log = AppendableRecordsOverBlock.create(block);
+
+      for (int payloadLength = 0; payloadLength < RecordHeaderLayout.RECORD_ALIGNMENT; payloadLength++) {
+        var recordOffset = log.append(payloadLength, _ -> { });
+        assertEquals(payloadLength, log.read(recordOffset).byteSize(), "The packed header must preserve the payload length");
+      }
+    }
+  }
+
+  @Test
+  public void packedHeaderUsesTheDocumentedBitFormat() {
+    var segment = MemorySegment.ofArray(new int[2]);
+    var recordOffset = Integer.BYTES;
+    var header = RecordHeaderLayout.RecordHeader.allocated(1);
+
+    assertFalse(header.isCommitted());
+    assertFalse(header.isTombstone());
+    assertFalse(header.hasLink());
+    assertEquals(3, header.paddingSize());
+    assertEquals(8, header.totalLength());
+    assertEquals(1, header.payloadLength());
+
+    header.writeAllocatedTo(segment, recordOffset);
+    assertEquals(0b10_011_000, (int)RecordHeaderLayout.PACKED_LENGTH_AND_FLAGS_HANDLE.get(segment, (long)recordOffset));
+
+    header.publishCommittedTo(segment, recordOffset);
+    assertTrue(header.isCommitted());
+    assertEquals(0b10_011_001, (int)RecordHeaderLayout.PACKED_LENGTH_AND_FLAGS_HANDLE.get(segment, (long)recordOffset));
+  }
+
+  @Test
+  public void committedPayloadSurvivesReopening(@TempDir Path databaseDirectory) throws Exception {
+    var factory = new BlocksDatabaseFactory(CHUNK_SIZE);
+    var expected = new byte[]{1, 2, 3, 4, 5};
+    int blockId;
+    int recordOffset;
+    try (var database = factory.open(databaseDirectory)) {
+      var store = database.openStore("log", 1);
+      var block = store.allocateBlock(ARBITRARY_BLOCK_ROLE, BLOCK_CONTENT_LENGTH);
+      var log = AppendableRecordsOverBlock.create(block);
+
+      recordOffset = log.append(expected.length, payload -> payload.copyFrom(MemorySegment.ofArray(expected)));
+      blockId = block.id();
+      assertArrayEquals(expected, log.read(recordOffset).toArray(ValueLayout.JAVA_BYTE));
+    }
+
+    try (var database = factory.open(databaseDirectory)) {
+      var store = database.findStore("log");
+      assertNotNull(store);
+      var block = store.findBlock(blockId);
+      assertNotNull(block);
+      var log = AppendableRecordsOverBlock.open(block);
+
+      assertArrayEquals(expected, log.read(recordOffset).toArray(ValueLayout.JAVA_BYTE));
+    }
+  }
+
+  @Test
+  public void optionalLinksPreservePayloadBoundariesAndAlignment(@TempDir Path databaseDirectory) throws Exception {
+    try (var database = new BlocksDatabaseFactory(CHUNK_SIZE).open(databaseDirectory)) {
+      var store = database.openStore("log", 1);
+      var block = store.allocateBlock(ARBITRARY_BLOCK_ROLE, BLOCK_CONTENT_LENGTH);
+      var log = AppendableRecordsOverBlock.create(block);
+      assertTrue(log.hasSpaceFor(1));
+
+      int firstOffset = log.append(1, payload -> payload.set(ValueLayout.JAVA_BYTE, 0, (byte)11));
+      int linkedOffset = log.append(1, 123L, payload -> payload.set(ValueLayout.JAVA_BYTE, 0, (byte)22));
+      var reopened = AppendableRecordsOverBlock.open(block);
+      assertEquals(0L, reopened.readRecord(firstOffset).previousRef());
+      assertEquals(123L, reopened.readRecord(linkedOffset).previousRef());
+      assertEquals(1L, reopened.readRecord(linkedOffset).payload().byteSize());
+      assertEquals(22, reopened.read(linkedOffset).get(ValueLayout.JAVA_BYTE, 0));
+
+      var values = new ArrayList<Byte>();
+      var allRecordsProcessed = reopened.forEachCommittedRecord((_, payload) -> {
+        values.add(payload.get(ValueLayout.JAVA_BYTE, 0));
+        return true;
+      });
+      assertTrue(allRecordsProcessed);
+      assertEquals(List.of((byte)11, (byte)22), values);
+
+      values.clear();
+      allRecordsProcessed = reopened.forEachCommittedRecord((_, payload) -> {
+        values.add(payload.get(ValueLayout.JAVA_BYTE, 0));
+        return false;
+      });
+      assertFalse(allRecordsProcessed);
+      assertEquals(List.of((byte)11), values);
+      assertEquals(8, RecordHeaderLayout.RecordHeader.totalLength(1));
+      assertEquals(16, RecordHeaderLayout.RecordHeader.totalLength(1, true));
+    }
+  }
+
+  @Test
+  public void failedAppendLeavesLifecycleDecisionToTheOwner(@TempDir Path databaseDirectory) throws Exception {
+    try (var database = new BlocksDatabaseFactory(CHUNK_SIZE).open(databaseDirectory)) {
+      var store = database.openStore("log", 1);
+      var block = store.allocateBlock(ARBITRARY_BLOCK_ROLE, BLOCK_CONTENT_LENGTH);
+      var log = AppendableRecordsOverBlock.create(block);
+
+      var failure = assertThrows(IOException.class, () -> log.append(8, _ -> {
+        throw new IOException("simulated failure");
+      }));
+
+      assertEquals("simulated failure", failure.getMessage());
+      assertTrue(log.hasIncompleteAllocation());
+      assertEquals(BlocksStore.Block.LifecycleState.ACTIVE, block.state(), "The block owner must decide its lifecycle state");
+      assertThrows(IllegalStateException.class, () -> log.append(1, _ -> { }));
+    }
+  }
+
+  @Test
+  public void openRejectsUncommittedRecordBeforeCommittedTail() throws Exception {
+    var block = new TestBlock(BLOCK_CONTENT_LENGTH);
+    var log = AppendableRecordsOverBlock.create(block);
+    var recordOffset = log.append(4, _ -> { });
+    log.append(4, _ -> { });
+    RecordHeaderLayout.RecordHeader.allocated(4).writeAllocatedTo(block.content(), recordOffset);
+
+    var failure = assertThrows(CorruptedException.class, () -> AppendableRecordsOverBlock.open(block));
+    assertTrue(failure.getMessage().contains("is not committed"), "Opening must validate earlier records, not only the tail");
+  }
+
+  @Test
+  public void openRejectsRecordBeyondCommittedTail() throws Exception {
+    var block = new TestBlock(BLOCK_CONTENT_LENGTH);
+    var log = AppendableRecordsOverBlock.create(block);
+    var recordOffset = log.append(0, _ -> { });
+    RecordHeaderLayout.RecordHeader.allocated(4).publishCommittedTo(block.content(), recordOffset);
+
+    var failure = assertThrows(CorruptedException.class, () -> AppendableRecordsOverBlock.open(block));
+    assertTrue(failure.getMessage().contains("exceeds the committed tail"), "A record must fit within the committed prefix");
+  }
+
+  @Test
+  public void openRejectsMissingRecordLink() throws Exception {
+    var block = new TestBlock(BLOCK_CONTENT_LENGTH);
+    var log = AppendableRecordsOverBlock.create(block);
+    var recordOffset = log.append(0, 123L, _ -> { });
+    block.content().set(ValueLayout.JAVA_LONG_UNALIGNED, recordOffset + RecordHeaderLayout.HEADER_SIZE, 0L);
+
+    var failure = assertThrows(CorruptedException.class, () -> AppendableRecordsOverBlock.open(block));
+    assertTrue(failure.getMessage().contains("Missing record link"), "Opening must validate links without creating record views");
+  }
+
+  private static final class TestBlock implements BlocksStore.Block {
+    private final MemorySegment content;
+    private LifecycleState state = LifecycleState.ALLOCATED;
+
+    private TestBlock(int contentLength) {
+      content = MemorySegment.ofArray(new int[(contentLength + Integer.BYTES - 1) / Integer.BYTES]).asSlice(0, contentLength);
+    }
+
+    @Override
+    public int id() {
+      return 1;
+    }
+
+    @Override
+    public int role() {
+      return ARBITRARY_BLOCK_ROLE;
+    }
+
+    @Override
+    public @NotNull LifecycleState state() {
+      return state;
+    }
+
+    @Override
+    public @NotNull MemorySegment content() {
+      return content;
+    }
+
+    @Override
+    public void activate() {
+      transition(LifecycleState.ALLOCATED, LifecycleState.ACTIVE);
+    }
+
+    @Override
+    public void discard() {
+      transition(LifecycleState.ALLOCATED, LifecycleState.RETIRED);
+    }
+
+    @Override
+    public void seal() {
+      transition(LifecycleState.ACTIVE, LifecycleState.SEALED);
+    }
+
+    @Override
+    public void retire() {
+      transition(LifecycleState.SEALED, LifecycleState.RETIRED);
+    }
+
+    private void transition(LifecycleState expected, LifecycleState target) {
+      if (state != expected) {
+        throw new IllegalStateException("Block state is " + state + ", expected " + expected);
+      }
+      state = target;
+    }
+  }
+}

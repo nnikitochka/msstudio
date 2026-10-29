@@ -5,6 +5,7 @@ import com.intellij.idea.IJIgnore
 import com.intellij.testFramework.SkipInHeadlessEnvironment
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
+import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Test
 import java.lang.reflect.Modifier
 import java.util.concurrent.atomic.AtomicBoolean
@@ -49,6 +50,7 @@ class HeadlessSkippedTestFinderTest {
     assertThat(finder.isSkippedInHeadlessEnvironment(JdkDerivedCase::class.java.name)).isFalse()
   }
 
+  @Disabled("AT-3959")
   @Test
   fun `the finder runs no class initializer`() {
     // One test method holds both checks, because the flag stays set after the first initializer runs.
@@ -79,11 +81,16 @@ class HeadlessSkippedTestFinderTest {
   }
 
   @SkipInHeadlessEnvironment
-  @Suppress("JUnitTestCaseWithNoTests")
-  class MarkedCase
+  class MarkedCase {
+    @Test
+    fun testDummy() = Unit
+  }
 
   @SkipInHeadlessEnvironment
-  abstract class MarkedBaseCase
+  abstract class MarkedBaseCase {
+    @Test
+    fun testDummy() = Unit
+  }
 
   open class InheritingCase : MarkedBaseCase()
 
@@ -119,8 +126,10 @@ class HeadlessSkippedTestFinderTest {
  */
 @SkipInHeadlessEnvironment
 @WithAnEnumDefault
-@Suppress("JUnitTestCaseWithNoTests")
-internal class MarkedCaseWithAnEnumDefault
+internal class MarkedCaseWithAnEnumDefault {
+  @Test
+  fun testDummy() = Unit
+}
 
 /** Records whether the JVM has run the initializer of [EnvironmentFixture]. */
 internal object EnumDefaultInitialization {

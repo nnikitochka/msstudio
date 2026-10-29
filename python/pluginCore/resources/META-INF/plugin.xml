@@ -66,8 +66,6 @@ The Python plug-in provides smart editing for Python scripts. The feature set of
     <module name="intellij.python.ruff.frontend"/>
     <module name="intellij.python.ty.common"/>
     <module name="intellij.python.ty.frontend"/>
-    <module name="intellij.python.zuban.common"/>
-    <module name="intellij.python.zuban.frontend"/>
 
     <!-- Backend-only modules: load only when intellij.platform.backend is available -->
     <module name="intellij.python.psi"/>
@@ -87,6 +85,13 @@ The Python plug-in provides smart editing for Python scripts. The feature set of
     <module name="intellij.python.community.helpersLocator"/>
     <module name="intellij.python.community"/>
     <module name="intellij.python.community.impl" required-if-available="intellij.platform.backend"/>
+    <module name="intellij.python.refactoring" required-if-available="intellij.platform.backend"/>
+    <module name="intellij.python.codeInsight" required-if-available="intellij.platform.backend"/>
+    <module name="intellij.python.sourceRoots" required-if-available="intellij.platform.backend"/>
+    <module name="intellij.python.navigation" required-if-available="intellij.platform.backend"/>
+    <module name="intellij.python.spellchecker" required-if-available="intellij.platform.backend"/>
+    <module name="intellij.python.testing.codeInsight" required-if-available="intellij.platform.backend"/>
+    <module name="intellij.python.console" required-if-available="intellij.platform.backend"/>
     <module name="intellij.python.django.common" required-if-available="intellij.platform.backend"/>
     <module name="intellij.python.flask.common" required-if-available="intellij.platform.backend"/>
     <module name="intellij.python.fastapi.common" required-if-available="intellij.platform.backend"/>
@@ -134,7 +139,6 @@ The Python plug-in provides smart editing for Python scripts. The feature set of
     <module name="intellij.python.ruff"/>
     <module name="intellij.python.pyrefly"/>
     <module name="intellij.python.pyright"/>
-    <module name="intellij.python.zuban"/>
   </content>
   <content>
     <module name="intellij.libraries.jsr305"/>

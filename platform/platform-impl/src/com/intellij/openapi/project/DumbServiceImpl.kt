@@ -11,6 +11,7 @@ import com.intellij.openapi.application.asContextElement
 import com.intellij.openapi.application.impl.ApplicationImpl
 import com.intellij.openapi.application.writeIntentReadAction
 import com.intellij.openapi.components.service
+import com.intellij.openapi.components.serviceOrNull
 import com.intellij.openapi.diagnostic.debug
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.progress.ProcessCanceledException
@@ -333,7 +334,7 @@ open class DumbServiceImpl @NonInjectable @VisibleForTesting constructor(
   // We cannot make this function `suspend`, because we have a contract that if dumb task is queued from EDT, dumb service becomes dumb
   // immediately. DumbService.queue is blocking method at the moment.
   @RequiresBlockingContext
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   private fun incrementDumbCounterBlocking(trace: Throwable) {
     if (tryIncrementStateCounter()) {
       dumbModeStartTrace = trace
@@ -429,7 +430,7 @@ open class DumbServiceImpl @NonInjectable @VisibleForTesting constructor(
 
   // this method is not `suspend` for the sake of symmetry: incrementDumbCounter is not `suspend` as of now
   @RequiresBlockingContext
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   private fun decrementDumbCounterBlocking() {
     // If there are other dumb tasks - just decrement the counter. We don't need a write action (to not interrupt NBRA), neither we need EDT.
     // Otherwise, decrement the counter under write action because this will change dumb state
@@ -844,7 +845,9 @@ open class DumbServiceImpl @NonInjectable @VisibleForTesting constructor(
 
   override fun getModificationCount(): Long {
     // todo: drop mod tracker in scanner executor after there is a proper way to track indexes updates IJPL-472
-    return _state.value.modificationCounter + UnindexedFilesScannerExecutor.getInstance(project).modificationTracker.modificationCount
+    // A process without the indexing backend has no scanner executor, so there is no scanning to count.
+    val scanningModificationCount = project.serviceOrNull<UnindexedFilesScannerExecutor>()?.modificationTracker?.modificationCount ?: 0
+    return _state.value.modificationCounter + scanningModificationCount
   }
 
   private data class DumbStateImpl(

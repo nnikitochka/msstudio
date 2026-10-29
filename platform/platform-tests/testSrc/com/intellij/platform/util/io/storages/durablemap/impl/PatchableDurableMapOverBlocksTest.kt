@@ -3,16 +3,18 @@ package com.intellij.platform.util.io.storages.durablemap.impl
 
 import com.intellij.platform.util.io.storages.CommonKeyDescriptors.stringAsUTF8
 import com.intellij.platform.util.io.storages.DataExternalizerEx.KnownSizeRecordWriter
+import com.intellij.platform.util.io.storages.PersistentFormatLayouts.JAVA_INT_UNALIGNED
+import com.intellij.platform.util.io.storages.database.DurableMapImplementation.KEY_VALUE_TOGETHER
 import com.intellij.platform.util.io.storages.database.spi.BlocksDatabaseFactory
 import com.intellij.platform.util.io.storages.database.DurableDatabaseFactory
 import com.intellij.platform.util.io.storages.database.spi.BlocksStore
 import com.intellij.platform.util.io.storages.database.spi.BlocksStore.Block.LifecycleState.ACTIVE
 import com.intellij.platform.util.io.storages.database.spi.BlocksStore.Block.LifecycleState.RETIRED
 import com.intellij.platform.util.io.storages.database.storages.durablemap.DurableMapBlockCatalog
-import com.intellij.platform.util.io.storages.database.storages.durablemap.DurableMapBlockCatalog.DurableMapBlockRole.DATA
+import com.intellij.platform.util.io.storages.database.storages.durablemap.DurableMapBlockCatalog.DurableMapBlockRole.ENTRIES
 import com.intellij.platform.util.io.storages.database.storages.durablemap.DurableMapBlockCatalog.DurableMapBlockRole.LOOKUP
 import com.intellij.platform.util.io.storages.database.storages.durablemap.DurableMapOverBlocks
-import com.intellij.platform.util.io.storages.database.storages.durablemap.RecordStorageOverBlocks
+import com.intellij.platform.util.io.storages.database.storages.appenablerecords.RecordStorageOverBlocks
 import com.intellij.platform.util.io.storages.database.storages.extendiblehashmap.ExtendibleHashMapStorageOverLookupBlocks
 import com.intellij.platform.util.io.storages.durablemap.DefaultEntryExternalizer
 import com.intellij.platform.util.io.storages.durablemap.PatchableDurableMap
@@ -33,7 +35,7 @@ import org.junit.jupiter.api.Timeout
 import org.junit.jupiter.api.io.TempDir
 import java.io.IOException
 import java.lang.foreign.ValueLayout.JAVA_LONG_UNALIGNED
-import java.nio.ByteBuffer
+import java.lang.foreign.MemorySegment
 import java.nio.file.Path
 import java.util.concurrent.Callable
 import java.util.concurrent.Executors
@@ -97,7 +99,7 @@ class PatchableDurableMapOverBlocksTest {
           map.patchValue("FB", listOf(i))
           map.patchValue("Ea", listOf(i + 100))
         }
-        assertTrue(store.blocks().count { it.role() == DATA.persistentCode() } > 1)
+        assertTrue(store.blocks().count { it.role() == ENTRIES.persistentCode() } > 1)
       }
       dropRecordRefIndex(store)
       val codec = SetCodec().apply { failReads = true }
@@ -141,14 +143,14 @@ class PatchableDurableMapOverBlocksTest {
   }
 
   @Test
-  fun replayOrdersDataBlocksByLogicalBlockId() {
+  fun replayOrdersEntriesBlocksByLogicalBlockId() {
     BlocksDatabaseFactory(CHUNK_SIZE).open(directory).use { database ->
       val store = database.openStore("map", 1)
       openMap(store).use { map ->
         map.put("key", setOf(1))
         for (value in 2..50) map.patchValue("key", listOf(value))
       }
-      assertTrue(store.blocks().count { it.role() == DATA.persistentCode() } > 1)
+      assertTrue(store.blocks().count { it.role() == ENTRIES.persistentCode() } > 1)
       dropRecordRefIndex(store)
 
       val storeWithReorderedBlocks = object : BlocksStore by store {
@@ -170,9 +172,9 @@ class PatchableDurableMapOverBlocksTest {
         map.put("key", setOf(1000))
         map.put("filler", (1..50).toSet())
       }
-      val dataBlocks = store.blocks().filter { it.role() == DATA.persistentCode() }
-      assertTrue(dataBlocks.size >= 3, "The records must span three DATA blocks")
-      dataBlocks.first().retire()
+      val entriesBlocks = store.blocks().filter { it.role() == ENTRIES.persistentCode() }
+      assertTrue(entriesBlocks.size >= 3, "The records must span three ENTRIES blocks")
+      entriesBlocks.first().retire()
       dropRecordRefIndex(store)
 
       openMap(store).use { map ->
@@ -351,17 +353,19 @@ class PatchableDurableMapOverBlocksTest {
   fun namedFactoryReturnsTheTypedCapabilityAndCachesItsInstance() {
     DurableDatabaseFactory(CHUNK_SIZE).open(directory).use { database ->
       val codec = SetCodec()
-      val first = database.openMap("patchable", 1, stringAsUTF8(), codec)
-      val second = database.openMap("patchable", 1, stringAsUTF8(), codec)
+      val first = database.openMap("patchable", 1, KEY_VALUE_TOGETHER, stringAsUTF8(), codec)
+      val second = database.openMap("patchable", 1, KEY_VALUE_TOGETHER, stringAsUTF8(), codec)
       assertSame(first, second)
       first.patchValue("key", listOf(1))
       first.patchValue("key", listOf(2))
       assertEquals(setOf(1, 2), second.get("key"))
       first.close()
-      database.openMap("patchable", 1, stringAsUTF8(), codec).use { assertEquals(setOf(1, 2), it.get("key")) }
-      val ordinary = database.openMap("ordinary", 1, stringAsUTF8(), stringAsUTF8())
+      database.openMap("patchable", 1, KEY_VALUE_TOGETHER, stringAsUTF8(), codec).use { assertEquals(setOf(1, 2), it.get("key")) }
+      val ordinary = database.openMap("ordinary", 1, KEY_VALUE_TOGETHER, stringAsUTF8(), stringAsUTF8())
       assertFalse(ordinary is PatchableDurableMap<*, *, *>, "Ordinary maps must not advertise patch support")
-      assertThrows(IllegalStateException::class.java) { database.openMap("ordinary", 1, stringAsUTF8(), codec) }
+      assertThrows(IllegalStateException::class.java) {
+        database.openMap("ordinary", 1, KEY_VALUE_TOGETHER, stringAsUTF8(), codec)
+      }
     }
   }
 
@@ -428,7 +432,14 @@ class PatchableDurableMapOverBlocksTest {
     }
   }
 
-  private fun records(store: BlocksStore): RecordStorageOverBlocks = RecordStorageOverBlocks.open(DurableMapBlockCatalog.open(store), BLOCK_SIZE)
+  private fun records(store: BlocksStore): RecordStorageOverBlocks {
+    val blockCatalog = DurableMapBlockCatalog.open(store)
+    return RecordStorageOverBlocks.open(
+      blockCatalog.appendableRecordBlocks(ENTRIES),
+      /*appendOnly: */ true,
+      BLOCK_SIZE
+    )
+  }
 
   private fun openRecordRefIndex(store: BlocksStore): ExtendibleHashMapInt32ToInt64 = ExtendibleHashMapInt32ToInt64(
     ExtendibleHashMapStorageOverLookupBlocks(
@@ -436,6 +447,7 @@ class PatchableDurableMapOverBlocksTest {
         ExtendibleHashMapStorageOverLookupBlocks.IMPLEMENTATION_ID,
         ExtendibleHashMapStorageOverLookupBlocks.INITIAL_GENERATION,
       ),
+      ExtendibleHashMapInt32ToInt64.REQUIRED_HEADER_SIZE,
       DurableMapOverBlocks.SEGMENT_SIZE,
     )
   )
@@ -454,12 +466,14 @@ class PatchableDurableMapOverBlocksTest {
     var failWrites = false
     var beforeWrite: () -> Unit = {}
 
-    override fun read(input: ByteBuffer): Set<Int> {
+    override fun read(input: MemorySegment): Set<Int> {
       check(!failReads) { "The operation must not deserialize values" }
       val result = mutableSetOf<Int>()
-      while (input.hasRemaining()) {
-        val command = input.int
+      var offset = 0L
+      while (offset < input.byteSize()) {
+        val command = input.get(JAVA_INT_UNALIGNED, offset)
         if (command > 0) result.add(command) else result.remove(-command)
+        offset += Int.SIZE_BYTES
       }
       return result
     }
@@ -469,13 +483,13 @@ class PatchableDurableMapOverBlocksTest {
     override fun writerForPatch(patch: List<Int>): KnownSizeRecordWriter = object : KnownSizeRecordWriter {
       override fun recordSize(): Int = patch.size * 4
 
-      override fun write(data: ByteBuffer): ByteBuffer {
+      override fun write(target: MemorySegment, startingOffset: Long) {
+        val record = target.asSlice(startingOffset, recordSize().toLong())
         beforeWrite()
-        for (command in patch) {
-          data.putInt(command)
+        for ((index, command) in patch.withIndex()) {
+          record.set(JAVA_INT_UNALIGNED, index.toLong() * Int.SIZE_BYTES, command)
           if (failWrites) throw IOException("Simulated failure during patch serialization")
         }
-        return data
       }
     }
   }

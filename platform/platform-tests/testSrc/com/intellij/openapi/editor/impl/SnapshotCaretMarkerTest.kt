@@ -5,7 +5,10 @@ import com.intellij.openapi.application.EDT
 import com.intellij.openapi.editor.EditorFactory
 import com.intellij.openapi.editor.LogicalPosition
 import com.intellij.openapi.editor.VisualPosition
+import com.intellij.openapi.editor.impl.marker.PMarkerResolution
+import com.intellij.openapi.editor.impl.marker.SnapshotRangeMarkerImpl
 import com.intellij.openapi.editor.impl.marker.UsePMarkerImplementation
+import com.intellij.openapi.util.TextRange
 import com.intellij.testFramework.common.timeoutRunBlocking
 import com.intellij.testFramework.junit5.TestApplication
 import kotlinx.coroutines.Dispatchers
@@ -13,6 +16,7 @@ import kotlinx.coroutines.withContext
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
+@Suppress("SuspiciousPackagePrivateAccess")
 @TestApplication
 @UsePMarkerImplementation
 class SnapshotCaretMarkerTest {
@@ -54,6 +58,29 @@ class SnapshotCaretMarkerTest {
   }
 
   @Test
+  fun `whitespace insertion replaces the caret marker`(): Unit = timeoutRunBlocking {
+    val (beforeRoot, afterRoot) = withEditor("a b") { editor ->
+      val caret = editor.caretModel.primaryCaret
+      caret.moveToOffset(2)
+      val positionMarkerField = CaretImpl::class.java.getDeclaredField("myPositionMarker").apply { isAccessible = true }
+      val beforeMarker = positionMarkerField.get(caret) as SnapshotRangeMarkerImpl
+      val beforeRoot = beforeMarker.currentRootReference().get()
+
+      editor.document.insertString(2, "  ")
+
+      val afterMarker = positionMarkerField.get(caret) as SnapshotRangeMarkerImpl
+      beforeRoot to afterMarker.currentRootReference().get()
+    }
+
+    val beforeMarker = beforeRoot.overlappingIterator(0, 5, 0).asSequence().single()
+    val afterMarker = afterRoot.overlappingIterator(0, 5, 0).asSequence().single()
+    assertThat(afterMarker.markerId).isNotEqualTo(beforeMarker.markerId)
+    assertThat(PMarkerResolution.toTextRange(beforeRoot.resolve(beforeMarker.markerId))).isEqualTo(TextRange(2, 2))
+    assertThat(afterRoot.resolve(beforeMarker.markerId)).isEqualTo(PMarkerResolution.ABSENT)
+    assertThat(PMarkerResolution.toTextRange(afterRoot.resolve(afterMarker.markerId))).isEqualTo(TextRange(4, 4))
+  }
+
+  @Test
   fun `whole replacement restores the logical caret position`(): Unit = timeoutRunBlocking {
     val position = withEditor("first\nsecond\nthird") { editor ->
       val caret = editor.caretModel.primaryCaret
@@ -80,6 +107,69 @@ class SnapshotCaretMarkerTest {
     }
 
     assertThat(position).isEqualTo(VisualPosition(0, 4))
+  }
+
+  @Test
+  fun `edit before a virtual caret keeps its virtual column`(): Unit = timeoutRunBlocking {
+    val position = withEditor("abc\nccccc") { editor ->
+      editor.isColumnMode = true
+      val caret = editor.caretModel.primaryCaret
+      caret.moveToVisualPosition(VisualPosition(1, 7))
+
+      editor.document.insertString(0, "x\n")
+
+      caret.visualPosition
+    }
+
+    assertThat(position).isEqualTo(VisualPosition(2, 7))
+  }
+
+  @Test
+  fun `successive whitespace insertions move only the affected caret`(): Unit = timeoutRunBlocking {
+    val offsets = withEditor("a b\nc d") { editor ->
+      val firstCaret = editor.caretModel.primaryCaret
+      firstCaret.moveToOffset(2)
+      val secondCaret = checkNotNull(editor.caretModel.addCaret(VisualPosition(1, 2)))
+
+      editor.document.insertString(2, "  ")
+      val firstOffsets = listOf(firstCaret.offset, secondCaret.offset)
+      editor.document.insertString(8, "  ")
+
+      firstOffsets + listOf(firstCaret.offset, secondCaret.offset)
+    }
+
+    assertThat(offsets).containsExactly(4, 8, 4, 10)
+  }
+
+  @Test
+  fun `moving a line keeps the virtual caret column`(): Unit = timeoutRunBlocking {
+    val position = withEditor("abc\nxyz\n") { editor ->
+      editor.isColumnMode = true
+      val caret = editor.caretModel.primaryCaret
+      caret.moveToVisualPosition(VisualPosition(0, 5))
+
+      editor.document.moveText(0, 4, 8)
+
+      caret.visualPosition
+    }
+
+    assertThat(position).isEqualTo(VisualPosition(1, 5))
+  }
+
+  @Test
+  fun `insertion at the selection end removes its virtual columns`(): Unit = timeoutRunBlocking {
+    val position = withEditor("abc") { editor ->
+      editor.isColumnMode = true
+      val caret = editor.caretModel.primaryCaret
+      caret.moveToVisualPosition(VisualPosition(0, 5))
+      caret.setSelection(VisualPosition(0, 1), 1, VisualPosition(0, 5), 3)
+
+      editor.document.insertString(3, "x")
+
+      caret.selectionEndPosition
+    }
+
+    assertThat(position).isEqualTo(VisualPosition(0, 3))
   }
 
   private suspend fun <T> withEditor(text: String, action: suspend (EditorImpl) -> T): T {

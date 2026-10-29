@@ -42,6 +42,7 @@ fun generifyErrorMessage(originalMessage: String): String {
     .generifyHexCode()
     .generifyNumber()
     .generifyKernelMessage()
+    .generifyLineEndings()
 }
 
 fun String.generifyFileNames(): String {
@@ -98,16 +99,8 @@ fun String.generifyHash(): String = this
 fun String.generifyHexadecimal(): String {
   val hexNumber ="[a-fA-F0-9]{2,}"
   val specialChars = "[\\W_]"
-  val regex = Regex("($specialChars)($hexNumber)$|^($hexNumber)($specialChars)|($specialChars)($hexNumber)($specialChars)")
-  return this.replace(regex) {
-    if (it.groupValues[2].isNotEmpty()) {
-      "${it.groupValues[1]}<NUM>"
-    } else if (it.groupValues[4].isNotEmpty()) {
-      "<NUM>${it.groupValues[4]}"
-    } else {
-      "${it.groupValues[5]}<NUM>${it.groupValues[7]}"
-    }
-  }
+  val regex = Regex("(?<=$specialChars)($hexNumber)$|^($hexNumber)(?=$specialChars)|(?<=$specialChars)($hexNumber)(?=$specialChars)")
+  return this.replace(regex, "<NUM>")
 }
 
 fun String.generifyKernelMessage(): String {
@@ -123,3 +116,6 @@ fun String.generifyHexCode(): String = this.replace("0x[\\da-fA-F]+".toRegex(), 
 
 /** text1234text => text<NUM>text */
 fun String.generifyNumber(): String = this.replace("\\d+".toRegex(), "<NUM>")
+
+/** text123\r\n => text123\n */
+fun String.generifyLineEndings(): String = this.replace("\r\n", "\n")

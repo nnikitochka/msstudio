@@ -51,6 +51,11 @@
     <extensionPoint name="searchEverywhere.tabBackendInfoProvider"
                     interface="com.intellij.platform.searchEverywhere.SeTabBackendInfoProvider"
                     dynamic="true"/>
+
+    <!-- Ordered. The first answer other than DoNothing wins. -->
+    <extensionPoint name="searchEverywhere.itemsEqualityProvider"
+                    interface="com.intellij.platform.searchEverywhere.equalityProviders.SeItemsEqualityProvider"
+                    dynamic="true"/>
   </extensionPoints>
 
   <extensions defaultExtensionNs="com.intellij">
@@ -94,5 +99,15 @@
     <searchEverywhere.targetItemSelectionProcessor
       order="last"
       implementation="com.intellij.platform.searchEverywhere.providers.target.selection.SeDefaultTargetItemSelectionProcessor"/>
+
+    <!-- The same order as the legacy copies in lang-impl -->
+    <searchEverywhere.itemsEqualityProvider
+      implementation="com.intellij.platform.searchEverywhere.equalityProviders.SeTrivialItemsEqualityProvider"/>
+    <searchEverywhere.itemsEqualityProvider
+      implementation="com.intellij.platform.searchEverywhere.equalityProviders.SePsiElementsEqualityProvider"/>
+    <searchEverywhere.itemsEqualityProvider
+      implementation="com.intellij.platform.searchEverywhere.equalityProviders.SeActionsEqualityProvider"/>
+    <searchEverywhere.itemsEqualityProvider
+      implementation="com.intellij.platform.searchEverywhere.equalityProviders.SeOptionsEqualityProvider"/>
   </extensions>
 </idea-plugin>

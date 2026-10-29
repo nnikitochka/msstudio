@@ -21,11 +21,10 @@ import com.intellij.ide.plugins.PluginInitContextSelectCandidateSubsetKt;
 import com.intellij.ide.plugins.PluginInstaller;
 import com.intellij.ide.plugins.PluginMainDescriptor;
 import com.intellij.ide.plugins.PluginManagerCore;
-import com.intellij.ide.plugins.PluginNode;
 import com.intellij.ide.plugins.PluginVersionIsSuperseded;
 import com.intellij.ide.plugins.PluginsDiscoveryResult;
+import com.intellij.ide.plugins.marketplace.IdeCompatibleUpdate;
 import com.intellij.ide.plugins.marketplace.MarketplaceRequests;
-import com.intellij.ide.plugins.newui.PluginUiModel;
 import com.intellij.ide.startup.StartupActionScriptManager;
 import com.intellij.ide.startup.StartupActionScriptManager.ActionCommand;
 import com.intellij.ide.ui.laf.LookAndFeelThemeAdapterKt;
@@ -117,6 +116,8 @@ import static com.intellij.ide.plugins.BundledPluginsStateKt.BUNDLED_PLUGINS_FIL
 public final class ConfigImportHelper {
   public static final String IMPORT_FROM_ENV_VAR = "JB_IMPORT_SETTINGS_FROM";
   public static final Pattern SELECTOR_PATTERN = Pattern.compile("\\.?(\\D+)(\\d+(?:\\.\\d+)*)");
+  // A Unified IDE flavor directory, `<selector>-<flavor>` (`UnifiedIdeFlavorPathCustomizer`), belongs to another flavor of the product
+  private static final Pattern FLAVOR_DIRECTORY_SUFFIX = Pattern.compile("\\d+(?:\\.\\d+)*-[a-z0-9-]+");
 
   private static final String UPDATE_ONLY_INCOMPATIBLE_PLUGINS_PROPERTY = "idea.config.import.update.incompatible.plugins.only"; // if true, only incompatible will be updated
 
@@ -675,7 +676,8 @@ public final class ConfigImportHelper {
     var strictPrefix = dotted ? '.' + prefix : prefix;
     return StringUtil.startsWithIgnoreCase(name, strictPrefix) &&
            name.length() > strictPrefix.length() &&
-           Character.isDigit(name.charAt(strictPrefix.length()));
+           Character.isDigit(name.charAt(strictPrefix.length())) &&
+           !FLAVOR_DIRECTORY_SUFFIX.matcher(name.substring(strictPrefix.length())).matches();
   }
 
   private static String getNameWithVersion(Path configDir) {
@@ -1108,6 +1110,7 @@ public final class ConfigImportHelper {
       for (var plugin : selectedCandidates) {
         if (PluginManagerCore.INSTANCE.isCompatible(plugin, options.compatibleBuildNumber)) {
           candidatePlugins.add(plugin);
+          nonLoadablePlugins.remove(plugin.getPluginId());
         }
         else {
           nonLoadablePlugins.put(plugin.getPluginId(), plugin);
@@ -1163,7 +1166,7 @@ public final class ConfigImportHelper {
     var currentProductVersion = PluginManagerCore.getBuildNumber().asStringWithoutProductCode();
     var previousVersion = parseVersionFromConfig(oldConfigDir);
     var options = new PluginMigrationOptions(
-      previousVersion, currentProductVersion, newConfigDir, oldConfigDir, toMigrate, toDownload, toDisable, log
+      previousVersion, currentProductVersion, newConfigDir, oldConfigDir, toMigrate, toDownload, toDisable, log, false
     );
     performMigrations(options);
     var downloadIds = toDownload.stream()
@@ -1176,6 +1179,56 @@ public final class ConfigImportHelper {
     catch (IOException e) {
       log.error("Unable to write auto install result", e);
     }
+  }
+
+  /**
+   * The plugins of a partial import after the plugin migrations: the plugins to install and the plugins to disable.
+   * A migration can disable a plugin that it keeps in {@link #toMigrate}.
+   */
+  public record PluginMigrationResult(@NotNull List<IdeaPluginDescriptor> toMigrate, @NotNull List<PluginId> toDisable) { }
+
+  /**
+   * Applies the plugin migrations to the plugins of a partial import, the import of the plugins that the Import Settings dialog selected.
+   * Without {@code dryRun}, it adds the plugins to disable to the disabled plugins file of {@code newConfigDir}, and a migration can
+   * write its own files there. It logs an I/O error of the disabled plugins file and does not throw it. In a dry run, nothing is written.
+   */
+  public static @NotNull PluginMigrationResult migrateImportedPlugins(
+    @NotNull Path oldConfigDir,
+    @NotNull Path newConfigDir,
+    @NotNull Collection<? extends IdeaPluginDescriptor> plugins,
+    boolean dryRun,
+    @NotNull Logger log
+  ) {
+    var currentProductVersion = PluginManagerCore.getBuildNumber().asStringWithoutProductCode();
+    return migrateImportedPlugins(oldConfigDir, newConfigDir, plugins, currentProductVersion, dryRun, log);
+  }
+
+  @VisibleForTesting
+  static @NotNull PluginMigrationResult migrateImportedPlugins(
+    Path oldConfigDir, Path newConfigDir, Collection<? extends IdeaPluginDescriptor> plugins, String currentProductVersion,
+    boolean dryRun, Logger log
+  ) {
+    var toMigrate = new ArrayList<IdeaPluginDescriptor>(plugins);
+    var toDownload = new ArrayList<IdeaPluginDescriptor>();
+    var toDisable = new ArrayList<PluginId>();
+    var options = new PluginMigrationOptions(
+      parseVersionFromConfig(oldConfigDir), currentProductVersion, newConfigDir, oldConfigDir, toMigrate, toDownload, toDisable, log, dryRun
+    );
+    performMigrations(options);
+    if (!toDownload.isEmpty()) {
+      log.info("Plugins that the migrations add are not downloaded by a partial import: " +
+               toDownload.stream().map(d -> d.getPluginId().getIdString()).collect(Collectors.joining(", ")));
+    }
+    if (!dryRun && !toDisable.isEmpty()) {
+      try {
+        amendDisabledPluginsFile(newConfigDir, ContainerUtil.map(toDisable, PluginId::getIdString), log);
+        DisabledPluginsState.Companion.invalidate();
+      }
+      catch (IOException e) {
+        log.warn("Cannot add the plugins that the migrations disable to the disabled plugins file", e);
+      }
+    }
+    return new PluginMigrationResult(toMigrate, toDisable);
   }
 
   private static void partitionNonBundled(
@@ -1315,7 +1368,9 @@ public final class ConfigImportHelper {
     }
   }
 
-  private static @Nullable Map<PluginId, PluginNode> fetchPluginUpdatesFromMarketplace(ConfigImportOptions options, Set<PluginId> pluginIds) {
+  private static @Nullable Map<PluginId, IdeCompatibleUpdate> fetchPluginUpdatesFromMarketplace(
+    ConfigImportOptions options, Set<PluginId> pluginIds
+  ) {
     if (testLastCompatiblePluginUpdatesFetcher != null) {
       return testLastCompatiblePluginUpdatesFetcher.apply(pluginIds);
     }
@@ -1323,15 +1378,12 @@ public final class ConfigImportHelper {
     try {
       var start = System.nanoTime();
       var updates = runSynchronouslyInBackgroundWithTimeout(
-        () -> MarketplaceRequests.loadLastCompatiblePluginModels(pluginIds, options.compatibleBuildNumber).stream()
-          .map(PluginUiModel::getDescriptor)
-          .filter(PluginNode.class::isInstance)
-          .toList(),
+        () -> MarketplaceRequests.getLastCompatiblePluginUpdate(pluginIds, options.compatibleBuildNumber),
         PLUGIN_UPDATES_TIMEOUT_MS);
       options.log.info("Fetched " + updates.size() + " latest compatible plugin updates in " + ((System.nanoTime() - start) / 1_000_000) + " ms");
-      var updatesMap = new HashMap<PluginId, PluginNode>();
+      var updatesMap = new HashMap<PluginId, IdeCompatibleUpdate>();
       for (var update : updates) {
-        updatesMap.put(update.getPluginId(), (PluginNode)update);
+        updatesMap.put(PluginId.getId(update.getPluginId()), update);
       }
       return updatesMap;
     }
@@ -1738,5 +1790,5 @@ public final class ConfigImportHelper {
 
   @VisibleForTesting
   @SuppressWarnings("StaticNonFinalField")
-  public static @Nullable Function<Set<PluginId>, @Nullable Map<PluginId, PluginNode>> testLastCompatiblePluginUpdatesFetcher = null;
+  public static @Nullable Function<Set<PluginId>, @Nullable Map<PluginId, IdeCompatibleUpdate>> testLastCompatiblePluginUpdatesFetcher = null;
 }

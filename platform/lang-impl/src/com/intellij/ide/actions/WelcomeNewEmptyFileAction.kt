@@ -3,9 +3,8 @@ package com.intellij.ide.actions
 
 import com.intellij.ide.IdeBundle
 import com.intellij.ide.scratch.RootType
-import com.intellij.ide.scratch.ScratchFileActions
-import com.intellij.ide.scratch.ScratchFileActions.ChangeLanguageAction
 import com.intellij.ide.scratch.ScratchFileCreationHelper
+import com.intellij.ide.scratch.ScratchFileCreator
 import com.intellij.ide.trustedProjects.TrustedProjects
 import com.intellij.ide.trustedProjects.TrustedProjectsLocator
 import com.intellij.ide.ui.WindowFocusFrontendService
@@ -35,7 +34,6 @@ import com.intellij.openapi.project.ProjectCloseHandler
 import com.intellij.openapi.ui.MessageConstants.YesNoCancelResult
 import com.intellij.openapi.ui.MessageDialogBuilder
 import com.intellij.openapi.ui.Messages
-import com.intellij.openapi.util.Condition
 import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.openapi.vfs.VirtualFile
@@ -77,28 +75,12 @@ internal class WelcomeNewEmptyFileAction : DumbAwareAction(), FusAwareAction {
     else {
       context.prepareText = false
     }
-    if (ScratchFileActions.doCreateNewScratch(project, context, e.dataContext) != null) {
+    if (ScratchFileCreator.doCreateNewScratch(project, context, e.dataContext) != null) {
       rememberWelcomeNewFile(e, context.language)
     }
   }
 
   override fun getAdditionalUsageData(event: AnActionEvent): List<EventPair<*>> = welcomeNewFileUsageData(event)
-}
-
-internal class WelcomeChangeLanguageAction : ChangeLanguageAction() {
-  override fun update(e: AnActionEvent) {
-    val project = e.project
-    if (project != null && !WelcomeUtils.isWelcomeProject(project)) {
-      e.presentation.isEnabledAndVisible = false
-    }
-    else {
-      super.update(e)
-    }
-  }
-
-  override fun fileFilter(project: Project): Condition<VirtualFile> {
-    return Condition { file -> !file.isDirectory() && WelcomeFilesRootType.Util.instance.containsFile(file) }
-  }
 }
 
 @ApiStatus.Internal

@@ -154,6 +154,22 @@ class EditorNotificationsImpl(private val project: Project, coroutineScope: Coro
     return fileEditor.getUserData(EDITOR_NOTIFICATION_PROVIDER) ?: emptyMap()
   }
 
+  /**
+   * Waits for the update jobs of the open files.
+   * A job needs the EDT, so call it from a background thread or from a coroutine that can suspend.
+   */
+  @TestOnly
+  suspend fun awaitUpdateJobs() {
+    val parentJob = coroutineScope.coroutineContext[Job]!!
+    while (true) {
+      val jobs = parentJob.children.filter { it != updateAllRequestFlowJob }.toList()
+      if (jobs.isEmpty()) {
+        return
+      }
+      jobs.joinAll()
+    }
+  }
+
   @TestOnly
   fun completeAsyncTasks() {
     NonBlockingReadActionImpl.waitForAsyncTaskCompletion()
@@ -333,7 +349,7 @@ class EditorNotificationsImpl(private val project: Project, coroutineScope: Coro
     job.start()
   }
 
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   private fun updateNotification(fileEditor: FileEditor, provider: EditorNotificationProvider, component: JComponent?) {
     val panels = fileEditor.getUserData(EDITOR_NOTIFICATION_PROVIDER)
     val providerClass = provider.javaClass

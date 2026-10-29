@@ -22,7 +22,6 @@ import com.jetbrains.python.newProject.collector.InterpreterStatisticsInfo
 import com.jetbrains.python.onFailure
 import com.jetbrains.python.sdk.ModuleOrProject
 import com.jetbrains.python.sdk.baseDir
-import com.jetbrains.python.sdk.flavors.PythonSdkFlavor
 import com.jetbrains.python.statistics.InterpreterCreationMode
 import com.jetbrains.python.statistics.InterpreterType
 import kotlinx.coroutines.CoroutineScope
@@ -124,7 +123,7 @@ internal abstract class CustomNewEnvironmentCreator<P : PathHolder>(
    * 6. Runs `(pythonExecutable -m) pip install <package_name> --user`.
    * 7. Reruns `detectExecutable`.
    */
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   protected fun createInstallFix(errorSink: ErrorSink): ActionLink? {
     // We can only install things on eel
     val eelDescriptor = when (val r = model.fileSystem.eelOrTarget) {
@@ -132,7 +131,6 @@ internal abstract class CustomNewEnvironmentCreator<P : PathHolder>(
       is EelOrTarget.IsTarget -> return null
     }
     return ActionLink(message("sdk.create.custom.venv.install.fix.title", pyToolPresentableName)) {
-      PythonSdkFlavor.clearExecutablesCache()
       runWithModalProgressBlocking(ModalTaskOwner.guess(), message("sdk.create.custom.venv.install.fix.title", pyToolPresentableName)) {
         installExecutable(errorSink, eelDescriptor, pyTool)
       }

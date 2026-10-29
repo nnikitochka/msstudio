@@ -1,6 +1,6 @@
 load("@community//build:bazel_targets_json.bzl", "current_bazel_targets_json")
 load("@community//build:tests-options.bzl", "jps_test")
-load("@rules_jvm//:jvm.bzl", "jvm_library", "jvm_provided_library", "resourcegroup")
+load("@rules_jvm//:jvm.bzl", "jvm_library", "resourcegroup")
 load("//platform/build-scripts/bazel-rules:content_module_jar.bzl", "content_module_jar")
 
 BAZEL_TARGETS_JSON = current_bazel_targets_json()
@@ -35,11 +35,6 @@ resourcegroup(
         ["gen-resources/**/*"],
     ),
     strip_prefix = "gen-resources",
-)
-
-jvm_provided_library(
-    name = "libraries_kotlinc_libraries-kotlinc-kotlinx-serialization-compiler-plugin_provided",
-    lib = "//libraries/kotlinc/kotlinx-serialization-compiler-plugin:libraries-kotlinc-kotlinx-serialization-compiler-plugin",
 )
 
 jvm_library(
@@ -118,7 +113,6 @@ jvm_library(
         "//platform/platform-util-netty:ide-util-netty",
         "//platform/credential-store",
         "//plugins/gitlab/shared",
-        ":libraries_kotlinc_libraries-kotlinc-kotlinx-serialization-compiler-plugin_provided",
     ],
 )
 
@@ -157,8 +151,6 @@ jvm_library(
         "//libraries/kotlinx/coroutines/core:core_test_lib",
         "//libraries/kotlinx/serialization/core:core_test_lib",
         "//libraries/kotlinx/serialization/json:json_test_lib",
-        "//libraries/kotlinc/kotlinx-serialization-compiler-plugin:libraries-kotlinc-kotlinx-serialization-compiler-plugin",
-        "//libraries/kotlinc/kotlinx-serialization-compiler-plugin:libraries-kotlinc-kotlinx-serialization-compiler-plugin_test_lib",
         "//libraries/jackson3/jackson:libraries-jackson3_test_lib",
         "//libraries/jackson3/module-kotlin:libraries-jackson3-module-kotlin_test_lib",
         "//platform/dvcs-impl:vcs-dvcs-impl_test_lib",
@@ -222,6 +214,8 @@ jvm_library(
     runtime_deps = [
         # do not sort,
         "//libraries/lucene.common",
+        "//platform/main/intellij.platform.monolith.main:monolith-main",
+        "//community-resources:customization",
         "//xml/plugin",
     ],
 )
@@ -253,10 +247,10 @@ jvm_library(
         # do not sort,
         ":vcs-gitlab-tests",
         "//platform/platform-impl:ide-impl_test_lib",
-        "//platform/platform-util-io:ide-util-io_test_lib",
-        "//platform/ide-core-impl:ide-core-impl_test_lib",
-        "//platform/observable:observable_test_lib",
+        "//platform/ide-core:ide-core_test_lib",
         "//libraries/lucene.common:lucene.common_test_lib",
+        "//platform/main/intellij.platform.monolith.main:monolith-main_test_lib",
+        "//community-resources:customization_test_lib",
         "//xml/plugin:plugin_test_lib",
     ],
     deps = [
@@ -267,8 +261,6 @@ jvm_library(
         "//platform/core-api:core_test_lib",
         "//platform/core-ui",
         "//platform/core-ui:core-ui_test_lib",
-        "//platform/diff-api:diff",
-        "//platform/diff-api:diff_test_lib",
         "//platform/core-impl",
         "//platform/core-impl:core-impl_test_lib",
         "//platform/editor-ui-api:editor-ui",
@@ -276,13 +268,10 @@ jvm_library(
         "//platform/platform-api:ide",
         "//platform/platform-api:ide_test_lib",
         "//platform/platform-impl:ide-impl",
-        "//platform/platform-util-io:ide-util-io",
         "//platform/projectModel-api:projectModel",
         "//platform/projectModel-api:projectModel_test_lib",
         "//platform/projectModel-impl",
         "//platform/projectModel-impl:projectModel-impl_test_lib",
-        "//platform/util/diff",
-        "//platform/util/diff:diff_test_lib",
         "//platform/util:util-ui",
         "//platform/util:util-ui_test_lib",
         "//platform/vcs-api:vcs",
@@ -313,28 +302,10 @@ jvm_library(
         "//plugins/git4idea/backend:backend_test_lib",
         "//plugins/git4idea/shared",
         "//plugins/git4idea/shared:shared_test_lib",
-        "//platform/vcs-log/impl",
-        "//platform/vcs-log/impl:impl_test_lib",
         "//platform/vcs-impl",
         "//platform/vcs-impl:vcs-impl_test_lib",
-        "//libraries/markdown",
-        "//libraries/markdown:markdown_test_lib",
-        "//platform/markdown-utils",
-        "//platform/markdown-utils:markdown-utils_test_lib",
-        "//libraries/miglayout-swing",
-        "//libraries/miglayout-swing:miglayout-swing_test_lib",
-        "//libraries/caffeine",
-        "//libraries/caffeine:caffeine_test_lib",
-        "//platform/diff-impl",
-        "//platform/diff-impl:diff-impl_test_lib",
         "//platform/lang-impl",
         "//platform/lang-impl:lang-impl_test_lib",
-        "//platform/statistics",
-        "//platform/statistics:statistics_test_lib",
-        "//platform/vcs-log/api:vcs-log",
-        "//platform/vcs-log/api:vcs-log_test_lib",
-        "//libraries/jsoup",
-        "//libraries/jsoup:jsoup_test_lib",
         "//libraries/testcontainers",
         "//libraries/testcontainers:testcontainers_test_lib",
         "//platform/testFramework/junit5",
@@ -345,14 +316,13 @@ jvm_library(
         "//libraries/mockk:mockk_test_lib",
         "//libraries/mockk/jvm",
         "//libraries/mockk/jvm:jvm_test_lib",
-        "//platform/dvcs-impl/shared",
-        "//platform/dvcs-impl/shared:shared_test_lib",
-        "//platform/ide-core-impl",
-        "//platform/vcs-impl/shared",
-        "//platform/vcs-impl/shared:shared_test_lib",
+        "//platform/ide-core",
+        "//platform/diff-impl",
+        "//platform/diff-impl:diff-impl_test_lib",
+        "//platform/util/diff",
+        "//platform/util/diff:diff_test_lib",
         "//platform/code-style-api:codeStyle",
         "//platform/code-style-api:codeStyle_test_lib",
-        "//platform/observable",
         "//platform/collaboration-tools:collaborationTools-tests",
         "//platform/collaboration-tools:collaborationTools-tests_test_lib",
         "//platform/testFramework/junit5/codeInsight",
@@ -361,8 +331,6 @@ jvm_library(
         "//libraries/junit6:junit6_test_lib",
         "//platform/vcs/plugin",
         "//platform/vcs/plugin:plugin_test_lib",
-        "//plugins/git4idea:vcs-git",
-        "//plugins/git4idea:vcs-git_test_lib",
         "//plugins/gitlab",
         "//plugins/gitlab:gitlab_test_lib",
     ],

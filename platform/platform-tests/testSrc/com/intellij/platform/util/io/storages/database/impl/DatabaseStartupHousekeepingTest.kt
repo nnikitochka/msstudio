@@ -2,6 +2,7 @@
 package com.intellij.platform.util.io.storages.database.impl
 
 import com.intellij.platform.util.io.storages.CommonKeyDescriptors.stringAsUTF8
+import com.intellij.platform.util.io.storages.database.DurableMapImplementation.KEY_VALUE_SEPARATELY
 import com.intellij.platform.util.io.storages.database.spi.BlocksDatabaseFactory
 import com.intellij.platform.util.io.storages.database.DurableDatabaseFactory
 import com.intellij.platform.util.io.storages.database.spi.housekeeping.OnStartupHousekeeper
@@ -179,6 +180,72 @@ class DatabaseStartupHousekeepingTest {
   }
 
   @Test
+  fun `startup evacuation can finish one chunk over multiple runs`(@TempDir directory: Path) {
+    val sourceChunkPath = DatabaseChunks.chunkPath(directory, 1)
+    var firstBlockId = 0
+    var secondBlockId = 0
+
+    BlocksDatabaseFactory(CHUNK_SIZE).open(directory).use { database ->
+      val store = database.openStore("store", 1)
+      val firstBlock = store.allocateBlock(0, LIVE_BLOCK_CONTENT_SIZE)
+      val secondBlock = store.allocateBlock(0, LIVE_BLOCK_CONTENT_SIZE)
+      firstBlock.activate()
+      secondBlock.activate()
+      firstBlockId = firstBlock.id()
+      secondBlockId = secondBlock.id()
+      retireFiller(store, 2 * DatabaseBlock.blockLengthForContent(LIVE_BLOCK_CONTENT_SIZE))
+
+      store.allocateBlock(0, LIVE_BLOCK_CONTENT_SIZE).activate()
+      retireFiller(store, DatabaseBlock.blockLengthForContent(LIVE_BLOCK_CONTENT_SIZE))
+      store.allocateBlock(0, LIVE_BLOCK_CONTENT_SIZE).activate()
+    }
+
+    val oneBlockBudget = DatabaseBlock.blockLengthForContent(LIVE_BLOCK_CONTENT_SIZE).toLong()
+    val factory = BlocksDatabaseFactory(CHUNK_SIZE).withStartupHousekeepers(
+      listOf(
+        SparseChunksEvacuationHousekeeper(0.1f, oneBlockBudget, 1),
+        DropRetiredChunksHousekeeper(),
+      ),
+    )
+    factory.open(directory).use { database ->
+      val implementation = database as BlocksDatabaseImpl
+      val sourceChunk = implementation.sealedChunks().single { it.chunkId() == 1 }
+      assertEquals(1, sourceChunk.blocks().size,
+                   "The first run must remove the evacuated copy and leave one block in the source chunk")
+      assertEquals(LifecycleState.ACTIVE, sourceChunk.blocks().single().state(),
+                   "The remaining source block must stay active")
+      assertEquals(1, implementation.metrics(true).blocks().evacuated(),
+                   "The first run must use the one-block budget")
+      val store = requireNotNull(database.findStore("store"))
+      assertEquals(LifecycleState.ACTIVE, requireNotNull(store.findBlock(firstBlockId)).state())
+      assertEquals(LifecycleState.ACTIVE, requireNotNull(store.findBlock(secondBlockId)).state())
+      assertTrue(Files.exists(sourceChunkPath), "A partially evacuated chunk must remain on disk")
+    }
+
+    factory.open(directory).use { database ->
+      val implementation = database as BlocksDatabaseImpl
+      assertTrue(implementation.sealedChunks().none { it.chunkId() == 1 },
+                 "The second run must finish and retire the source chunk")
+      val store = requireNotNull(database.findStore("store"))
+      for (blockId in listOf(firstBlockId, secondBlockId)) {
+        assertEquals(LifecycleState.ACTIVE, requireNotNull(store.findBlock(blockId)).state(),
+                     "The second run must keep both evacuated blocks active")
+        assertEquals(1, store.blocks().count { it.id() == blockId },
+                     "The second run must expose one current copy of each block")
+      }
+      val blockMetrics = implementation.metrics(true).blocks()
+      assertEquals(store.blocks().size + blockMetrics.retiredCurrent(), blockMetrics.total(),
+                   "Current block metrics must include each logical block once")
+      assertEquals(1, blockMetrics.evacuated(), "The second run must use the one-block budget")
+      assertEquals(1, implementation.metrics(true).chunks().released(),
+                   "Startup drop must release the source chunk after the second run")
+      assertTrue(object : WaitFor(10_000) {
+        override fun condition(): Boolean = Files.notExists(sourceChunkPath)
+      }.isConditionRealized, "Startup drop must delete the fully evacuated source chunk")
+    }
+  }
+
+  @Test
   fun `startup sees recovered blocks and runs in order before open returns`(@TempDir directory: Path) {
     BlocksDatabaseFactory(CHUNK_SIZE).open(directory).use { database ->
       val block = database.openStore("store", 1).allocateBlock(1, 32)
@@ -222,7 +289,7 @@ class DatabaseStartupHousekeepingTest {
     factory.open(directory).use { database ->
       assertEquals(listOf("startup"), events, "Startup must finish before clients can open maps")
       val descriptor = stringAsUTF8()
-      val map = database.openMap("map", 1, descriptor, descriptor)
+      val map = database.openMap("map", 1, KEY_VALUE_SEPARATELY, descriptor, descriptor)
       map.put("key", "value")
       assertEquals("value", map.get("key"))
     }

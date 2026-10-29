@@ -119,7 +119,7 @@ backend_config_repo(name = "ij_backend_config")
 # Parsed by `BazelProjectStructureTest` (to assert alignment with `.idea/kotlinc.xml`) and by
 # `com.intellij.monorepo.devkit.bazel.ComposeCompilerPluginProjectPathMacroContributor` (to resolve the
 # `KOTLIN_COMPOSE_COMPILER_PLUGIN` path macro). If you rename this variable, update both regexes too.
-_KOTLIN_VERSION = "2.4.21-RC"
+_KOTLIN_VERSION = "2.5.0-Beta2"
 
 python = use_extension("@rules_python//python/extensions:python.bzl", "python")
 python.toolchain(
@@ -285,7 +285,7 @@ http_file(
 http_file(
     name = "jvm-abi-gen-embeddable_http",
     downloaded_file_path = "jvm-abi-gen-embeddable-%s.jar" % _KOTLIN_VERSION,
-    sha256 = "b75fc4233781d1bd7ca9be12b0a79c929a0ffeed2a711475a531b338781f3703",
+    sha256 = "b510019e0827de8d5d8ed2bf83f77b050b89119000733542f374fbc97419f716",
     url = "https://cache-redirector.jetbrains.com/repo1.maven.org/maven2/org/jetbrains/kotlin/jvm-abi-gen-embeddable/%s/jvm-abi-gen-embeddable-%s.jar" % (_KOTLIN_VERSION, _KOTLIN_VERSION),
 )
 
@@ -299,91 +299,91 @@ http_file(
 http_file(
     name = "kotlin-build-tools-impl_http",
     downloaded_file_path = "kotlin-build-tools-impl-%s.jar" % _KOTLIN_VERSION,
-    sha256 = "0ef70c4b47dadf5808f03a96c48509b9f8abb7b69d5973b151c6ceee38ab3eed",
+    sha256 = "0dc4ce20790f45c307126214987505e101997e87fee25c30b2e3a7a7ceb98fdb",
     url = "https://cache-redirector.jetbrains.com/repo1.maven.org/maven2/org/jetbrains/kotlin/kotlin-build-tools-impl/%s/kotlin-build-tools-impl-%s.jar" % (_KOTLIN_VERSION, _KOTLIN_VERSION),
 )
 
 http_file(
     name = "kotlin-tooling-core_http",
     downloaded_file_path = "kotlin-tooling-core-%s.jar" % _KOTLIN_VERSION,
-    sha256 = "5fc5db083803232857408ed5c25bcc307c703b04bdef6cb2c34ebf4db611a622",
+    sha256 = "4dc5ec54a924c0d66d6f918e67aa28a569275a64cdfdaab11061c9eb9bb16b67",
     url = "https://cache-redirector.jetbrains.com/repo1.maven.org/maven2/org/jetbrains/kotlin/kotlin-tooling-core/%s/kotlin-tooling-core-%s.jar" % (_KOTLIN_VERSION, _KOTLIN_VERSION),
 )
 
 http_file(
     name = "kotlin-compiler-embeddable_http",
     downloaded_file_path = "kotlin-compiler-embeddable-%s.jar" % _KOTLIN_VERSION,
-    sha256 = "0bfd7a573eb94751463c76841ed0a799d50e91751ee27baa4ce1a894aa3ea144",
+    sha256 = "c81e8259130d2d436cbb50a4c38bef01ece252ca27aca5a23922af5aba4b3c8a",
     url = "https://cache-redirector.jetbrains.com/repo1.maven.org/maven2/org/jetbrains/kotlin/kotlin-compiler-embeddable/%s/kotlin-compiler-embeddable-%s.jar" % (_KOTLIN_VERSION, _KOTLIN_VERSION),
 )
 
 http_file(
     name = "kotlin-daemon-client_http",
     downloaded_file_path = "kotlin-daemon-client-%s.jar" % _KOTLIN_VERSION,
-    sha256 = "4528eff2be8ecfa44038de7f54f9ec27fdec6e5bbe253225424d9d3f53e69f42",
+    sha256 = "4c60efa18ae2f54b8ae1610cf0242b80271651b4accdb26644c0e0d246eadb9b",
     url = "https://cache-redirector.jetbrains.com/repo1.maven.org/maven2/org/jetbrains/kotlin/kotlin-daemon-client/%s/kotlin-daemon-client-%s.jar" % (_KOTLIN_VERSION, _KOTLIN_VERSION),
 )
 
 http_file(
     name = "kotlin-compose-compiler-plugin-embeddable_http",
     downloaded_file_path = "kotlin-compose-compiler-plugin-embeddable-%s.jar" % _KOTLIN_VERSION,
-    sha256 = "82e45223efa3e7407f6bd86757872eb8453a46eabb54ef22255f725b17ef5334",
+    sha256 = "a04f39f9605256f819c689da618c7225c26fb9793d38256cc4b01a8798ef7a68",
     url = "https://cache-redirector.jetbrains.com/repo1.maven.org/maven2/org/jetbrains/kotlin/kotlin-compose-compiler-plugin-embeddable/%s/kotlin-compose-compiler-plugin-embeddable-%s.jar" % (_KOTLIN_VERSION, _KOTLIN_VERSION),
 )
 
 http_file(
     name = "kotlin-metadata-jvm_http",
     downloaded_file_path = "kotlin-metadata-jvm-%s.jar" % _KOTLIN_VERSION,
-    sha256 = "ce7a0385fb0f803a887f64019b8bdd911ac803c31ff3d3eb54e1a913641679da",
+    sha256 = "9f439d9010205bcf3f49533e5b63601dda452b303d3e8d65163235f08f0d2d09",
     url = "https://cache-redirector.jetbrains.com/repo1.maven.org/maven2/org/jetbrains/kotlin/kotlin-metadata-jvm/%s/kotlin-metadata-jvm-%s.jar" % (_KOTLIN_VERSION, _KOTLIN_VERSION),
 )
 
 http_file(
     name = "kotlin-reflect_http",
     downloaded_file_path = "kotlin-reflect-%s.jar" % _KOTLIN_VERSION,
-    sha256 = "b48a382c9714a766bc68d3f4698b2b3a37e88e9a927f795606d37a0dccc077be",
+    sha256 = "0c3d4738b8c6554b51cc3e54e6a9987b076c1a83364b9def219a83d9325f8dfc",
     url = "https://cache-redirector.jetbrains.com/repo1.maven.org/maven2/org/jetbrains/kotlin/kotlin-reflect/%s/kotlin-reflect-%s.jar" % (_KOTLIN_VERSION, _KOTLIN_VERSION),
 )
 
 http_file(
     name = "kotlin-script-runtime_http",
     downloaded_file_path = "kotlin-script-runtime-%s.jar" % _KOTLIN_VERSION,
-    sha256 = "25b20b5340a77b8b5b9564b9fd5fc3477a988b037a02b4c84daf62fc71ec84c9",
+    sha256 = "fa82da018563caaf986dbd463421e13aee55a630c4b9fa0239c42e511b926ff2",
     url = "https://cache-redirector.jetbrains.com/repo1.maven.org/maven2/org/jetbrains/kotlin/kotlin-script-runtime/%s/kotlin-script-runtime-%s.jar" % (_KOTLIN_VERSION, _KOTLIN_VERSION),
 )
 
 http_file(
     name = "kotlin-serialization-compiler-plugin-embeddable_http",
     downloaded_file_path = "kotlin-serialization-compiler-plugin-embeddable-%s.jar" % _KOTLIN_VERSION,
-    sha256 = "9dbd9b05078c2b05e5205952fe00e3eae36eff93f8eda78358870a49ba7cfe1f",
+    sha256 = "fe0d8e68d0ad2f5c4757ecd795cd3cc6fae4dfe7dd217d265bc06636f8ff5803",
     url = "https://cache-redirector.jetbrains.com/repo1.maven.org/maven2/org/jetbrains/kotlin/kotlin-serialization-compiler-plugin-embeddable/%s/kotlin-serialization-compiler-plugin-embeddable-%s.jar" % (_KOTLIN_VERSION, _KOTLIN_VERSION),
 )
 
 http_file(
     name = "kotlin-stdlib_http",
     downloaded_file_path = "kotlin-stdlib-%s.jar" % _KOTLIN_VERSION,
-    sha256 = "1ac10d64c98f420b80f6b54add4dad1f0bbf96a18c94ec3d3212035681741439",
+    sha256 = "bcc8380470f1b4ff3795d9083ce6b9aa299e74e32f655fc9248f1801b63d36ef",
     url = "https://cache-redirector.jetbrains.com/repo1.maven.org/maven2/org/jetbrains/kotlin/kotlin-stdlib/%s/kotlin-stdlib-%s.jar" % (_KOTLIN_VERSION, _KOTLIN_VERSION),
 )
 
 http_file(
     name = "kotlin-stdlib-sources_http",
     downloaded_file_path = "kotlin-stdlib-sources-%s.jar" % _KOTLIN_VERSION,
-    sha256 = "1e29c0668b0aa555e7b154e5da2e8094e1b755cfee25737839195bbbdad8a4a2",
+    sha256 = "8a9f2f62afb1aed31e401e3b514abe5fa2306428b83af9cebfd32f74fc65c2bb",
     url = "https://cache-redirector.jetbrains.com/repo1.maven.org/maven2/org/jetbrains/kotlin/kotlin-stdlib/%s/kotlin-stdlib-%s-sources.jar" % (_KOTLIN_VERSION, _KOTLIN_VERSION),
 )
 
 http_file(
     name = "kotlin-stdlib-jdk7_http",
     downloaded_file_path = "kotlin-stdlib-jdk7-%s.jar" % _KOTLIN_VERSION,
-    sha256 = "deaaec89af0291736d3e0d980c10fdc7f2e3087bbd333c0998a0f776f12aceff",
+    sha256 = "5b34f4b957ae3182201e55decc55d698c13ed11f82346bbd41ea1c6a4075a143",
     url = "https://cache-redirector.jetbrains.com/repo1.maven.org/maven2/org/jetbrains/kotlin/kotlin-stdlib-jdk7/%s/kotlin-stdlib-jdk7-%s.jar" % (_KOTLIN_VERSION, _KOTLIN_VERSION),
 )
 
 http_file(
     name = "kotlin-stdlib-jdk8_http",
     downloaded_file_path = "kotlin-stdlib-jdk8-%s.jar" % _KOTLIN_VERSION,
-    sha256 = "570ec8903d404a90d72bc6ed84b14ae7d8a3ac8215cf26b88e0f07b4d0922b16",
+    sha256 = "4a433154e9a55fb596d661a906aae4dd18c610efc41b778dfae8a97e9389a1b6",
     url = "https://cache-redirector.jetbrains.com/repo1.maven.org/maven2/org/jetbrains/kotlin/kotlin-stdlib-jdk8/%s/kotlin-stdlib-jdk8-%s.jar" % (_KOTLIN_VERSION, _KOTLIN_VERSION),
 )
 
@@ -405,14 +405,14 @@ http_file(
     name = "netty-buffer_http",
     downloaded_file_path = "netty-buffer-4.2.2.Final-20250508.062804-10.jar",
     sha256 = "35bc0d116ea829e028380a3b3722ad6d4bb852d62fcd30506ed3f39cc8be9396",
-    url = "https://packages.jetbrains.team/files/p/ij/intellij-build-dependencies/io/netty/netty-buffer/4.2.2.Final-SNAPSHOT/netty-buffer-4.2.2.Final-20250508.062804-10.jar",
+    url = "https://cache-redirector.jetbrains.com/files/p/ij/intellij-build-dependencies/io/netty/netty-buffer/4.2.2.Final-SNAPSHOT/netty-buffer-4.2.2.Final-20250508.062804-10.jar",
 )
 
 http_file(
     name = "netty-buffer-sources_http",
     downloaded_file_path = "netty-buffer-4.2.2.Final-20250508.062804-10-sources.jar",
     sha256 = "fa21f27635dabbfe9b1019056683398ac363ba231a609ddedc72a46204ae0424",
-    url = "https://packages.jetbrains.team/files/p/ij/intellij-build-dependencies/io/netty/netty-buffer/4.2.2.Final-SNAPSHOT/netty-buffer-4.2.2.Final-20250508.062804-10-sources.jar",
+    url = "https://cache-redirector.jetbrains.com/files/p/ij/intellij-build-dependencies/io/netty/netty-buffer/4.2.2.Final-SNAPSHOT/netty-buffer-4.2.2.Final-20250508.062804-10-sources.jar",
 )
 
 http_file(
@@ -426,14 +426,14 @@ http_file(
     name = "netty-common_http",
     downloaded_file_path = "netty-common-4.2.2.Final-20250508.062804-10.jar",
     sha256 = "6223a40b144cbfd8e89d9f957d1d36a72abb4f71a25e52c037bfab18a2face45",
-    url = "https://packages.jetbrains.team/files/p/ij/intellij-build-dependencies/io/netty/netty-common/4.2.2.Final-SNAPSHOT/netty-common-4.2.2.Final-20250508.062804-10.jar",
+    url = "https://cache-redirector.jetbrains.com/files/p/ij/intellij-build-dependencies/io/netty/netty-common/4.2.2.Final-SNAPSHOT/netty-common-4.2.2.Final-20250508.062804-10.jar",
 )
 
 http_file(
     name = "netty-common-sources_http",
     downloaded_file_path = "netty-common-4.2.2.Final-20250508.062804-10-sources.jar",
     sha256 = "b2e1649e4513fc00d042d3d4ef6c9dda7429cfca25968975889af1b606fb18c5",
-    url = "https://packages.jetbrains.team/files/p/ij/intellij-build-dependencies/io/netty/netty-common/4.2.2.Final-SNAPSHOT/netty-common-4.2.2.Final-20250508.062804-10-sources.jar",
+    url = "https://cache-redirector.jetbrains.com/files/p/ij/intellij-build-dependencies/io/netty/netty-common/4.2.2.Final-SNAPSHOT/netty-common-4.2.2.Final-20250508.062804-10-sources.jar",
 )
 
 http_file(
@@ -686,7 +686,7 @@ CHROMIUM_HEADLESS_SHELL_PLATFORMS = {
         build_file = "//:BUILD.chromium-headless-shell.bazel",
         sha256 = sha256,
         strip_prefix = archive_root,
-        url = "https://playwright.azureedge.net/builds/chromium/%s/chromium-headless-shell-%s.zip" % (
+        url = "https://cdn.playwright.dev/builds/chromium/%s/chromium-headless-shell-%s.zip" % (
             CHROMIUM_HEADLESS_SHELL_REVISION,
             archive,
         ),
@@ -793,14 +793,14 @@ WASMJS_TEST_HARNESS_JARS = {
 http_file(
     name = "kotlin-stdlib-wasm-js_http",
     downloaded_file_path = "kotlin-stdlib-wasm-js-%s.klib" % _KOTLIN_VERSION,
-    sha256 = "b72040e4b90d5a518cf74854d17c0be6ca81922196b36870017ef1a445b48d4e",
+    sha256 = "ad12698d28acdc0eb17ccf74f9a5735bcafd69f36b87cfb1f2bfac4e719fbc42",
     url = "https://cache-redirector.jetbrains.com/repo1.maven.org/maven2/org/jetbrains/kotlin/kotlin-stdlib-wasm-js/%s/kotlin-stdlib-wasm-js-%s.klib" % (_KOTLIN_VERSION, _KOTLIN_VERSION),
 )
 
 http_file(
     name = "kotlin-test-wasm-js_http",
     downloaded_file_path = "kotlin-test-wasm-js-%s.klib" % _KOTLIN_VERSION,
-    sha256 = "9d26ad464d42660b1ca9a3cd4c19d9d0e8e6101c3e4a71bba41ff554686cfde2",
+    sha256 = "20aec844c669249be908b2619244ae161a165727c9f4b1e01a0d52f516c2044b",
     url = "https://cache-redirector.jetbrains.com/repo1.maven.org/maven2/org/jetbrains/kotlin/kotlin-test-wasm-js/%s/kotlin-test-wasm-js-%s.klib" % (_KOTLIN_VERSION, _KOTLIN_VERSION),
 )
 

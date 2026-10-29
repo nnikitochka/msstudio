@@ -3,12 +3,12 @@ package git4idea.config;
 
 import com.intellij.execution.wsl.EelDescriptorWithWslDistribution;
 import com.intellij.execution.wsl.WSLDistribution;
+import com.intellij.openapi.application.PathManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.progress.EmptyProgressIndicator;
 import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.progress.util.ProgressIndicatorUtils;
-import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.platform.eel.EelApi;
@@ -25,10 +25,8 @@ import git4idea.i18n.GitBundle;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Collections;
-import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.Semaphore;
@@ -42,7 +40,7 @@ class GitExecutableFileTester {
   private final ReentrantLock LOCK = new ReentrantLock();
   private final @NotNull ConcurrentMap<GitExecutable, TestResult> myTestMap = new ConcurrentHashMap<>();
 
-  final @NotNull TestResult getResultFor(@Nullable Project project, @NotNull GitExecutable executable) {
+  final @NotNull TestResult getResultFor(@NotNull GitExecutable executable) {
     return ProgressIndicatorUtils.computeWithLockAndCheckingCanceled(LOCK, 50, TimeUnit.MILLISECONDS, () -> {
       TestResult result = myTestMap.get(executable);
       long currentLastModificationDate = 0L;
@@ -50,7 +48,7 @@ class GitExecutableFileTester {
       try {
         currentLastModificationDate = executable.getModificationTime();
         if (result == null || result.getFileLastModifiedTimestamp() != currentLastModificationDate) {
-          result = new TestResult(testOrAbort(project, executable), currentLastModificationDate);
+          result = new TestResult(testOrAbort(executable), currentLastModificationDate);
           myTestMap.put(executable, result);
         }
       }
@@ -82,7 +80,7 @@ class GitExecutableFileTester {
     return false;
   }
 
-  private static @NotNull GitVersion testOrAbort(@Nullable Project project, @NotNull GitExecutable executable) throws Exception {
+  private static @NotNull GitVersion testOrAbort(@NotNull GitExecutable executable) throws Exception {
     int maxAttempts = 1;
 
     // IDEA-248193 Apple Git might hang with timeout after hibernation. Do several attempts.
@@ -92,7 +90,7 @@ class GitExecutableFileTester {
 
     int attempt = 0;
     while (attempt < maxAttempts) {
-      GitVersion result = runTestWithTimeout(project, executable);
+      GitVersion result = runTestWithTimeout(executable);
       if (result != null) return result;
       attempt++;
     }
@@ -101,7 +99,7 @@ class GitExecutableFileTester {
       GitBundle.message("git.executable.validation.error.no.response.in.n.attempts.message", maxAttempts), null);
   }
 
-  private static @Nullable GitVersion runTestWithTimeout(@Nullable Project project, @NotNull GitExecutable executable) throws Exception {
+  private static @Nullable GitVersion runTestWithTimeout(@NotNull GitExecutable executable) throws Exception {
     EmptyProgressIndicator indicator = new EmptyProgressIndicator();
     Ref<Exception> exceptionRef = new Ref<>();
     Ref<GitVersion> resultRef = new Ref<>();
@@ -111,7 +109,7 @@ class GitExecutableFileTester {
     AppJavaExecutorUtil.executeOnPooledIoThread(() -> {
       ProgressManager.getInstance().executeProcessUnderProgress(() -> {
         try {
-          resultRef.set(testExecutable(project, executable));
+          resultRef.set(testExecutable(executable));
         }
         catch (Exception e) {
           exceptionRef.set(e);
@@ -150,13 +148,14 @@ class GitExecutableFileTester {
     myTestMap.clear();
   }
 
-  private static @NotNull GitVersion testExecutable(@Nullable Project project, @NotNull GitExecutable executable) throws Exception {
+  /**
+   * Runs {@code git version} without a project. The output does not depend on the working directory.
+   * So the check runs in a directory that the IDE selects: the system directory for a local executable,
+   * the distribution root for WSL, and the home directory of the target machine for Eel.
+   */
+  private static @NotNull GitVersion testExecutable(@NotNull GitExecutable executable) throws Exception {
     GitVersion.Type type = null;
-    var workingDirectory = Optional.ofNullable(project)
-      .map(Project::getBasePath)
-      .map(Path::of)
-      .map(p -> Files.exists(p) ? p : null)
-      .orElse(Path.of("."));
+    Path workingDirectory = PathManager.getSystemDir();
 
     if (executable instanceof GitExecutable.Unknown) {
       type = GitVersion.Type.UNDEFINED;
@@ -178,12 +177,13 @@ class GitExecutableFileTester {
     }
 
     LOG.debug("Acquiring git version for " + executable);
-    GitLineHandler handler = new GitLineHandler(project,
+    GitLineHandler handler = new GitLineHandler(null,
                                                 workingDirectory,
                                                 executable,
                                                 GitCommand.VERSION,
                                                 Collections.emptyList());
     handler.setPreValidateExecutable(false);
+    handler.setAllowUntrustedWorkingDirectory();
     handler.setSilent(false);
     handler.setTerminationTimeout(1000);
     handler.setStdoutSuppressed(false);

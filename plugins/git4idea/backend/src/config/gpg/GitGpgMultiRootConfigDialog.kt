@@ -12,7 +12,6 @@ import com.intellij.ui.ColoredTableCellRenderer
 import com.intellij.ui.DoubleClickListener
 import com.intellij.ui.SimpleTextAttributes
 import com.intellij.ui.ToolbarDecorator
-import com.intellij.ui.components.JBLabel
 import com.intellij.ui.table.JBTable
 import com.intellij.util.FontUtil
 import com.intellij.util.ui.JBUI
@@ -27,7 +26,6 @@ import kotlinx.coroutines.launch
 import java.awt.event.MouseEvent
 import javax.swing.Action
 import javax.swing.JComponent
-import javax.swing.JPanel
 import javax.swing.JTable
 import javax.swing.ListSelectionModel
 import javax.swing.table.AbstractTableModel
@@ -76,12 +74,6 @@ class GitGpgMultiRootConfigDialog(val project: Project,
     initTable()
   }
 
-  override fun createSouthAdditionalPanel(): JPanel {
-    val label = JBLabel(message("settings.configure.sign.gpg.synced.with.gitconfig.text"))
-    label.foreground = JBUI.CurrentTheme.ContextHelp.FOREGROUND
-    return JBUI.Panels.simplePanel(label)
-  }
-
   override fun createCenterPanel(): JComponent {
     return ToolbarDecorator.createDecorator(table)
       .setEditAction { editConfig() }
@@ -104,7 +96,7 @@ class GitGpgMultiRootConfigDialog(val project: Project,
         }
         tableModel.fireTableDataChanged()
 
-        secretKeys.tryLoad()
+        secretKeys.tryReload()
         table.repaint()
       }
       finally {
@@ -152,20 +144,21 @@ class GitGpgMultiRootConfigDialog(val project: Project,
       else if (value is RepoConfigValue) {
         val error = value.error
         val config = value.value
+        val availableKeys = secretKeys.value
 
         when {
           error != null -> append(message("settings.configure.sign.gpg.error.table.text", error))
           config == null -> append(message("settings.configure.sign.gpg.loading.table.text"))
-          config.key == null -> append(message("settings.configure.sign.gpg.do.not.sign.table.text"))
+          !config.isEnabled -> append(message("settings.configure.sign.gpg.do.not.sign.table.text"))
+          availableKeys != null && availableKeys.keys.isEmpty() ->
+            append(message("settings.configure.sign.gpg.no.available.keys.table.text"), SimpleTextAttributes.ERROR_ATTRIBUTES)
+          config.key == null -> append(message("settings.configure.sign.gpg.no.key.selected.table.text"),
+                                       SimpleTextAttributes.ERROR_ATTRIBUTES)
           else -> {
             append(config.key.id)
-
-            val descriptions = secretKeys.value?.descriptions ?: return
-            val description = descriptions[config.key]
-            if (description != null) {
-              append(FontUtil.spaceAndThinSpace())
-              append(description, SimpleTextAttributes.GRAYED_ATTRIBUTES)
-            }
+            val description = availableKeys?.descriptions[config.key] ?: return
+            append(FontUtil.spaceAndThinSpace())
+            append(description, SimpleTextAttributes.GRAYED_ATTRIBUTES)
           }
         }
       }

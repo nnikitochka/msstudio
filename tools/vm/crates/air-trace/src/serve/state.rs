@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
 use avl_base::sync::lock;
-use avl_trace_tools::discover::{Bundle, Options, Root, RootState, Scanner, Snapshot, Status, Summary};
+use avl_trace_tools::discover::{Bundle, Options, Origin, Root, RootState, Scanner, Snapshot, Status, Summary};
 use futures::future::BoxFuture;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -16,7 +16,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::BUNDLE_ROUTE;
 use super::events::{Frame, Tail, Watches, native_watch};
-use super::journals::{ControllerRun, Journals};
+use super::journals::{ControllerRun, Journals, RunsDir};
 use super::service::{Activity, SiteBuild, build_site};
 use crate::Refusal;
 use crate::plan::{Input, PlanResult};
@@ -45,11 +45,13 @@ pub(crate) struct Settings {
     /// The checkout, which the planner needs; `None` for a server started outside one.
     pub repo_root: Option<PathBuf>,
     pub site_dir: Option<PathBuf>,
-    /// The inflate cache: one directory for each version of a zip whose deflated entries were asked for in ranges.
+    /// The inflate cache: one directory for each version of a zip whose deflated entries were asked for in ranges,
+    /// and one for each inner zip that discovery extracted.
     pub cache_dir: PathBuf,
     pub roots: Vec<Root>,
-    /// The controller's runs, `<runtime root>/runs`, each with its journal; `None` for none.
-    pub runs_dir: Option<PathBuf>,
+    /// The directories of the controller's runs, each run with its journal: `<runtime root>/runs` and the runs of
+    /// the VM export of the checkout. The first directory that holds a run owns it.
+    pub runs_dirs: Vec<RunsDir>,
     pub log: Log,
     /// How long a directory bundle without a manifest may go unchanged and still be running.
     pub stale_after: Duration,
@@ -86,7 +88,7 @@ impl Settings {
             site_dir: None,
             cache_dir,
             roots,
-            runs_dir: None,
+            runs_dirs: Vec::new(),
             log: Arc::new(|_| {}),
             stale_after: Duration::from_mins(5),
             debounce: Duration::from_millis(300),
@@ -149,9 +151,10 @@ impl Server {
         prune_cache(&settings.cache_dir, SystemTime::now() - CACHE_RETENTION);
         let scanner = Scanner::new(Options {
             stale_after: settings.stale_after,
+            nested_dir: Some(settings.cache_dir.clone()),
             ..Options::default()
         });
-        let journals = Journals::new(settings.runs_dir.clone());
+        let journals = Journals::new(settings.runs_dirs.clone());
         Arc::new(Self {
             settings,
             scanner,
@@ -247,7 +250,7 @@ impl Server {
 }
 
 /// Removes the inflate cache's directories for zips not read since `before`. Each directory is one version of one
-/// zip, so a zip rewritten by every Bazel run would otherwise leave one behind per run.
+/// zip or one extracted inner zip, so a zip rewritten by every Bazel run would otherwise leave one behind per run.
 fn prune_cache(cache_dir: &Path, before: SystemTime) {
     let Ok(entries) = fs::read_dir(cache_dir) else {
         return;
@@ -321,6 +324,9 @@ pub(crate) struct Run {
     pub started_at: Option<String>,
     /// The worst of its scenarios': running, failed, invalid, truncated, aborted, passed, in that order.
     pub status: Status,
+    /// The CI build that ran the run, as its first scenario with one names it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub origin: Option<Origin>,
     pub scenarios: Vec<Scenario>,
 }
 
@@ -331,6 +337,9 @@ pub(crate) struct Scenario {
     pub summary: Summary,
     /// The bundle's base, `/__air/bundle/<id>/`; a file of the bundle is the URL plus its path.
     pub url: String,
+    /// The bundle's zip, relative to the listing, in the listing that `teamcity-publish` writes beside its zips.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub zip: Option<String>,
 }
 
 /// A found bundle as the listing names it.
@@ -338,6 +347,7 @@ pub(crate) fn listed(found: &Summary) -> Scenario {
     Scenario {
         summary: found.clone(),
         url: format!("{BUNDLE_ROUTE}{}/", found.id),
+        zip: None,
     }
 }
 
@@ -357,15 +367,25 @@ fn rank_of(status: Status) -> usize {
 
 /// A snapshot's bundles, grouped by run, newest run first.
 pub(crate) fn runs_of(current: &Snap) -> Runs<'_> {
+    Runs {
+        generation: current.generation,
+        controller_runs: &current.controller_runs,
+        runs: group_runs(current.found.bundles.iter().map(|found| listed(&found.summary))),
+        roots: &current.found.roots,
+    }
+}
+
+/// The scenarios grouped by run, newest run first. A run keeps its scenarios in the given order.
+pub(crate) fn group_runs(scenarios: impl IntoIterator<Item = Scenario>) -> Vec<Run> {
     let mut runs: Vec<Run> = Vec::new();
     let mut by_run: HashMap<String, usize> = HashMap::new();
-    for found in &current.found.bundles {
-        let scenario = listed(&found.summary);
+    for scenario in scenarios {
         let index = *by_run.entry(scenario.summary.run_id.clone()).or_insert_with(|| {
             runs.push(Run {
                 run_id: scenario.summary.run_id.clone(),
                 started_at: None,
                 status: Status::Passed,
+                origin: None,
                 scenarios: Vec::new(),
             });
             runs.len() - 1
@@ -379,13 +399,11 @@ pub(crate) fn runs_of(current: &Snap) -> Runs<'_> {
         if rank_of(scenario.summary.status) < rank_of(run.status) {
             run.status = scenario.summary.status;
         }
+        if run.origin.is_none() {
+            run.origin.clone_from(&scenario.summary.origin);
+        }
         run.scenarios.push(scenario);
     }
     runs.sort_by(|left, right| right.started_at.cmp(&left.started_at).then_with(|| left.run_id.cmp(&right.run_id)));
-    Runs {
-        generation: current.generation,
-        controller_runs: &current.controller_runs,
-        runs,
-        roots: &current.found.roots,
-    }
+    runs
 }

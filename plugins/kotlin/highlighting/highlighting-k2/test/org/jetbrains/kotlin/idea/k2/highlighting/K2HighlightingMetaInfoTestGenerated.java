@@ -392,6 +392,21 @@ public abstract class K2HighlightingMetaInfoTestGenerated extends AbstractK2High
                 runTest("../../idea/tests/testData/highlighterMetaInfo/jvm/RepeatableAsAliasAnnotation.kt");
             }
 
+            @TestMetadata("StringExpressionArgument.kt")
+            public void testStringExpressionArgument() throws Exception {
+                runTest("../../idea/tests/testData/highlighterMetaInfo/jvm/StringExpressionArgument.kt");
+            }
+
+            @TestMetadata("StringExpressionArgumentWithConstTrimMargin.kt")
+            public void testStringExpressionArgumentWithConstTrimMargin() throws Exception {
+                runTest("../../idea/tests/testData/highlighterMetaInfo/jvm/StringExpressionArgumentWithConstTrimMargin.kt");
+            }
+
+            @TestMetadata("StringExpressionWithinParentheses.kt")
+            public void testStringExpressionWithinParentheses() throws Exception {
+                runTest("../../idea/tests/testData/highlighterMetaInfo/jvm/StringExpressionWithinParentheses.kt");
+            }
+
             @TestMetadata("SyntheticExtensionProperty.kt")
             public void testSyntheticExtensionProperty() throws Exception {
                 runTest("../../idea/tests/testData/highlighterMetaInfo/jvm/SyntheticExtensionProperty.kt");

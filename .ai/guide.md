@@ -2,12 +2,9 @@
 To regenerate, run `bazel run //.ai:render-guides`.
 <!-- /TEMPLATE:COMMENT -->
 
-**Critical:** These guidelines MUST be followed at all times.
-
 ## Project Invariants
 
-- A module or plugin directory can hold its own AGENTS or CLAUDE instructions. Follow them when they are present.
-- `*.iml` files are the source of truth. They generate the `BUILD.bazel` files.
+- `*.iml` files are the source of truth. They generate the `BUILD.bazel` files. Keep an `*.iml` in the canonical form that the IDE writes: no comment, no reformat or whitespace change, no trailing newline, and no added, removed or reordered element or attribute.
 <!-- IF_EDITION:ULTIMATE -->- Register a new or edited JPS module `.iml` with `bun build/jps-module.mjs register <path-to-iml> --fix-iml-eof`, then run `./build/jpsModelToBazel.cmd`. Never edit `.idea/modules.xml` by hand. The command keeps both `modules.xml` files in canonical order.<!-- /IF_EDITION:ULTIMATE --><!-- IF_EDITION:COMMUNITY -->- Register a new or edited JPS module `.iml` with `bun build/jps-module.mjs register <path-to-iml> --fix-iml-eof`, then run `./build/jpsModelToBazelCommunityOnly.cmd`. Never edit `.idea/modules.xml` by hand. The command keeps `modules.xml` in canonical order.<!-- /IF_EDITION:COMMUNITY -->
 - User-visible strings belong in `*.properties` for localization.
 
@@ -30,7 +27,7 @@ Each kind of text has one home. Rationale and evidence for a change go in the co
 
 ## Workspace Isolation
 
-Do not create a Git worktree or a clone, and do not install a workspace manager, on your own initiative. Read [Workspace Isolation](./workspace-isolation.md) before any workspace-isolation action. It also covers the explicit-request exception.
+This repository is too large for an ad hoc Git worktree or clone. Create one only on an explicit user request, and never install a workspace manager. Isolation comes from the `branch-deck` skill: follow it before the first edit. Without it, work in the current checkout.
 
 {{PARTIAL:module-specific}}
 
@@ -44,22 +41,11 @@ Do not create a Git worktree or a clone, and do not install a workspace manager,
 - **Bazel compilation without tests:** to verify compilation only, run `bazel build <target>` for the affected modules. Skip this when you changed only `.js`, `.mjs`, `.md`, `.txt`, or `.json` files.
 - After you change a Bazel or Starlark source (`BUILD`, `BUILD.bazel`, `MODULE.bazel`, `WORKSPACE`, `WORKSPACE.bazel`, or `*.bzl`), run `bazel run //:format.check`. If it reports a diff, run `bazel run //:format`, inspect the changes, and run the check again.
 <!-- IF_EDITION:ULTIMATE -->- After you change an `*.iml`, a `BUILD.bazel`, or a `.idea/` file, run `./build/jpsModelToBazel.cmd`.
-- After you change the version of a repository library in an `*.iml` or in `.idea/libraries/*.xml`, also run `./fleet/build/generateProjectModel.cmd dump`. The Fleet generator copies the JPS library versions into `fleet/build/jps-library-mappings.tsv` and both `fleet/kmp.MODULE.bazel` files, and its `check` mode fails on drift. When the dump changes a `kmp.MODULE.bazel`, run `./bazel.cmd mod deps --lockfile_mode=update` in the root and in `community/`, because CI fails on a stale `MODULE.bazel.lock`. Then run `./tests.cmd --module intellij.projectStructureTests --test 'com.intellij.ideaProjectStructure.fast.*'`, because `community/platform/jps-bootstrap/pom.xml` and `JetBrainsAnnotationsExternalLibraryResolver.VERSION` copy library versions and these tests check the copies.<!-- /IF_EDITION:ULTIMATE --><!-- IF_EDITION:COMMUNITY -->- After you change an `*.iml`, a `BUILD.bazel`, or a `.idea/` file, run `./build/jpsModelToBazelCommunityOnly.cmd`.<!-- /IF_EDITION:COMMUNITY -->
+- After you change the version of a repository library, follow [Library Versions](../../.ai/library-versions.md).<!-- /IF_EDITION:ULTIMATE --><!-- IF_EDITION:COMMUNITY -->- After you change an `*.iml`, a `BUILD.bazel`, or a `.idea/` file, run `./build/jpsModelToBazelCommunityOnly.cmd`.<!-- /IF_EDITION:COMMUNITY -->
 
 ### After Writing Code
 
 - Use `lint_files` to check the files for warnings when ijproxy or JetBrains MCP is available. Fix every warning that belongs to your changes. You can ignore an unrelated warning.
-
-## Repository-wide rules
-
-Keep IDE-serialized `.iml` files in canonical form. Do not:
-
-- add a comment
-- auto-format
-- normalize the structure or the whitespace
-- add a trailing newline at the end of the file
-- remove an empty tag
-- reorder an element or an attribute
 
 ## Tools
 
@@ -85,10 +71,12 @@ Available through ijproxy or JetBrains MCP: `lint_files`, `get_symbol_info`, `re
 
 ### Skills
 
-The harness can list skill *names* only, without a description. When a task looks like something a skill covers, read the index for what each name does before you improvise:
+Before you improvise a procedure, look for a skill that covers it in the index:
 
 <!-- IF_EDITION:ULTIMATE -->- Skill index: [`.agents/skills/INDEX.md`](../../.agents/skills/INDEX.md)<!-- /IF_EDITION:ULTIMATE -->
 <!-- IF_EDITION:COMMUNITY -->- Skill index: [`.agents/skills/INDEX.md`](../.agents/skills/INDEX.md)<!-- /IF_EDITION:COMMUNITY -->
+
+Before a plan that adds a responsibility, run the owner check of the `duplicate-and-dead-code` skill.
 
 {{PARTIAL:knowledge-mcps}}
 

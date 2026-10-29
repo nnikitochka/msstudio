@@ -20,39 +20,45 @@ import org.jetbrains.annotations.ApiStatus
  */
 object PyKnownDecoratorUtil {
   /**
-   * Map decorators of element to [PyKnownDecorator].
+   * Returns the known decorators of [element], one entry per decorator in declaration order.
    *
-   * @param element decoratable element to check
    * @param context type evaluation context. If it doesn't allow switch to AST, the imports of the file give the qualified name of a decorator.
-   * @return list of known decorators in declaration order with duplicates (with any)
    */
   @JvmStatic
-  fun getKnownDecorators(element: PyDecoratable, context: TypeEvalContext): List<PyKnownDecorator> {
-    val decoratorList = element.decoratorList
-    if (decoratorList == null) {
-      return emptyList()
-    }
-
-    return decoratorList.decorators
-      .flatMap { asKnownDecorators(it, context) }
+  fun knownDecoratorsOf(element: PyDecoratable, context: TypeEvalContext): PyElementKnownDecorators {
+    val decoratorList = element.decoratorList ?: return PyElementKnownDecorators.NONE
+    val decorators = decoratorList.decorators.map { knownDecoratorsOf(it, context) }
+    return PyElementKnownDecorators.of(decorators)
   }
 
+  @Deprecated(
+    "Use knownDecoratorsOf(element, context). The returned list flattens two axes - which decorator, and which " +
+    "known decorator each can resolve to - and holds candidates, not facts: aggregate it with any, never with all.",
+    ReplaceWith("knownDecoratorsOf(element, context)")
+  )
   @JvmStatic
-  fun asKnownDecorators(decorator: PyDecorator, context: TypeEvalContext): List<PyKnownDecorator> {
-    val qualifiedName = decorator.qualifiedName
-    if (qualifiedName == null) {
-      return emptyList()
-    }
+  fun getKnownDecorators(element: PyDecoratable, context: TypeEvalContext): List<PyKnownDecorator> {
+    return knownDecoratorsOf(element, context).asList()
+  }
+
+  /**
+   * Returns the known decorators that [decorator] can resolve to.
+   *
+   * @param context type evaluation context. If it doesn't allow switch to AST, the imports of the file give the qualified name of a decorator.
+   */
+  @JvmStatic
+  fun knownDecoratorsOf(decorator: PyDecorator, context: TypeEvalContext): PyKnownDecorators {
+    val qualifiedName = decorator.qualifiedName ?: return PyKnownDecorators.NONE
     // Avoid resolving property accessor decorators to prevent an infinite recursion
     val lastComponent = qualifiedName.lastComponent
     if (PyNames.GETTER == lastComponent || PyNames.SETTER == lastComponent || PyNames.DELETER == lastComponent) {
-      return emptyList()
+      return PyKnownDecorators.NONE
     }
     val containingFile = decorator.containingFile
     if (!context.maySwitchToAST(decorator)) {
       // Without the AST, the imports of the file give the qualified name of the decorator. This reads stubs only.
-      if (containingFile !is PyFile) return emptyList()
-      return asKnownDecoratorsInFile(qualifiedName, containingFile)
+      if (containingFile !is PyFile) return PyKnownDecorators.NONE
+      return PyKnownDecorators.of(asKnownDecoratorsInFile(qualifiedName, containingFile))
     }
     val resolved = if (containingFile is PyiFile) {
       // In .pyi files it's safe to resolve decorators such as "@overload" flow-insensitively.
@@ -61,12 +67,23 @@ object PyKnownDecoratorUtil {
     else {
       PyUtil.multiResolveTopPriority(decorator.callee!!, PyResolveContext.defaultContext(context))
     }
-    return resolved
+    val candidates = resolved
       .filterIsInstance<PyQualifiedNameOwner>()
       .mapNotNull { it.qualifiedName }
       .map(PyNames.FQN::unqualifyBuiltinName)
       .map { QualifiedName.fromDottedString(it!!) }
       .mapNotNull { findByQualifiedName(it) }
+    return PyKnownDecorators.of(candidates)
+  }
+
+  @Deprecated(
+    "Use knownDecoratorsOf(decorator, context). The returned list holds resolve candidates, not facts: " +
+    "aggregate it with any, never with all. The returned list is immutable.",
+    ReplaceWith("knownDecoratorsOf(decorator, context)")
+  )
+  @JvmStatic
+  fun asKnownDecorators(decorator: PyDecorator, context: TypeEvalContext): List<PyKnownDecorator> {
+    return knownDecoratorsOf(decorator, context).asList()
   }
 
   /**
@@ -159,7 +176,7 @@ object PyKnownDecoratorUtil {
    */
   @JvmStatic
   fun hasUnknownDecorator(element: PyDecoratable, context: TypeEvalContext): Boolean {
-    return !allDecoratorsAreKnown(element, getKnownDecorators(element, context))
+    return !knownDecoratorsOf(element, context).allKnown()
   }
 
   /**
@@ -171,13 +188,12 @@ object PyKnownDecoratorUtil {
    */
   @JvmStatic
   fun hasAbstractDecorator(element: PyDecoratable, context: TypeEvalContext): Boolean {
-    return getKnownDecorators(element, context).any { it.isAbstract }
+    return knownDecoratorsOf(element, context).hasTrait(PyKnownDecorator::isAbstract)
   }
 
   @JvmStatic
   fun hasGeneratorBasedCoroutineDecorator(function: PyFunction, context: TypeEvalContext): Boolean {
-    return getKnownDecorators(function,
-                              context).any { it.isGeneratorBasedCoroutine }
+    return knownDecoratorsOf(function, context).hasTrait(PyKnownDecorator::isGeneratorBasedCoroutine)
   }
 
   @JvmStatic
@@ -194,15 +210,14 @@ object PyKnownDecoratorUtil {
 
   @JvmStatic
   fun hasRedeclarationDecorator(function: PyFunction, context: TypeEvalContext): Boolean {
-    return getKnownDecorators(function, context).contains(PyKnownDecorator.TYPING_OVERLOAD)
+    return knownDecoratorsOf(function, context).contains(PyKnownDecorator.TYPING_OVERLOAD)
   }
 
   @JvmStatic
   fun findOverrideDecorator(decoratable: PyDecoratable, context: TypeEvalContext): PyDecorator? {
     return decoratable.decoratorList?.decorators?.firstOrNull { decorator ->
-      asKnownDecorators(decorator, context).any {
-        it == PyKnownDecorator.TYPING_OVERRIDE || it == PyKnownDecorator.TYPING_EXTENSIONS_OVERRIDE
-      }
+      knownDecoratorsOf(decorator, context)
+        .containsAny(PyKnownDecorator.TYPING_OVERRIDE, PyKnownDecorator.TYPING_EXTENSIONS_OVERRIDE)
     }
   }
 
@@ -213,31 +228,16 @@ object PyKnownDecoratorUtil {
 
   @JvmStatic
   fun hasUnknownOrChangingSignatureDecorator(decoratable: PyDecoratable, context: TypeEvalContext): Boolean {
-    val decorators = getKnownDecorators(decoratable, context)
-    return !allDecoratorsAreKnown(decoratable, decorators) || decorators.contains(PyKnownDecorator.UNITTEST_MOCK_PATCH)
+    val decorators = knownDecoratorsOf(decoratable, context)
+    return !decorators.allKnown() || decorators.contains(PyKnownDecorator.UNITTEST_MOCK_PATCH)
   }
 
   @JvmStatic
   fun hasUnknownOrUpdatingAttributesDecorator(decoratable: PyDecoratable, context: TypeEvalContext): Boolean {
-    val decorators = getKnownDecorators(decoratable, context)
-
-    if (!allDecoratorsAreKnown(decoratable, decorators)) {
-      return true
-    }
-
-    return decorators.any {
-      it === PyKnownDecorator.FUNCTOOLS_LRU_CACHE ||  // cache_clear, cache_info
-      it === PyKnownDecorator.FUNCTOOLS_SINGLEDISPATCH
-    }
-  }
-
-  private fun allDecoratorsAreKnown(element: PyDecoratable, decorators: List<PyKnownDecorator>): Boolean {
-    val decoratorList = element.decoratorList
-    return if (decoratorList == null)
-      decorators.isEmpty()
-    else
-      decoratorList.decorators.size == decorators
-        .groupBy { it.shortName }.size
+    val decorators = knownDecoratorsOf(decoratable, context)
+    if (!decorators.allKnown()) return true
+    // lru_cache adds cache_clear and cache_info, singledispatch adds register
+    return decorators.containsAny(PyKnownDecorator.FUNCTOOLS_LRU_CACHE, PyKnownDecorator.FUNCTOOLS_SINGLEDISPATCH)
   }
 
   @Suppress("DEPRECATION")

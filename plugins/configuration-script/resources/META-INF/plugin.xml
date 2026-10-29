@@ -1,6 +1,6 @@
 <!-- BUILD_USING_BAZEL_MARKER: this plugin is also packaged by the `ij_plugin` Bazel rule, and IjPluginDistributionEquivalenceTest
      checks that the result matches the distribution produced by the build scripts. See IJPL-251444. -->
-<idea-plugin package="com.intellij.configurationScript">
+<idea-plugin>
   <name>Configuration Script</name>
   <id>com.intellij.configurationScript</id>
   <category>IDE Settings</category>
@@ -13,7 +13,6 @@
 
   <dependencies>
     <!-- region Generated dependencies - run `Generate Product Layouts` to regenerate -->
-    <module name="intellij.json.backend"/>
     <module name="intellij.libraries.kotlin.reflect"/>
     <module name="intellij.libraries.snakeyaml.engine"/>
     <module name="intellij.platform.analysis"/>
@@ -21,8 +20,6 @@
     <module name="intellij.platform.configurationStore.impl"/>
     <module name="intellij.platform.core"/>
     <module name="intellij.platform.core.impl"/>
-    <module name="intellij.platform.execution"/>
-    <module name="intellij.platform.execution.impl"/>
     <module name="intellij.platform.ide.core"/>
     <module name="intellij.platform.ide.impl"/>
     <module name="intellij.platform.lang"/>
@@ -33,17 +30,19 @@
     <module name="intellij.platform.workspace.jps"/>
     <!-- endregion -->
   </dependencies>
-  <content namespace="jetbrains"/>
+  <content namespace="jetbrains">
+    <module name="intellij.configurationScript.backend"/>
+    <module name="intellij.configurationScript.execution"/>
+  </content>
 
-  <extensions defaultExtensionNs="JavaScript.JsonSchema">
-    <ProviderFactory implementation="com.intellij.configurationScript.IntellijConfigurationJsonSchemaProviderFactory"/>
-  </extensions>
+  <extensionPoints>
+    <extensionPoint name="schemaGeneratorProvider" interface="com.intellij.configurationScript.SchemaGeneratorProvider" dynamic="true"/>
+  </extensionPoints>
+
   <extensions defaultExtensionNs="com.intellij">
     <projectService serviceInterface="com.intellij.profile.codeInspection.InspectionProjectProfileManager"
                     serviceImplementation="com.intellij.configurationScript.inspection.ExternallyConfigurableProjectInspectionProfileManager"
                     overrides="true"/>
-
-    <runConfigurationTemplateProvider implementation="com.intellij.configurationScript.providers.MyRunConfigurationTemplateProvider"/>
 
     <applicationService serviceInterface="com.intellij.openapi.project.impl.ProjectStoreFactory"
                         serviceImplementation="com.intellij.configurationScript.providers.ConfigurationScriptProjectStoreFactory"

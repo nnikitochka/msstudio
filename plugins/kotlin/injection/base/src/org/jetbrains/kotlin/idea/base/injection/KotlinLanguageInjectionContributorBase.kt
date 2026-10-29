@@ -28,7 +28,6 @@ import com.intellij.psi.util.CachedValue
 import com.intellij.psi.util.CachedValueProvider
 import com.intellij.psi.util.CachedValuesManager
 import com.intellij.psi.util.PsiTreeUtil
-import com.intellij.util.asSafely
 import org.intellij.plugins.intelliLang.Configuration
 import org.intellij.plugins.intelliLang.inject.LanguageInjectionSupport
 import org.intellij.plugins.intelliLang.inject.TemporaryPlacesRegistry
@@ -58,15 +57,17 @@ import org.jetbrains.kotlin.idea.references.KtReference
 import org.jetbrains.kotlin.idea.references.mainReference
 import org.jetbrains.kotlin.lexer.KtSingleValueToken
 import org.jetbrains.kotlin.lexer.KtTokens
+import org.jetbrains.kotlin.name.CallableId
 import org.jetbrains.kotlin.name.FqName
 import org.jetbrains.kotlin.name.Name
+import org.jetbrains.kotlin.name.Name.identifier
 import org.jetbrains.kotlin.name.StandardClassIds
 import org.jetbrains.kotlin.psi.KtArrayAccessExpression
 import org.jetbrains.kotlin.psi.KtBinaryExpression
+import org.jetbrains.kotlin.psi.KtBlockExpression
 import org.jetbrains.kotlin.psi.KtCallElement
 import org.jetbrains.kotlin.psi.KtCallExpression
 import org.jetbrains.kotlin.psi.KtCallableDeclaration
-import org.jetbrains.kotlin.psi.KtCollectionLiteralExpression
 import org.jetbrains.kotlin.psi.KtConstantExpression
 import org.jetbrains.kotlin.psi.KtConstructorCalleeExpression
 import org.jetbrains.kotlin.psi.KtContainerNode
@@ -77,7 +78,6 @@ import org.jetbrains.kotlin.psi.KtElement
 import org.jetbrains.kotlin.psi.KtExpression
 import org.jetbrains.kotlin.psi.KtFunction
 import org.jetbrains.kotlin.psi.KtIfExpression
-import org.jetbrains.kotlin.psi.KtLiteralStringTemplateEntry
 import org.jetbrains.kotlin.psi.KtOperationReferenceExpression
 import org.jetbrains.kotlin.psi.KtParameter
 import org.jetbrains.kotlin.psi.KtParenthesizedExpression
@@ -103,7 +103,8 @@ abstract class KotlinLanguageInjectionContributorBase : LanguageInjectionContrib
     // Abstract variables and functions are front-end dependent (K1 or K2).
     abstract val kotlinSupport: KotlinLanguageInjectionSupportBase?
 
-    abstract fun KtCallExpression.hasCallableId(packageName: FqName, callableName: Name): Boolean
+    abstract fun KtCallExpression.callableId(): CallableId?
+    abstract fun KtExpression?.computeConstantExpression(): Any?
 
     abstract fun resolveReference(reference: PsiReference): PsiElement?
 
@@ -116,8 +117,8 @@ abstract class KotlinLanguageInjectionContributorBase : LanguageInjectionContrib
     private val absentKotlinInjection: BaseInjection = BaseInjection("ABSENT_KOTLIN_BASE_INJECTION")
 
     companion object {
-        private val trimIndentName = Name.identifier("trimIndent")
-        private val trimMarginName = Name.identifier("trimMargin")
+        private val trimIndentCallableId = CallableId(StandardClassIds.BASE_TEXT_PACKAGE, identifier("trimIndent"))
+        private val trimMarginCallableId = CallableId(StandardClassIds.BASE_TEXT_PACKAGE, identifier("trimMargin"))
     }
 
     private data class KotlinCachedInjection(val modificationCount: Long, val baseInjection: BaseInjection)
@@ -212,18 +213,23 @@ abstract class KotlinLanguageInjectionContributorBase : LanguageInjectionContrib
     private fun unwrapTrims(ktHost: KtElement): KtElement {
         if (!Registry.`is`("kotlin.injection.handle.trimindent", true)) return ktHost
         val dotQualifiedExpression = ktHost.parent as? KtDotQualifiedExpression ?: return ktHost
-        val callExpression = dotQualifiedExpression.selectorExpression.asSafely<KtCallExpression>() ?: return ktHost
-        if (callExpression.hasCallableId(StandardClassIds.BASE_TEXT_PACKAGE, trimIndentName)) {
-            ktHost.indentHandler = TrimIndentHandler()
-            return dotQualifiedExpression
+        val callExpression = dotQualifiedExpression.selectorExpression as? KtCallExpression ?: return ktHost
+        val callableId = callExpression.callableId()
+        return when (callableId) {
+            trimIndentCallableId -> {
+                ktHost.indentHandler = TrimIndentHandler()
+                dotQualifiedExpression
+            }
+
+            trimMarginCallableId -> {
+                val argumentExpression = callExpression.valueArguments.firstOrNull()?.getArgumentExpression()
+                val marginChar = argumentExpression.computeConstantExpression() as? String
+                ktHost.indentHandler = TrimIndentHandler(marginChar)
+                dotQualifiedExpression
+            }
+
+            else -> ktHost
         }
-        if (callExpression.hasCallableId(StandardClassIds.BASE_TEXT_PACKAGE, trimMarginName)) {
-            val marginChar = callExpression.valueArguments.getOrNull(0)?.getArgumentExpression().asSafely<KtStringTemplateExpression>()
-                ?.entries?.singleOrNull()?.asSafely<KtLiteralStringTemplateEntry>()?.text ?: "|"
-            ktHost.indentHandler = TrimIndentHandler(marginChar)
-            return dotQualifiedExpression
-        }
-        return ktHost
     }
 
     private fun findInjectionInfo(place: KtElement, containingFile: PsiFile, configuration: Configuration, originalHost: Boolean = true): InjectionInfo? {
@@ -338,7 +344,8 @@ abstract class KotlinLanguageInjectionContributorBase : LanguageInjectionContrib
     protected open fun getTargetProperty(ktProperty: KtProperty, containingFile: PsiFile): KtProperty = ktProperty
 
     private tailrec fun injectWithCall(host: KtElement, configuration: Configuration): InjectionInfo? {
-        val argument = getArgument(host) ?: return null
+        val deparenthesized = (host.deparenthesized() as? KtParenthesizedExpression)?.parent as? KtElement ?: host
+        val argument = getArgument(deparenthesized) ?: return null
         val callExpression = PsiTreeUtil.getParentOfType(argument, KtCallElement::class.java) ?: return null
 
         if (getCallableShortName(callExpression) == "arrayOf") {
@@ -357,7 +364,16 @@ abstract class KotlinLanguageInjectionContributorBase : LanguageInjectionContrib
 
         for (reference in callee.references) {
             ProgressManager.checkCanceled()
-            when (val resolvedTo = resolveReference(reference)) {
+            val resolveReference = resolveReference(reference)
+            when (val resolvedTo = resolveReference) {
+                is PsiClass -> {
+                    val constructors = resolvedTo.constructors
+                    for (constructor in constructors) {
+                        injectionForJavaMethod(argument, constructor, configuration)
+                            ?.let { return it }
+                    }
+                }
+
                 is PsiMethod ->
                     injectionForJavaMethod(argument, resolvedTo, configuration)
                         ?.let { return it }
@@ -474,11 +490,13 @@ abstract class KotlinLanguageInjectionContributorBase : LanguageInjectionContrib
         return callee as? KtSimpleNameExpression
     }
 
-    private fun getArgument(host: KtElement): KtValueArgument? = when (val parent = host.parent) {
-        is KtValueArgument -> parent
-        is KtCollectionLiteralExpression, is KtCallElement -> parent.parent as? KtValueArgument
-        else -> null
-    }
+    private fun getArgument(host: KtElement): KtValueArgument? =
+        PsiTreeUtil.getParentOfType(
+            /* element = */ host,
+            /* aClass = */ KtValueArgument::class.java,
+            /* strict = */ false,
+            /* ...stopAt = */ KtBlockExpression::class.java
+        )
 
     private tailrec fun injectInAnnotationCall(host: KtElement, configuration: Configuration): InjectionInfo? {
         val argument = getArgument(host) ?: return null

@@ -2,6 +2,8 @@
 package com.intellij.platform.util.io.storages.database.storages.durablemap;
 
 import com.intellij.platform.util.io.storages.database.spi.BlocksStore;
+import com.intellij.platform.util.io.storages.database.spi.BlocksStore.Block.LifecycleState;
+import com.intellij.platform.util.io.storages.database.storages.appenablerecords.AppendableRecordBlocks;
 import com.intellij.util.io.CorruptedException;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
@@ -9,6 +11,7 @@ import org.jetbrains.annotations.NotNull;
 import java.io.IOException;
 import java.lang.foreign.MemorySegment;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.List;
 
@@ -36,14 +39,20 @@ public final class DurableMapBlockCatalog {
     return new DurableMapBlockCatalog(store, blocks, blocksByRole);
   }
 
-  /** @return all blocks known to the store, including retired blocks */
+  /// @return blocks that are not `RETIRED` when selected.
+  /// A returned block can become `RETIRED` before use.
   public synchronized @NotNull List<BlocksStore.Block> blocks() {
-    return List.copyOf(blocks);
+    return blocks.stream()
+      .filter(block -> block.state() != LifecycleState.RETIRED)
+      .toList();
   }
 
-  /** @return all blocks with the specified role, including retired blocks */
+  /// @return blocks with the specified role that are not `RETIRED` when selected.
+  /// A returned block can become `RETIRED` before use.
   public synchronized @NotNull List<BlocksStore.Block> blocks(@NotNull DurableMapBlockRole role) {
-    return List.copyOf(blocksByRole.get(role));
+    return blocksByRole.get(role).stream()
+      .filter(block -> block.state() != LifecycleState.RETIRED)
+      .toList();
   }
 
   /** Allocates a block and adds it to this catalog */
@@ -52,6 +61,39 @@ public final class DurableMapBlockCatalog {
     var block = store.allocateBlock(role.persistentCode(), minimumContentLength);
     addBlock(blocks, blocksByRole, block);
     return block;
+  }
+
+  /// @return appendable record blocks restricted to the specified durable map role
+  public @NotNull AppendableRecordBlocks appendableRecordBlocks(@NotNull DurableMapBlockRole role) {
+    switch (role) {
+      case ENTRIES, KEYS, VALUES -> { }
+      case LOOKUP -> throw new IllegalArgumentException("LOOKUP blocks do not store appendable records");
+    }
+    return new RoleAppendableRecordBlocks(role);
+  }
+
+  private final class RoleAppendableRecordBlocks implements AppendableRecordBlocks {
+    private final @NotNull DurableMapBlockRole role;
+
+    private RoleAppendableRecordBlocks(@NotNull DurableMapBlockRole role) {
+      this.role = role;
+    }
+
+    @Override
+    public @NotNull List<BlocksStore.Block> blocksInAllocationOrder() {
+      //TODO RC: could be done with less allocation by directly accessing and filtering blocksByRole, without
+      //         intermediate copy
+      //         Also, blocksByRole could keep already sorted blocks
+      return blocks(role).stream()
+        .filter(block -> block.state() != LifecycleState.RETIRED)
+        .sorted(Comparator.comparingInt(BlocksStore.Block::id))
+        .toList();
+    }
+
+    @Override
+    public @NotNull BlocksStore.Block allocateBlock(int minimumContentLength) throws IOException {
+      return DurableMapBlockCatalog.this.allocateBlock(role, minimumContentLength);
+    }
   }
 
   /// @return access restricted to the specified lookup implementation and generation
@@ -74,7 +116,7 @@ public final class DurableMapBlockCatalog {
       this.implementationId = implementationId;
       this.generation = generation;
       for (var block : DurableMapBlockCatalog.this.blocks(DurableMapBlockRole.LOOKUP)) {
-        if (block.state() == BlocksStore.Block.LifecycleState.RETIRED) {
+        if (block.state() == LifecycleState.RETIRED) {
           continue;
         }
         if (LookupBlockHeaderLayout.implementationId(block) == implementationId &&
@@ -86,7 +128,9 @@ public final class DurableMapBlockCatalog {
 
     @Override
     public synchronized @NotNull List<LookupBlocks.Block> blocks() {
-      return List.copyOf(scopedBlocks);
+      return scopedBlocks.stream()
+        .filter(block -> block.state() != LifecycleState.RETIRED)
+        .toList();
     }
 
     @Override
@@ -98,18 +142,19 @@ public final class DurableMapBlockCatalog {
         DurableMapBlockRole.LOOKUP,
         Math.addExact(LookupBlockHeaderLayout.HEADER_SIZE, minimumPayloadLength)
       );
-      var initialized = false;
       try {
         LookupBlockHeaderLayout.initialize(block, implementationId, generation);
         var scopedBlock = new ScopedLookupBlock(block);
         scopedBlocks.add(scopedBlock);
-        initialized = true;
         return scopedBlock;
       }
-      finally {
-        if (!initialized && block.state() == BlocksStore.Block.LifecycleState.ALLOCATED) {
+      catch (Throwable failure) {
+        if (block.state() == LifecycleState.ALLOCATED) {
+          //Not strictly required: ALLOCATED blocks are discarded on recovery phase of DB startup
+          // but why not do it right here, if we can?
           block.discard();
         }
+        throw failure;
       }
     }
 
@@ -147,7 +192,7 @@ public final class DurableMapBlockCatalog {
     }
 
     @Override
-    public @NotNull BlocksStore.Block.LifecycleState state() {
+    public @NotNull LifecycleState state() {
       return block.state();
     }
 
@@ -202,9 +247,13 @@ public final class DurableMapBlockCatalog {
   @ApiStatus.Internal
   public enum DurableMapBlockRole {
     /** Blocks with key-value records */
-    DATA(1),
+    ENTRIES(1),
     /** Blocks with persistent lookup structures */
-    LOOKUP(2);
+    LOOKUP(2),
+    /** Blocks with (unique) key records */
+    KEYS(3),
+    /** Blocks with value & patches records */
+    VALUES(4);
 
     private final int persistentCode;
 
@@ -218,8 +267,10 @@ public final class DurableMapBlockCatalog {
 
     private static @NotNull DurableMapBlockRole fromPersistentCode(int persistentCode) throws CorruptedException {
       return switch (persistentCode) {
-        case 1 -> DATA;
+        case 1 -> ENTRIES;
         case 2 -> LOOKUP;
+        case 3 -> KEYS;
+        case 4 -> VALUES;
         default -> throw new CorruptedException("Unknown durable map block role " + persistentCode);
       };
     }

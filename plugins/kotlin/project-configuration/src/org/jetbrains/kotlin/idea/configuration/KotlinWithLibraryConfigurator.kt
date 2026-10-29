@@ -3,9 +3,13 @@
 package org.jetbrains.kotlin.idea.configuration
 
 import com.intellij.facet.FacetManager
+import com.intellij.ide.actions.ShowSettingsUtilImpl
 import com.intellij.jarRepository.JarRepositoryManager
 import com.intellij.jarRepository.RepositoryLibraryType
 import com.intellij.model.SideEffectGuard
+import com.intellij.notification.NotificationAction
+import com.intellij.notification.NotificationGroupManager
+import com.intellij.notification.NotificationType
 import com.intellij.openapi.actionSystem.ex.ActionUtil
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.EDT
@@ -17,6 +21,7 @@ import com.intellij.openapi.module.ModuleManager
 import com.intellij.openapi.progress.EmptyProgressIndicator
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.project.RootsChangeRescanningInfo
 import com.intellij.openapi.roots.DependencyScope
 import com.intellij.openapi.roots.LibraryOrderEntry
 import com.intellij.openapi.roots.ModuleRootManager
@@ -26,6 +31,8 @@ import com.intellij.openapi.roots.libraries.Library
 import com.intellij.openapi.roots.libraries.LibraryProperties
 import com.intellij.openapi.roots.libraries.LibraryTablesRegistrar
 import com.intellij.openapi.roots.libraries.LibraryType
+import com.intellij.openapi.roots.ui.configuration.ModulesConfigurator
+import com.intellij.openapi.util.text.StringUtil
 import com.intellij.platform.backend.observation.launchTracked
 import com.intellij.platform.backend.workspace.WorkspaceModel
 import com.intellij.platform.backend.workspace.toVirtualFileUrl
@@ -49,12 +56,15 @@ import org.jetbrains.jps.model.serialization.library.JpsLibraryTableSerializer
 import org.jetbrains.kotlin.config.ApiVersion
 import org.jetbrains.kotlin.config.KotlinFacetSettingsProvider
 import org.jetbrains.kotlin.config.LanguageFeature
+import org.jetbrains.kotlin.idea.base.codeInsight.CliArgumentStringBuilder.buildArgumentString
 import org.jetbrains.kotlin.idea.base.codeInsight.CliArgumentStringBuilder.replaceLanguageFeature
 import org.jetbrains.kotlin.idea.base.platforms.StdlibDetectorFacility
 import org.jetbrains.kotlin.idea.base.projectStructure.ModuleSourceRootGroup
 import org.jetbrains.kotlin.idea.base.projectStructure.toModuleGroup
 import org.jetbrains.kotlin.idea.base.util.findLibrary
 import org.jetbrains.kotlin.idea.base.util.hasKotlinFilesInTestsOnly
+import org.jetbrains.kotlin.idea.base.util.invalidateProjectRoots
+import org.jetbrains.kotlin.idea.compiler.configuration.KotlinCompilerSettings
 import org.jetbrains.kotlin.idea.compiler.configuration.KotlinPluginLayout
 import org.jetbrains.kotlin.idea.configuration.ui.CreateLibraryDialogWithModules
 import org.jetbrains.kotlin.idea.facet.KotlinFacet
@@ -361,27 +371,47 @@ abstract class KotlinWithLibraryConfigurator<P : LibraryProperties<*>> protected
             return
         }
 
-        val facetSettings = KotlinFacetSettingsProvider.getInstance(module.project)?.getInitializedSettings(module)
-        if (facetSettings != null) {
-            ModuleRootModificationUtil.updateModel(module) {
-                feature.sinceVersion?.let { sinceVersion ->
-                    facetSettings.apiLevel = sinceVersion
-                    facetSettings.languageLevel = sinceVersion
-                }
-                facetSettings.compilerSettings?.apply {
-                    additionalArguments = additionalArguments.replaceLanguageFeature(
-                        feature,
-                        state,
-                        getRuntimeLibraryVersion(module),
-                        separator = " ",
-                        quoted = false
-                    )
-                }
-                KotlinFacet.get(module)?.let { kotlinFacet ->
-                    FacetManager.getInstance(module).facetConfigurationChanged(kotlinFacet)
-                }
+        val project = module.project
+        val facet = KotlinFacet.get(module)
+        val kotlinVersion = getRuntimeLibraryVersion(module)
+        val compilerArgument = feature.buildArgumentString(state, kotlinVersion)
+
+        fun updatedArguments(arguments: String): String =
+            arguments.replaceLanguageFeature(
+                feature,
+                state,
+                kotlinVersion,
+                separator = " ",
+                quoted = false
+            )
+
+        if (facet == null || facet.configuration.settings.useProjectSettings) {
+            KotlinCompilerSettings.getInstance(project).update {
+                additionalArguments = updatedArguments(additionalArguments)
+                // Trigger a roots change to invalidate Kotlin analysis caches.
+                // This lets open editors reanalyze the code with the updated compiler arguments.
+                project.invalidateProjectRoots(RootsChangeRescanningInfo.NO_RESCAN_NEEDED)
             }
+            notifyCompilerSettingsUpdated(module, compilerArgument, useProjectSettings = true)
+            return
         }
+
+        val facetSettings = KotlinFacetSettingsProvider.getInstance(project)
+            ?.getInitializedSettings(module)
+            ?: return
+        val compilerSettings = facetSettings.compilerSettings ?: return
+
+        ModuleRootModificationUtil.updateModel(module) {
+            feature.sinceVersion?.let { sinceVersion ->
+                facetSettings.apiLevel = sinceVersion
+                facetSettings.languageLevel = sinceVersion
+            }
+
+            compilerSettings.additionalArguments = updatedArguments(compilerSettings.additionalArguments)
+
+            FacetManager.getInstance(module).facetConfigurationChanged(facet)
+        }
+        notifyCompilerSettingsUpdated(module, compilerArgument, useProjectSettings = false)
     }
 
     override fun updateLanguageVersion(
@@ -468,4 +498,41 @@ abstract class KotlinWithLibraryConfigurator<P : LibraryProperties<*>> protected
             }
         }
     }
+}
+
+private fun notifyCompilerSettingsUpdated(module: Module, compilerArgument: String, useProjectSettings: Boolean) {
+    val project = module.project
+    val escapedArgument = StringUtil.escapeXmlEntities(compilerArgument)
+    val content = if (useProjectSettings) {
+        KotlinProjectConfigurationBundle.message("notification.compiler.settings.updated.project.content", escapedArgument)
+    } else {
+        KotlinProjectConfigurationBundle.message(
+            "notification.compiler.settings.updated.module.content",
+            escapedArgument,
+            StringUtil.escapeXmlEntities(module.name)
+        )
+    }
+    val actionText = if (useProjectSettings) {
+        KotlinProjectConfigurationBundle.message("notification.compiler.settings.updated.project.action")
+    } else {
+        KotlinProjectConfigurationBundle.message("notification.compiler.settings.updated.module.action")
+    }
+
+    NotificationGroupManager.getInstance()
+        .getNotificationGroup("Configure Kotlin")
+        .createNotification(
+            KotlinProjectConfigurationBundle.message("notification.compiler.settings.updated.title"),
+            content,
+            NotificationType.INFORMATION
+        )
+        .addAction(NotificationAction.createSimpleExpiring(actionText) {
+            if (!project.isDisposed) {
+                if (useProjectSettings) {
+                    ShowSettingsUtilImpl.showSettingsDialog(project, "project.kotlinCompiler", "")
+                } else if (!module.isDisposed) {
+                    KotlinFacet.get(module)?.let { ModulesConfigurator.showFacetSettingsDialog(it, null) }
+                }
+            }
+        })
+        .notify(project)
 }

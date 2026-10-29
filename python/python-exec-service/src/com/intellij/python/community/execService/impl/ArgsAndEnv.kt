@@ -2,9 +2,13 @@
 package com.intellij.python.community.execService.impl
 
 import com.intellij.execution.target.FullPathOnTarget
+import com.intellij.python.community.execService.EnvVar
+import com.intellij.python.community.execService.EnvVarVal
 import com.intellij.python.community.execService.FileReporter
 import com.intellij.python.community.execService.HowToReportFile
 import com.intellij.python.community.execService.resolveAgainst
+import com.jetbrains.python.Result
+import com.jetbrains.python.errorProcessing.MessageError
 import com.jetbrains.python.venvReader.Directory
 import java.nio.file.Path
 
@@ -12,44 +16,45 @@ import java.nio.file.Path
  * [commandArgs] are the process arguments (for example, `--foo=path_to_file`) and [env] is the environment.
  */
 @ConsistentCopyVisibility
-internal data class ArgsAndEnv private constructor(val commandArgs: List<String>, val env: Map<String, String>) {
+internal data class ArgsAndEnv private constructor(val commandArgs: List<String>, val env: List<EnvVar>) {
   companion object {
-    suspend fun create(args: List<Arg>, fileMapper: Uploader): ArgsAndEnv {
+    suspend fun create(args: List<Arg>, fileMapper: Uploader): Result<ArgsAndEnv, MessageError> {
       val commandArgs = mutableListOf<String>()
-      val env = mutableMapOf<String, String>()
+      val env = mutableListOf<EnvVar>()
       for (arg in args) {
         when (arg) {
           is Arg.FileArg -> {
-            addFileArgument(arg.fileReporter, fileMapper.uploadFile(arg.file), commandArgs, env)
+            val fileOnRemoteMachine = fileMapper.uploadFile(arg.file).getOr { return it }
+            addFileArgument(arg.fileReporter, fileOnRemoteMachine, commandArgs, env)
           }
           is Arg.StringArg -> {
             commandArgs.add(arg.arg)
           }
           is Arg.DirArg -> {
             // Upload the full root directory
-            val mapper = fileMapper.uploadDir(arg.root)
+            val mapper = fileMapper.uploadDir(arg.root).getOr { return it }
             for ((entry, fileReporter) in arg.filesToReport) {
               addFileArgument(fileReporter, mapper.getRemotePath(entry), commandArgs, env)
             }
           }
         }
       }
-      return ArgsAndEnv(commandArgs, env)
+      return Result.success(ArgsAndEnv(commandArgs, env))
     }
 
     private fun addFileArgument(
       fileReporter: FileReporter,
       fileOnRemoteMachine: FullPathOnTarget,
       commandArgs: MutableList<String>,
-      env: MutableMap<String, String>,
+      envs: MutableList<EnvVar>,
     ) {
       val (value, howToReport) = fileReporter.howToReportFile(fileOnRemoteMachine)
       when (howToReport) {
         HowToReportFile.AnArgument -> {
           commandArgs.add(value)
         }
-        is HowToReportFile.EnvVar -> {
-          env[howToReport.varName] = value
+        is HowToReportFile.AsEnvVar -> {
+          envs += EnvVar(howToReport.varName, EnvVarVal.RemotePath(value))
         }
       }
     }
@@ -58,14 +63,14 @@ internal data class ArgsAndEnv private constructor(val commandArgs: List<String>
 
 internal interface Uploader {
   /**
-   * Upload [localFile] and return its [FullPathOnTarget].
+   * Upload [localFile] and return its [FullPathOnTarget], or an error if the upload fails.
    */
-  suspend fun uploadFile(localFile: Path): FullPathOnTarget
+  suspend fun uploadFile(localFile: Path): Result<FullPathOnTarget, MessageError>
 
   /**
-   * Upload the full [localDir] and return a [PathMapper] for the files in it.
+   * Upload the full [localDir] and return a [PathMapper] for the files in it, or an error if the upload fails.
    */
-  suspend fun uploadDir(localDir: Directory): PathMapper
+  suspend fun uploadDir(localDir: Directory): Result<PathMapper, MessageError>
 }
 
 internal fun interface PathMapper {

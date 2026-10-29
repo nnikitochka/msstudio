@@ -2,12 +2,16 @@
 package com.intellij.openapi.vcs.changes
 
 import com.intellij.diff.FrameDiffTool
+import com.intellij.diff.impl.DiffSettingsHolder
+import com.intellij.diff.tools.fragmented.UnifiedDiffTool
 import com.intellij.diff.util.DiffPlaces
+import com.intellij.diff.util.DiffUserDataKeys
 import com.intellij.diff.util.DiffUserDataKeysEx
 import com.intellij.diff.util.DiffUtil
 import com.intellij.openapi.application.EDT
 import com.intellij.openapi.components.serviceAsync
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.util.Key
 import com.intellij.openapi.vcs.FilePath
 import com.intellij.openapi.vcs.changes.ChangeViewDiffRequestProcessor.ChangeWrapper
 import com.intellij.openapi.vcs.changes.ChangeViewDiffRequestProcessor.UnversionedFileWrapper
@@ -30,6 +34,7 @@ import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.platform.vcs.impl.shared.commit.EditedCommitDetails
 import com.intellij.util.cancelOnDispose
 import com.intellij.util.containers.JBIterable
+import com.intellij.util.ui.UIUtil
 import com.intellij.util.ui.tree.TreeUtil
 import com.intellij.vcs.VcsDisposable
 import kotlinx.coroutines.Dispatchers
@@ -72,11 +77,17 @@ class ChangesViewDiffPreviewProcessor(
 ) : TreeHandlerDiffRequestProcessor(if (isInEditor) DiffPlaces.DEFAULT else DiffPlaces.CHANGES_VIEW, changesView,
                                     ChangesViewDiffPreviewHandler) {
 
+  private var allowExcludeFromCommit = false
+
   init {
     putContextUserData(DiffUserDataKeysEx.LAST_REVISION_WITH_LOCAL, true)
+    if (isInEditor) putContextUserData(STRUCTURAL_PREVIEW_CONTEXT, true)
 
     val busConnection = project.messageBus.connect(this)
     busConnection.subscribe(LineStatusTrackerSettingListener.TOPIC, MyLineStatusTrackerSettingsListener())
+    busConnection.subscribe(ChangesViewModifier.TOPIC, ChangesViewModifier.ChangesViewModifierListener {
+      UIUtil.invokeLaterIfNeeded { if (!isDisposed) updateAllowExcludeFromCommit() }
+    })
 
     TreeHandlerChangesTreeTracker(tree, this, handler).track()
   }
@@ -97,7 +108,27 @@ class ChangesViewDiffPreviewProcessor(
 
   override fun forceKeepCurrentFileWhileFocused(): Boolean = true
 
+  /**
+   * With structural changes, the editor tab starts with the unified viewer. The tab keeps its own viewer order, so the viewer switch
+   * still works and other diff tabs keep their choice. The superclass constructor calls this method, so it reads the place from the context.
+   */
+  override fun getSettings(): DiffSettingsHolder.DiffSettings {
+    if (getContextUserData(DiffUserDataKeys.PLACE) != DiffPlaces.DEFAULT || !StructuralChangesViewSettings.isEnabled(project)) {
+      return super.getSettings()
+    }
+    val settings = DiffSettingsHolder.DiffSettings.getSettings(STRUCTURAL_PREVIEW_PLACE)
+    if (settings.diffToolsOrder.isEmpty()) settings.diffToolsOrder = listOf(UnifiedDiffTool::class.java.canonicalName)
+    return settings
+  }
+
   fun setAllowExcludeFromCommit(value: Boolean) {
+    allowExcludeFromCommit = value
+    updateAllowExcludeFromCommit()
+  }
+
+  /** With structural changes, the hunks in the tree have the checkboxes, so the editor tab shows none. */
+  private fun updateAllowExcludeFromCommit() {
+    val value = allowExcludeFromCommit && !(isInEditor && StructuralChangesViewSettings.isEnabled(project))
     if (DiffUtil.isUserDataFlagSet(ALLOW_EXCLUDE_FROM_COMMIT, context) == value) return
     context.putUserData(ALLOW_EXCLUDE_FROM_COMMIT, value)
     fireDiffSettingsChanged()
@@ -114,6 +145,12 @@ class ChangesViewDiffPreviewProcessor(
     }
   }
 }
+
+/** The viewer order of the Commit diff tab while structural changes are on. */
+private const val STRUCTURAL_PREVIEW_PLACE = "ChangesView.StructuralPreview"
+
+/** Marks the context of the Commit diff tab. [StructuralDiffPreviewAppearance] changes its viewers while structural changes are on. */
+internal val STRUCTURAL_PREVIEW_CONTEXT: Key<Boolean> = Key.create("ChangesView.StructuralPreview")
 
 internal object ChangesViewDiffPreviewHandler : ChangesTreeDiffPreviewHandler() {
   override val isShowAllChangesForEmptySelection: Boolean get() = false

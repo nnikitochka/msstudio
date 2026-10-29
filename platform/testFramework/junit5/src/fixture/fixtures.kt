@@ -3,7 +3,6 @@
 
 package com.intellij.testFramework.junit5.fixture
 
-import com.intellij.execution.RunManager
 import com.intellij.ide.impl.OpenProjectTask
 import com.intellij.ide.impl.ProjectUtil
 import com.intellij.openapi.Disposable
@@ -38,6 +37,7 @@ import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.util.io.toCanonicalPath
 import com.intellij.openapi.util.registry.Registry
 import com.intellij.openapi.util.registry.RegistryValue
+import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.vfs.VirtualFileManager
@@ -63,6 +63,8 @@ import com.intellij.testFramework.common.runAll
 import com.intellij.testFramework.common.runAllSuspend
 import com.intellij.testFramework.common.testWorkspaceModelLeak
 import com.intellij.testFramework.replaceService
+import com.intellij.ui.EditorNotifications
+import com.intellij.ui.EditorNotificationsImpl
 import com.intellij.ui.docking.DockManager
 import com.intellij.util.application
 import com.intellij.util.io.createDirectories
@@ -141,6 +143,25 @@ fun tempPathFixture(root: Path? = null, prefix: String = "IJ", subdirName: Strin
         }
       }
       realTempDir.delete(recursively = true)
+    }
+  }
+}
+
+/**
+ * Creates a temporary directory that is deleted through the VFS, so that no [VirtualFile] of the test stays valid.
+ * [tempPathFixture] deletes the directory only on disk.
+ */
+@TestOnly
+fun vfsDeletedTempPathFixture(): TestFixture<Path> = testFixture("vfsDeletedTempPathFixture") {
+  val path = tempPathFixture().init()
+  initialized(path) {
+    val directory = LocalFileSystem.getInstance().findFileByNioFile(path)
+    if (directory != null) {
+      writeAction {
+        if (directory.isValid) {
+          directory.delete(directory.fileSystem)
+        }
+      }
     }
   }
 }
@@ -235,15 +256,25 @@ fun projectFixture(
   // Keep command-triggered postponed formatting deterministic while full background service preloading is disabled.
   PomManager.getModel(project)
 
-  // Wait until components fully loaded. Otherwise, we might start loading then when a project is already disposed when a test is too fast.
-  RunManager.getInstanceAsync(project)
   initialized(project) {
     runAllSuspend(
+      { awaitEditorNotificationJobs(project) },
       { testWorkspaceModelLeak(project) },
       { ProjectManagerEx.getInstanceEx().forceCloseProjectAsync(project, save = false) },
       { application.checkEditorsReleased(project) },
     )
   }
+}
+
+/**
+ * Waits for the editor notification jobs of [project].
+ * A job keeps its file editors alive. An editor of a disposed module holds the old workspace model snapshot through its inlays.
+ * [testWorkspaceModelLeak] blocks the EDT, so a job that waits for the EDT cannot finish during the check.
+ */
+@TestOnly
+private suspend fun awaitEditorNotificationJobs(project: Project) {
+  val editorNotifications = project.serviceIfCreated<EditorNotifications>() as? EditorNotificationsImpl ?: return
+  editorNotifications.awaitUpdateJobs()
 }
 
 @TestOnly

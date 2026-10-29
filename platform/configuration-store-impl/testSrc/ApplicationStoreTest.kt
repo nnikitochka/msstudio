@@ -10,20 +10,25 @@ import com.intellij.openapi.components.ComponentManagerEx
 import com.intellij.openapi.components.PersistentStateComponent
 import com.intellij.openapi.components.RoamingType
 import com.intellij.openapi.components.SerializablePersistentStateComponent
+import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.State
 import com.intellij.openapi.components.Storage
 import com.intellij.openapi.components.StoragePathMacros
 import com.intellij.openapi.components.impl.stores.stateStore
 import com.intellij.openapi.components.service
+import com.intellij.openapi.components.serviceIfCreated
 import com.intellij.openapi.options.OptionsBundle
+import com.intellij.openapi.progress.Cancellation
 import com.intellij.openapi.progress.ProcessCanceledException
 import com.intellij.openapi.project.ProjectBundle
 import com.intellij.openapi.util.io.BufferExposingByteArrayOutputStream
+import com.intellij.openapi.util.registry.Registry
 import com.intellij.platform.settings.SettingsController
 import com.intellij.platform.settings.local.clearCacheStore
 import com.intellij.testFramework.ApplicationRule
 import com.intellij.testFramework.DisposableRule
 import com.intellij.testFramework.ExtensionTestUtil
+import com.intellij.testFramework.LoggedErrorProcessor
 import com.intellij.testFramework.assertions.Assertions.assertThat
 import com.intellij.testFramework.refreshVfs
 import com.intellij.testFramework.registerServiceInstance
@@ -31,9 +36,14 @@ import com.intellij.testFramework.rules.InMemoryFsRule
 import com.intellij.util.xmlb.SettingsInternalApi
 import com.intellij.util.xmlb.XmlSerializerUtil
 import com.intellij.util.xmlb.annotations.Attribute
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import org.assertj.core.data.MapEntry
 import org.intellij.lang.annotations.Language
 import org.junit.Assert.assertEquals
@@ -50,6 +60,10 @@ import java.io.InputStream
 import java.nio.file.Path
 import java.util.EnumMap
 import java.util.concurrent.CancellationException
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.zip.ZipInputStream
 import kotlin.coroutines.CoroutineContext
 import kotlin.io.path.createDirectories
@@ -60,6 +74,7 @@ import kotlin.io.path.getLastModifiedTime
 import kotlin.io.path.writeBytes
 import kotlin.io.path.writeText
 import kotlin.properties.Delegates
+import kotlin.time.Duration.Companion.seconds
 
 @OptIn(SettingsInternalApi::class)
 class ApplicationStoreTest {
@@ -323,6 +338,142 @@ class ApplicationStoreTest {
     component.loadStateCallback = null
     componentStore.initComponent(component, null, PluginManagerCore.CORE_ID)
     assertThat(component.options).isEqualTo(TestState("old"))
+  }
+
+  @Test
+  fun `prefetched state is used by initComponent`() = runBlocking<Unit>(Dispatchers.Default) {
+    val file = writeConfig("a.xml", """<application><component name="A" foo="old"/></application>""")
+    testAppConfig.refreshVfs()
+
+    componentStore.prefetchComponentState(A::class.java)
+    // initComponent must not read the file again
+    file.deleteIfExists()
+
+    val component = A()
+    componentStore.initComponent(component, null, PluginManagerCore.CORE_ID)
+    assertThat(component.options).isEqualTo(TestState("old"))
+  }
+
+  @Test
+  fun `prefetch skips the second storage`() = runBlocking<Unit>(Dispatchers.Default) {
+    writeConfig("new.xml", """<application><component name="B" foo="new"/></application>""")
+    writeConfig("old.xml", """<application><component name="A" foo="old"/></application>""")
+    testAppConfig.refreshVfs()
+    val streamProvider = ReadRecordingStreamProvider()
+    componentStore.storageManager.addStreamProvider(streamProvider)
+
+    componentStore.prefetchComponentState(SeveralStoragesConfigured::class.java)
+    // the first storage has no state of the component, but the prefetch must not read the second storage
+    assertThat(streamProvider.readFileSpecs).containsExactly("new.xml")
+
+    val component = SeveralStoragesConfigured()
+    componentStore.initComponent(component, null, PluginManagerCore.CORE_ID)
+    // initComponent reads the second storage, and it uses the prefetched data of the first storage
+    assertThat(component.foo).isEqualTo("old")
+    assertThat(streamProvider.readFileSpecs).containsExactly("new.xml", "old.xml")
+  }
+
+  @Test
+  fun `long read of the service state is cancellable before the service initialization`() = runBlocking<Unit>(Dispatchers.Default) {
+    val app = ApplicationManager.getApplication()
+    val storageManager = app.stateStore.storageManager
+    val streamProvider = SlowStreamProvider(
+      fileSpec = SLOW_READ_FILE_SPEC,
+      data = """<application><component name="SlowReadService" foo="stored"/></application>""",
+    )
+    storageManager.addStreamProvider(streamProvider)
+    val loggedErrors = CopyOnWriteArrayList<String>()
+    val errorProcessor = object : LoggedErrorProcessor() {
+      override fun processError(category: String, message: String, details: Array<String>, t: Throwable?): Set<Action> {
+        loggedErrors.add("$message: $t")
+        return super.processError(category, message, details, t)
+      }
+    }
+    try {
+      LoggedErrorProcessor.executeWith(errorProcessor).use {
+        val getService = launch {
+          app.service<SlowReadService>()
+        }
+        withTimeout(10.seconds) {
+          streamProvider.readStarted.await()
+        }
+        // the read runs before the initialization, so other callers do not wait for it
+        assertThat(app.serviceIfCreated<SlowReadService>()).isNull()
+
+        // the read checks the cancellation, so the caller must stop soon
+        withTimeout(10.seconds) {
+          getService.cancelAndJoin()
+        }
+        assertThat(app.serviceIfCreated<SlowReadService>()).isNull()
+      }
+      // the cancellation is not an error of the read
+      assertThat(loggedErrors).isEmpty()
+
+      // the canceled read must not keep an empty state for the storage
+      streamProvider.isSlow = false
+      assertThat(app.service<SlowReadService>().state).isEqualTo(TestState("stored"))
+    }
+    finally {
+      storageManager.removeStreamProvider(SlowStreamProvider::class.java)
+    }
+  }
+
+  @Test
+  fun `cancellation exception without the cancellation of the caller breaks the read of the service state`() = runBlocking<Unit>(Dispatchers.Default) {
+    val app = ApplicationManager.getApplication()
+    val storageManager = app.stateStore.storageManager
+    val readError = CancellationException("the provider fails, but the caller is not canceled")
+    val streamProvider = ThrowingStreamProvider(fileSpec = BROKEN_READ_FILE_SPEC, error = readError)
+    storageManager.addStreamProvider(streamProvider)
+    val loggedErrors = CopyOnWriteArrayList<Pair<String, Throwable?>>()
+    val errorProcessor = object : LoggedErrorProcessor() {
+      override fun processError(category: String, message: String, details: Array<String>, t: Throwable?): Set<Action> {
+        loggedErrors.add(message to t)
+        return Action.NONE
+      }
+    }
+    try {
+      val service = LoggedErrorProcessor.executeWith(errorProcessor).use {
+        // the caller is active, so the exception does not cancel the caller
+        app.service<BrokenReadService>()
+      }
+      assertThat(isActive).isTrue()
+
+      // the exception is reported as an error of the read, and the service gets the default state
+      assertThat(loggedErrors).hasSize(1)
+      val (message, error) = loggedErrors.single()
+      assertThat(message).isEqualTo("Cannot load data for $BROKEN_READ_FILE_SPEC")
+      assertThat(error).isNotInstanceOf(CancellationException::class.java).hasCause(readError)
+      assertThat(service.state).isEqualTo(TestState())
+
+      // the storage keeps the empty data, so the service initialization does not read the file again
+      assertThat(streamProvider.readCount.get()).isEqualTo(1)
+    }
+    finally {
+      storageManager.removeStreamProvider(ThrowingStreamProvider::class.java)
+    }
+  }
+
+  @Test
+  fun `registry key disables the preload of the service state`() = runBlocking<Unit>(Dispatchers.Default) {
+    val app = ApplicationManager.getApplication()
+    val storageManager = app.stateStore.storageManager
+    val streamProvider = PreparationRecordingStreamProvider()
+    storageManager.addStreamProvider(streamProvider)
+    try {
+      app.service<PreloadedService>()
+      assertThat(streamProvider.readsInPreparation).containsExactly(MapEntry.entry(PRELOADED_FILE_SPEC, true))
+
+      Registry.get("ide.service.preload.state").setValue(false, disposableRule.disposable)
+      app.service<NotPreloadedService>()
+      assertThat(streamProvider.readsInPreparation).containsExactly(
+        MapEntry.entry(PRELOADED_FILE_SPEC, true),
+        MapEntry.entry(NOT_PRELOADED_FILE_SPEC, false),
+      )
+    }
+    finally {
+      storageManager.removeStreamProvider(PreparationRecordingStreamProvider::class.java)
+    }
   }
 
   private class MyElement(val id: String) : CoroutineContext.Element {
@@ -672,6 +823,147 @@ class ApplicationStoreTest {
   private fun writeConfig(fileName: String, @Language("XML") data: String): Path =
     testAppConfig.resolve(fileName).createParentDirectories().apply { writeText(data) }
 
+  /**
+   * Serves [fileSpec] like a slow remote storage.
+   * While [isSlow] is `true`, a read of [fileSpec] waits until the caller is canceled.
+   */
+  private class SlowStreamProvider(private val fileSpec: String, private val data: String) : StreamProvider {
+    val readStarted: CompletableDeferred<Unit> = CompletableDeferred()
+
+    @Volatile
+    var isSlow: Boolean = true
+
+    override val isExclusive: Boolean = false
+
+    override fun isApplicable(fileSpec: String, roamingType: RoamingType): Boolean = fileSpec == this.fileSpec
+
+    override fun write(fileSpec: String, content: ByteArray, roamingType: RoamingType) {
+    }
+
+    override fun read(fileSpec: String, roamingType: RoamingType, consumer: (InputStream?) -> Unit): Boolean {
+      if (fileSpec != this.fileSpec) {
+        return false
+      }
+
+      if (isSlow) {
+        readStarted.complete(Unit)
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30)
+        while (System.nanoTime() < deadline) {
+          Cancellation.checkCancelled()
+          Thread.sleep(10)
+        }
+        throw AssertionError("The read of $fileSpec is not canceled")
+      }
+
+      consumer(ByteArrayInputStream(data.toByteArray()))
+      return true
+    }
+
+    override fun processChildren(
+      path: String,
+      roamingType: RoamingType,
+      filter: (String) -> Boolean,
+      processor: (String, InputStream, Boolean) -> Boolean,
+    ): Boolean = false
+
+    override fun delete(fileSpec: String, roamingType: RoamingType): Boolean = false
+  }
+
+  /**
+   * Throws [error] on each read of [fileSpec].
+   */
+  private class ThrowingStreamProvider(private val fileSpec: String, private val error: Throwable) : StreamProvider {
+    val readCount: AtomicInteger = AtomicInteger()
+
+    override val isExclusive: Boolean = false
+
+    override fun isApplicable(fileSpec: String, roamingType: RoamingType): Boolean = fileSpec == this.fileSpec
+
+    override fun write(fileSpec: String, content: ByteArray, roamingType: RoamingType) {
+    }
+
+    override fun read(fileSpec: String, roamingType: RoamingType, consumer: (InputStream?) -> Unit): Boolean {
+      if (fileSpec != this.fileSpec) {
+        return false
+      }
+      readCount.incrementAndGet()
+      throw error
+    }
+
+    override fun processChildren(
+      path: String,
+      roamingType: RoamingType,
+      filter: (String) -> Boolean,
+      processor: (String, InputStream, Boolean) -> Boolean,
+    ): Boolean = false
+
+    override fun delete(fileSpec: String, roamingType: RoamingType): Boolean = false
+  }
+
+  /**
+   * Records if the container reads [PRELOADED_FILE_SPEC] and [NOT_PRELOADED_FILE_SPEC] in the preparation of the initialization.
+   * It does not serve any data.
+   */
+  private class PreparationRecordingStreamProvider : StreamProvider {
+    val readsInPreparation: MutableMap<String, Boolean> = ConcurrentHashMap()
+
+    override val isExclusive: Boolean = false
+
+    override fun isApplicable(fileSpec: String, roamingType: RoamingType): Boolean {
+      return fileSpec == PRELOADED_FILE_SPEC || fileSpec == NOT_PRELOADED_FILE_SPEC
+    }
+
+    override fun write(fileSpec: String, content: ByteArray, roamingType: RoamingType) {
+    }
+
+    override fun read(fileSpec: String, roamingType: RoamingType, consumer: (InputStream?) -> Unit): Boolean {
+      if (isApplicable(fileSpec, roamingType)) {
+        readsInPreparation[fileSpec] = StackWalker.getInstance().walk { frames ->
+          frames.anyMatch { it.methodName == "prepareInitialization" }
+        }
+      }
+      return false
+    }
+
+    override fun processChildren(
+      path: String,
+      roamingType: RoamingType,
+      filter: (String) -> Boolean,
+      processor: (String, InputStream, Boolean) -> Boolean,
+    ): Boolean = false
+
+    override fun delete(fileSpec: String, roamingType: RoamingType): Boolean = false
+  }
+
+  /**
+   * Records the file specs of all reads.
+   * It does not serve any data, so the storage reads the local file.
+   */
+  private class ReadRecordingStreamProvider : StreamProvider {
+    val readFileSpecs: MutableList<String> = CopyOnWriteArrayList()
+
+    override val isExclusive: Boolean = false
+
+    override fun isApplicable(fileSpec: String, roamingType: RoamingType): Boolean = true
+
+    override fun write(fileSpec: String, content: ByteArray, roamingType: RoamingType) {
+    }
+
+    override fun read(fileSpec: String, roamingType: RoamingType, consumer: (InputStream?) -> Unit): Boolean {
+      readFileSpecs.add(fileSpec)
+      return false
+    }
+
+    override fun processChildren(
+      path: String,
+      roamingType: RoamingType,
+      filter: (String) -> Boolean,
+      processor: (String, InputStream, Boolean) -> Boolean,
+    ): Boolean = false
+
+    override fun delete(fileSpec: String, roamingType: RoamingType): Boolean = false
+  }
+
   private class MyStreamProvider : StreamProvider {
     override val isExclusive = true
 
@@ -746,7 +1038,44 @@ class ApplicationStoreTest {
 
   @State(name = "A", storages = [(Storage(value = "old.xml", deprecated = true)), (Storage("new.xml"))])
   private class ActualStorageLast : FooComponent()
+
+  @Service
+  @State(name = "SlowReadService", storages = [Storage(SLOW_READ_FILE_SPEC)], allowLoadInTests = true)
+  private class SlowReadService : PersistentStateComponent<TestState> {
+    private var state = TestState()
+
+    override fun getState(): TestState = state
+
+    override fun loadState(state: TestState) {
+      this.state = state
+    }
+  }
+
+  @Service
+  @State(name = "BrokenReadService", storages = [Storage(BROKEN_READ_FILE_SPEC)], allowLoadInTests = true)
+  private class BrokenReadService : PersistentStateComponent<TestState> {
+    private var state = TestState()
+
+    override fun getState(): TestState = state
+
+    override fun loadState(state: TestState) {
+      this.state = state
+    }
+  }
+
+  @Service
+  @State(name = "PreloadedService", storages = [Storage(PRELOADED_FILE_SPEC)], allowLoadInTests = true)
+  private class PreloadedService : A()
+
+  @Service
+  @State(name = "NotPreloadedService", storages = [Storage(NOT_PRELOADED_FILE_SPEC)], allowLoadInTests = true)
+  private class NotPreloadedService : A()
 }
+
+private const val SLOW_READ_FILE_SPEC = "slow-read.xml"
+private const val BROKEN_READ_FILE_SPEC = "broken-read.xml"
+private const val PRELOADED_FILE_SPEC = "preloaded.xml"
+private const val NOT_PRELOADED_FILE_SPEC = "not-preloaded.xml"
 
 internal data class TestState(@JvmField @Attribute var foo: String = "", @JvmField @Attribute var bar: String = "")
 

@@ -9,6 +9,7 @@ import com.intellij.openapi.editor.ex.RangeMarkerEx
 import com.intellij.openapi.editor.impl.DocumentImpl
 import com.intellij.openapi.util.Key
 import com.intellij.openapi.util.TextRange
+import com.intellij.openapi.util.TextRangeScalarUtil
 import com.intellij.util.Processor
 import com.intellij.util.ref.GCUtil
 import it.unimi.dsi.fastutil.longs.LongArrayList
@@ -34,6 +35,7 @@ import java.util.function.LongConsumer
 import kotlin.concurrent.thread
 import kotlin.random.Random
 
+@Suppress("SameParameterValue")
 @UsePMarkerImplementation
 class SnapshotMarkerEngineImplTest {
   @Test
@@ -54,7 +56,7 @@ class SnapshotMarkerEngineImplTest {
     assertEquals(TextRange(2, 4), marker.textRange)
 
     fixture.rootStore.updateRoot(snapshot) {
-      it.remove(marker.id).insert(marker.id, 3, 5, nonGreedySpec(), flavorFlags = 0)
+      applyPatch(it, "abcdef", textPatch(0, 0, "x"))
     }
 
     assertSame(snapshot, fixture.document.core.snapshot())
@@ -89,20 +91,20 @@ class SnapshotMarkerEngineImplTest {
 
     document.insertString(10, "x")
 
-    assertSame(beforeRange, before.textRange)
+    assertEquals(beforeRange, before.textRange)
     assertEquals(TextRange(1, 21), containing.textRange)
     assertEquals(TextRange(13, 15), after.textRange)
     val afterRange = after.textRange
 
     document.replaceString(10, 11, "y")
 
-    assertSame(beforeRange, before.textRange)
-    assertSame(afterRange, after.textRange)
+    assertEquals(beforeRange, before.textRange)
+    assertEquals(afterRange, after.textRange)
 
     document.deleteString(10, 11)
     before.isGreedyToRight = true
 
-    assertSame(beforeRange, before.textRange)
+    assertEquals(beforeRange, before.textRange)
     assertEquals(TextRange(12, 14), after.textRange)
   }
 
@@ -140,7 +142,7 @@ class SnapshotMarkerEngineImplTest {
       else MarkerTransformResult(entry.copy(nodeEnd = 5))
     }
     val marker = SnapshotMarkerEngineImpl.createRangeMarker(
-      document, document.core.snapshot(), 2, 4, nonGreedySpec().copy(policy = policy),
+      document, document.core.snapshot(), 2, 4, nonGreedySpec(), policy = policy,
     ) as SnapshotRangeMarkerImpl
     val containing = document.createRangeMarker(6, 20)
     val beforeRange = before.textRange
@@ -149,7 +151,7 @@ class SnapshotMarkerEngineImplTest {
     document.insertString(10, "x")
 
     assertTrue(transformed)
-    assertSame(beforeRange, before.textRange)
+    assertEquals(beforeRange, before.textRange)
     assertEquals(!invalidate, marker.isValid)
     assertEquals(TextRange(2, if (invalidate) 4 else 5), marker.textRange)
     assertCurrentResolution(marker)
@@ -374,7 +376,7 @@ class SnapshotMarkerEngineImplTest {
     val futureChild = fixture.edit(initialSnapshot, startOffset = 0, endOffset = 0, newFragment = "YY")
 
     assertRange(marker, initialSnapshot, startOffset = 2, endOffset = 4)
-    assertAbsent(marker, existingChild, startOffset = 2, endOffset = 4)
+    assertAbsent(marker, existingChild)
     assertRange(marker, futureChild, startOffset = 4, endOffset = 6)
   }
 
@@ -410,14 +412,14 @@ class SnapshotMarkerEngineImplTest {
       snapshot = initialSnapshot,
       startOffset = 2,
       endOffset = 4,
-      spec = MarkerSpec(isGreedyToLeft = true, isGreedyToRight = false)
+      spec = MarkerSpec.create(isGreedyToLeft = true, isGreedyToRight = false)
     )
     val nonGreedy = SnapshotMarkerEngineImpl.createRangeMarker(
       document = fixture.document,
       snapshot = initialSnapshot,
       startOffset = 2,
       endOffset = 4,
-      spec = MarkerSpec(isGreedyToLeft = false, isGreedyToRight = false)
+      spec = MarkerSpec.create(isGreedyToLeft = false, isGreedyToRight = false)
     )
 
     val child = fixture.edit(initialSnapshot, startOffset = 2, endOffset = 2, newFragment = "XX")
@@ -437,14 +439,14 @@ class SnapshotMarkerEngineImplTest {
       snapshot = initialSnapshot,
       startOffset = 2,
       endOffset = 4,
-      spec = MarkerSpec(isGreedyToLeft = false, isGreedyToRight = true)
+      spec = MarkerSpec.create(isGreedyToLeft = false, isGreedyToRight = true)
     )
     val nonGreedy = SnapshotMarkerEngineImpl.createRangeMarker(
       document = fixture.document,
       snapshot = initialSnapshot,
       startOffset = 2,
       endOffset = 4,
-      spec = MarkerSpec(isGreedyToLeft = false, isGreedyToRight = false)
+      spec = MarkerSpec.create(isGreedyToLeft = false, isGreedyToRight = false)
     )
 
     val child = fixture.edit(initialSnapshot, startOffset = 4, endOffset = 4, newFragment = "XX")
@@ -476,7 +478,7 @@ class SnapshotMarkerEngineImplTest {
       snapshot = initialSnapshot,
       startOffset = 2,
       endOffset = 2,
-      spec = MarkerSpec(isGreedyToLeft = false, isGreedyToRight = true)
+      spec = MarkerSpec.create(isGreedyToLeft = false, isGreedyToRight = true)
     ) as SnapshotRangeMarkerImpl
     sticking.setStickingToRight(true)
     greedy.setStickingToRight(true)
@@ -521,7 +523,8 @@ class SnapshotMarkerEngineImplTest {
       initialSnapshot,
       markerStart,
       markerStart + 3,
-      persistentSpec(),
+      nonGreedySpec(),
+      policy = PersistentMarkerPolicy,
     )
     val ordinaryMarker = SnapshotMarkerEngineImpl.createRangeMarker(
       document,
@@ -537,7 +540,7 @@ class SnapshotMarkerEngineImplTest {
 
     assertRange(persistentMarker, replacedSnapshot, expectedStart, expectedStart + 3)
     assertTrue(
-      SnapshotMarkerEngineImpl.resolveRangeMarker(ordinaryMarker, rootFor(ordinaryMarker, replacedSnapshot)) is PMarkerResolution.Invalid
+      !PMarkerResolution.isValid(SnapshotMarkerEngineImpl.resolveRangeMarker(ordinaryMarker, rootFor(ordinaryMarker, replacedSnapshot)))
     )
   }
 
@@ -553,7 +556,8 @@ class SnapshotMarkerEngineImplTest {
       initialSnapshot,
       markerStart,
       markerStart + 3,
-      persistentSpec(),
+      nonGreedySpec(),
+      policy = PersistentMarkerPolicy,
     )
     val ordinaryMarker = SnapshotMarkerEngineImpl.createRangeMarker(
       document,
@@ -571,7 +575,7 @@ class SnapshotMarkerEngineImplTest {
 
     assertRange(persistentMarker, replacedSnapshot, expectedStart, expectedStart + 3)
     assertTrue(
-      SnapshotMarkerEngineImpl.resolveRangeMarker(ordinaryMarker, rootFor(ordinaryMarker, replacedSnapshot)) is PMarkerResolution.Invalid
+      !PMarkerResolution.isValid(SnapshotMarkerEngineImpl.resolveRangeMarker(ordinaryMarker, rootFor(ordinaryMarker, replacedSnapshot)))
     )
   }
 
@@ -587,7 +591,8 @@ class SnapshotMarkerEngineImplTest {
       initialSnapshot,
       markerStart,
       markerStart + 3,
-      persistentSpec(),
+      nonGreedySpec(),
+      policy = PersistentMarkerPolicy,
     ) as SnapshotRangeMarkerImpl
     val replacementStart = oldText.indexOf("old-a")
     val replacementEnd = oldText.indexOf("stable2")
@@ -596,7 +601,7 @@ class SnapshotMarkerEngineImplTest {
 
     val snapshot = document.core.snapshot()
     assertTrue(
-      SnapshotMarkerEngineImpl.resolveRangeMarker(persistentMarker, rootFor(persistentMarker, snapshot)) is PMarkerResolution.Invalid
+      !PMarkerResolution.isValid(SnapshotMarkerEngineImpl.resolveRangeMarker(persistentMarker, rootFor(persistentMarker, snapshot)))
     )
   }
 
@@ -688,8 +693,8 @@ class SnapshotMarkerEngineImplTest {
 
     assertRange(marker, initialSnapshot, startOffset = 2, endOffset = 4)
     val storedMarker = marker as SnapshotRangeMarkerImpl
-    val invalid = SnapshotMarkerEngineImpl.resolveRangeMarker(storedMarker, rootFor(storedMarker, child)) as PMarkerResolution.Invalid
-    assertEquals(TextRange(2, 4), invalid)
+    val invalid = SnapshotMarkerEngineImpl.resolveRangeMarker(storedMarker, rootFor(storedMarker, child))
+    assertEquals(PMarkerResolution.invalid(TextRangeScalarUtil.toScalarRange(2, 4)), invalid)
     assertTrue(SnapshotMarkerEngineImpl.removeRangeMarker(marker))
     assertDisposed(marker, child, startOffset = 2, endOffset = 4)
   }
@@ -707,15 +712,22 @@ class SnapshotMarkerEngineImplTest {
 
     assertEquals(1, countOverlappingMarkers(fixture.rootStore, fixture.initialSnapshot, startOffset = 0, endOffset = 6))
 
+    fixture.document.insertString(0, "XX")
+    val currentSnapshot = fixture.document.core.snapshot()
     marker.dispose()
 
-    val resolution =
-      SnapshotMarkerEngineImpl.resolveRangeMarker(marker, rootFor(marker, fixture.initialSnapshot)) as PMarkerResolution.Invalid
-    assertEquals("Marker is disposed", resolution.reason)
-    assertEquals(TextRange(2, 4), resolution)
+    val root = rootFor(marker, currentSnapshot)
+    val resolution = SnapshotMarkerEngineImpl.resolveRangeMarker(marker, root)
+    assertEquals("Marker is disposed", SnapshotMarkerEngineImpl.invalidationReason(marker, root))
+    assertEquals(PMarkerResolution.invalid(TextRangeScalarUtil.toScalarRange(4, 6)), resolution)
     assertFalse(marker.isValid)
-    assertEquals(TextRange(2, 4), marker.textRange)
-    assertEquals(0, countOverlappingMarkers(fixture.rootStore, fixture.initialSnapshot, startOffset = 0, endOffset = 6))
+    assertEquals(TextRange(4, 6), marker.textRange)
+    assertEquals(0, countOverlappingMarkers(fixture.rootStore, currentSnapshot, startOffset = 0, endOffset = 8))
+    assertDisposed(marker, fixture.initialSnapshot, startOffset = 2, endOffset = 4)
+
+    fixture.document.insertString(0, "Y")
+    marker.dispose()
+    assertEquals(TextRange(4, 6), marker.textRange)
   }
 
   @Test
@@ -728,14 +740,18 @@ class SnapshotMarkerEngineImplTest {
       endOffset = 4,
       spec = nonGreedySpec()
     ) as SnapshotRangeMarkerImpl
+    fixture.document.insertString(0, "XX")
     assertTrue(fixture.document.removeRangeMarker(marker))
 
-    val resolution =
-      SnapshotMarkerEngineImpl.resolveRangeMarker(marker, rootFor(marker, fixture.initialSnapshot)) as PMarkerResolution.Invalid
-    assertEquals("Marker is disposed", resolution.reason)
+    val currentSnapshot = fixture.document.core.snapshot()
+    val root = rootFor(marker, currentSnapshot)
+    val resolution = SnapshotMarkerEngineImpl.resolveRangeMarker(marker, root)
+    assertFalse(PMarkerResolution.isValid(resolution))
+    assertEquals("Marker is disposed", SnapshotMarkerEngineImpl.invalidationReason(marker, root))
     assertFalse(marker.isValid)
-    assertEquals(0, countOverlappingMarkers(fixture.rootStore, fixture.initialSnapshot, startOffset = 0, endOffset = 6))
+    assertEquals(0, countOverlappingMarkers(fixture.rootStore, currentSnapshot, startOffset = 0, endOffset = 8))
     assertFalse(fixture.document.removeRangeMarker(marker))
+    assertEquals(TextRange(4, 6), marker.textRange)
   }
 
   @Test
@@ -898,7 +914,7 @@ class SnapshotMarkerEngineImplTest {
 
     val allRemoved = oneRemoved.remove(2)
     assertTrue(allRemoved.isEmpty())
-    assertTrue(allRemoved.resolve(1, TextRange.EMPTY_RANGE) is PMarkerResolution.Absent)
+    assertTrue(PMarkerResolution.isAbsent(allRemoved.resolve(1)))
     assertTrue(allRemoved.purgeMany(LongArrayList(longArrayOf(1, 2))).isEmpty())
     assertFalse(populated.isEmpty())
   }
@@ -909,7 +925,7 @@ class SnapshotMarkerEngineImplTest {
       .insert(1, 2, 4, nonGreedySpec(), 0)
       .insert(2, 5, 6, nonGreedySpec(), 0)
     val invalidated = applyPatch(populated, "abcdef", textPatch(1, 5, ""))
-    assertTrue(invalidated.resolve(1, TextRange.EMPTY_RANGE) is PMarkerResolution.Invalid)
+    assertFalse(PMarkerResolution.isValid(invalidated.resolve(1)))
     assertFalse(invalidated.isEmpty())
 
     val noValidMarkers = invalidated.remove(2)
@@ -1255,7 +1271,7 @@ class SnapshotMarkerEngineImplTest {
     val newText = "prefix\nalpha\ntarget\nomega\nsuffix"
     val markerStart = oldText.indexOf("target") + 1
     val root = PMarkerRootImpl.empty()
-      .insert(1, markerStart, markerStart, persistentSpec(), flavorFlags = 0, measure = 3)
+      .insert(1, markerStart, markerStart, nonGreedySpec(), flavorFlags = 0, measure = 3, policy = PersistentMarkerPolicy)
       .insert(2, markerStart, markerStart, nonGreedySpec(), flavorFlags = 0, measure = 5)
 
     val rebuilt = applyPatch(root, oldText, textPatch(startOffset = 0, endOffset = oldText.length, newFragment = newText))
@@ -1284,7 +1300,7 @@ class SnapshotMarkerEngineImplTest {
           val markerId = nextMarkerId++
           val offset = random.nextInt(document.textLength + 1)
           val measure = random.nextInt(maxMeasure)
-          val spec = nonGreedySpec().withStickyToRight(random.nextBoolean())
+          val spec = MarkerSpec.withStickyToRight(nonGreedySpec(), random.nextBoolean())
           rootStore.updateRoot(document.core.snapshot()) {
             it.insert(markerId, offset, offset, spec, flavorFlags = 0, measure = measure)
           }
@@ -1323,7 +1339,7 @@ class SnapshotMarkerEngineImplTest {
   }
 
   @Test
-  fun `marker spec delegates transformation to its policy`() {
+  fun `marker entry delegates transformation to its policy`() {
     var receivedPatch: DocumentPatch? = null
     val invalidatedMarkerIds = ArrayList<Long>()
     val policy = MarkerPolicy { entry, patch, _, _ ->
@@ -1334,9 +1350,11 @@ class SnapshotMarkerEngineImplTest {
       markerId = 1,
       startOffset = 2,
       endOffset = 4,
-      spec = nonGreedySpec().copy(policy = policy),
+      spec = nonGreedySpec(),
       flavorFlags = 0,
-      markerReference = null)
+      markerReference = null,
+      policy = policy,
+    )
 
     val patch = DocumentPatch.complex(
       startOffset = 2,
@@ -1348,10 +1366,12 @@ class SnapshotMarkerEngineImplTest {
       originEndOffset = 2,
       moveOffset = 3,
     )
-    val edited = applyPatch(root, "abcd", patch, LongConsumer(invalidatedMarkerIds::add))
+    val updated = root.updateSpec(1, MarkerSpec.withGreedyToLeft(nonGreedySpec(), true))
+    val edited = applyPatch(updated, "abcd", patch, LongConsumer(invalidatedMarkerIds::add))
 
-    val invalid = edited.resolve(1, TextRange(0, 0)) as PMarkerResolution.Invalid
-    assertEquals("Invalidated by test marker policy", invalid.reason)
+    val invalid = edited.resolve(1)
+    assertFalse(PMarkerResolution.isValid(invalid))
+    assertEquals("Invalidated by test marker policy", edited.invalidationReason(1))
     assertEquals(listOf(1L), invalidatedMarkerIds)
     assertSame(patch, receivedPatch)
   }
@@ -1368,7 +1388,7 @@ class SnapshotMarkerEngineImplTest {
       .insert(2, 1, 6, nonGreedySpec(), flavorFlags = 0)
       .insert(3, 3, 5, nonGreedySpec(), flavorFlags = 0)
       .insert(4, 7, 9, nonGreedySpec(), flavorFlags = 0)
-      .insert(5, 3, 4, nonGreedySpec().copy(policy = invalidatingPolicy), flavorFlags = 0)
+      .insert(5, 3, 4, nonGreedySpec(), flavorFlags = 0, policy = invalidatingPolicy)
 
     applyPatch(
       root,
@@ -1474,6 +1494,7 @@ class SnapshotMarkerEngineImplTest {
       endOffset = 4,
       spec = nonGreedySpec(),
     )
+    fixture.document.insertString(0, "XX")
     val start = CountDownLatch(1)
     val results = ConcurrentLinkedQueue<Boolean>()
     val threads = List(4) {
@@ -1488,6 +1509,7 @@ class SnapshotMarkerEngineImplTest {
 
     assertEquals(1, results.count { it })
     assertEquals(3, results.count { !it })
+    assertEquals(TextRange(4, 6), marker.textRange)
   }
 
   @Test
@@ -1556,42 +1578,43 @@ class SnapshotMarkerEngineImplTest {
 
     assertSame(fixture.document, marker.document)
     val initialResolution = SnapshotMarkerEngineImpl.resolveRangeMarker(marker, rootFor(marker, fixture.initialSnapshot))
-    assertEquals(2, initialResolution.startOffset)
-    assertEquals(4, initialResolution.endOffset)
+    assertEquals(2, PMarkerResolution.startOffset(initialResolution))
+    assertEquals(4, PMarkerResolution.endOffset(initialResolution))
 
     val childResolution = SnapshotMarkerEngineImpl.resolveRangeMarker(marker, rootFor(marker, child))
-    assertEquals(4, childResolution.startOffset)
-    assertEquals(6, childResolution.endOffset)
+    assertEquals(4, PMarkerResolution.startOffset(childResolution))
+    assertEquals(6, PMarkerResolution.endOffset(childResolution))
   }
 
   private fun assertCurrentResolution(marker: SnapshotRangeMarkerImpl, message: String = "") {
     val expected = SnapshotMarkerEngineImpl.resolveRangeMarker(marker, marker.currentRootReference().get())
     val actual = marker.textRange
-    assertEquals(expected.javaClass, actual.javaClass, message)
-    assertEquals(expected, actual, message)
-    assertEquals(expected.isValid, marker.isValid, message)
-    assertEquals(expected.startOffset, marker.startOffset, message)
-    assertEquals(expected.endOffset, marker.endOffset, message)
+    assertFalse(PMarkerResolution.isAbsent(expected), message)
+    assertEquals(PMarkerResolution.toTextRange(expected), actual, message)
+    assertEquals(PMarkerResolution.isValid(expected), marker.isValid, message)
+    assertEquals(PMarkerResolution.startOffset(expected), marker.startOffset, message)
+    assertEquals(PMarkerResolution.endOffset(expected), marker.endOffset, message)
   }
 
   private fun assertRange(marker: SnapshotMarker, snapshot: DocumentSnapshot, startOffset: Int, endOffset: Int) {
     val storedMarker = marker as SnapshotRangeMarkerImpl
     val resolution = SnapshotMarkerEngineImpl.resolveRangeMarker(storedMarker, rootFor(storedMarker, snapshot))
-    assertEquals(startOffset, resolution.startOffset)
-    assertEquals(endOffset, resolution.endOffset)
+    assertEquals(startOffset, PMarkerResolution.startOffset(resolution))
+    assertEquals(endOffset, PMarkerResolution.endOffset(resolution))
   }
 
-  private fun assertAbsent(marker: SnapshotMarker, snapshot: DocumentSnapshot, startOffset: Int, endOffset: Int) {
+  private fun assertAbsent(marker: SnapshotMarker, snapshot: DocumentSnapshot) {
     val storedMarker = marker as SnapshotRangeMarkerImpl
-    val resolution = SnapshotMarkerEngineImpl.resolveRangeMarker(storedMarker, rootFor(storedMarker, snapshot)) as PMarkerResolution.Absent
-    assertEquals(TextRange(startOffset, endOffset), resolution)
+    val resolution = SnapshotMarkerEngineImpl.resolveRangeMarker(storedMarker, rootFor(storedMarker, snapshot))
+    assertEquals(PMarkerResolution.ABSENT, resolution)
   }
 
   private fun assertDisposed(marker: SnapshotMarker, snapshot: DocumentSnapshot, startOffset: Int, endOffset: Int) {
     val storedMarker = marker as SnapshotRangeMarkerImpl
-    val resolution = SnapshotMarkerEngineImpl.resolveRangeMarker(storedMarker, rootFor(storedMarker, snapshot))
-    assertEquals("Marker is disposed", (resolution as PMarkerResolution.Invalid).reason)
-    assertEquals(TextRange(startOffset, endOffset), resolution)
+    val root = rootFor(storedMarker, snapshot)
+    val resolution = SnapshotMarkerEngineImpl.resolveRangeMarker(storedMarker, root)
+    assertEquals("Marker is disposed", SnapshotMarkerEngineImpl.invalidationReason(storedMarker, root))
+    assertEquals(PMarkerResolution.invalid(TextRangeScalarUtil.toScalarRange(startOffset, endOffset)), resolution)
   }
 
   private fun rootFor(marker: SnapshotRangeMarkerImpl, snapshot: DocumentSnapshot): PMarkerRoot {
@@ -1744,9 +1767,7 @@ class SnapshotMarkerEngineImplTest {
     val reference: WeakReference<SnapshotRangeMarkerImpl>,
   )
 
-  private fun nonGreedySpec(): MarkerSpec = MarkerSpec(isGreedyToLeft = false, isGreedyToRight = false)
-
-  private fun persistentSpec(): MarkerSpec = nonGreedySpec().copy(policy = PersistentMarkerPolicy)
+  private fun nonGreedySpec(): Byte = MarkerSpec.create(isGreedyToLeft = false, isGreedyToRight = false)
 
   private fun textPatch(startOffset: Int, endOffset: Int, newFragment: String): DocumentPatch {
     return DocumentPatch.simple(
@@ -1766,7 +1787,7 @@ class SnapshotMarkerEngineImplTest {
     affectedMarkerConsumer: LongConsumer = PMarkerRoot.EMPTY_LONG_CONSUMER,
   ): PMarkerRoot {
     val beforeText = DocumentImpl(before, true).core.snapshot().text()
-    val afterText = patch.ops().fold(beforeText) { text, op -> text.applyOp(op) }
+    val afterText = beforeText.replace(patch.startOffset(), patch.endOffset(), patch.newFragment())
     return root.applyPatch(patch, beforeText, afterText, invalidatedMarkerConsumer, affectedMarkerConsumer)
   }
 
@@ -1777,10 +1798,14 @@ class SnapshotMarkerEngineImplTest {
 
     private val markerStores: SnapshotMarkerStores = document.snapshotMarkerStores
 
-    private var nextModSequence = initialSnapshot.modState().sequence() + 1
-    private var nextModStamp = initialSnapshot.modState().stamp() + 1
+    private var nextModSequence: Int = initialSnapshot.modState().sequence() + 1
+    private var nextModStamp: Long = initialSnapshot.modState().stamp() + 1
 
-    fun applyOp(parent: DocumentSnapshot, op: DocumentOp): DocumentSnapshot = markerStores.applyPatch(parent, parent.applyOp(op), null)
+    fun applyOp(parent: DocumentSnapshot, op: DocumentOp): DocumentSnapshot {
+      val child = parent.applyOp(op)
+      markerStores.applyPatch(parent, child, null)
+      return child
+    }
 
     fun mergeMarkerRoots(markerSnapshot: DocumentSnapshot, metadataSnapshot: DocumentSnapshot): DocumentSnapshot =
       markerStores.mergeMarkerRoots(markerSnapshot, metadataSnapshot)
@@ -1809,7 +1834,9 @@ class SnapshotMarkerEngineImplTest {
       while (child.modState().sequence() < targetModSequence) {
         newModStamp = nextModStamp++
         val op = DocumentOp.modStampOp(newModStamp, true)
-        child = markerStores.applyPatch(child, child.applyOp(op), null)
+        val nextChild = child.applyOp(op)
+        markerStores.applyPatch(child, nextChild, null)
+        child = nextChild
       }
 
       check(child.modState().sequence() == targetModSequence) {

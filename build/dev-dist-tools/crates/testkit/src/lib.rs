@@ -1,8 +1,10 @@
 //! The helpers that the tests of the dev-dist tools share. Only `[dev-dependencies]` name this crate, so no tool links
 //! it, and a change here reruns no Bazel action of a tool.
 
+use std::ffi::{OsStr, OsString};
 use std::fmt::{Debug, Display};
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
@@ -144,6 +146,19 @@ pub fn require_error<T: Debug, E: Display>(result: Result<T, E>, message: &str) 
     }
 }
 
+/// Fails unless `result` is an error whose text with its causes contains `message`, as [`require_error`] does. A failure
+/// names the case `case` of a table.
+#[track_caller]
+pub fn require_case_error<T, E: Display>(case: &str, result: Result<T, E>, message: &str) {
+    match result {
+        Ok(_) => panic!("{case}: expected an error with {message:?}"),
+        Err(error) => {
+            let text = format!("{error:#}");
+            assert!(text.contains(message), "{case}: expected {message:?}, got {text:?}");
+        }
+    }
+}
+
 /// Sets the permission bits of a file. It does nothing on Windows, where the tools set no bits.
 pub fn set_mode(path: impl AsRef<Path>, mode: u32) {
     #[cfg(unix)]
@@ -167,10 +182,109 @@ pub fn directory_symlink(target: impl AsRef<Path>, link: impl AsRef<Path>) {
     fscopy::symlink(target.as_ref(), link.as_ref(), true).unwrap_or_else(|error| panic!("{error}"));
 }
 
+/// The text of a plan file of the plugin `demo` with the default variant. `assets` is the text of the asset list, and
+/// each of `sections` is one more top-level member, such as `"operations": []`.
+pub fn plan_text(version: u32, assets: &str, sections: &[&str]) -> String {
+    let mut text = format!(r#"{{"version": {version}, "plugin": "demo", "variant": "", "assets": [{assets}]"#);
+    for section in sections {
+        text.push_str(", ");
+        text.push_str(section);
+    }
+    text.push('}');
+    text
+}
+
 /// The bytes of the reference vectors of the Kotlin content hash: byte `i` is the low byte of `31 * i + 7`.
 #[expect(clippy::cast_possible_truncation, reason = "the vector keeps the low byte of each value")]
 pub fn reference_bytes(size: usize) -> Vec<u8> {
     (0..size).map(|index| (index.wrapping_mul(31).wrapping_add(7)) as u8).collect()
+}
+
+/// The Kotlin content hash of [`reference_bytes`] for each size of the reference vectors. The sizes cross the borders of
+/// the short inputs, of the 240-byte input and of the block of 256 KiB.
+#[expect(
+    clippy::unreadable_literal,
+    reason = "the hashes are copied from the output of the former Kotlin tool"
+)]
+pub const REFERENCE_CONTENT_HASHES: [(usize, i64); 10] = [
+    (0, 3244421341483603138),
+    (1, -2399747073602280719),
+    (3, -737883702129266468),
+    (240, 2788469911834355041),
+    (241, -4155630063455057979),
+    (262143, 9078738661776034622),
+    (262144, -1692254647099917537),
+    (262145, -2541306581069977202),
+    (524288, 3157545227256347297),
+    (524301, 8144707773225287728),
+];
+
+/// The outcome of one run of a tool: the exit code, the text on stdout and the text on stderr.
+#[derive(Debug)]
+pub struct Run {
+    pub code: u8,
+    pub output: String,
+    pub errors: String,
+}
+
+impl Run {
+    /// Fails the test unless the run failed with an error that holds `message`.
+    #[track_caller]
+    pub fn assert_error(&self, message: &str) {
+        assert!(
+            self.code != 0 && self.errors.contains(message),
+            "exit {}, errors {:?}, expected {message:?}",
+            self.code,
+            self.errors
+        );
+    }
+
+    #[track_caller]
+    pub fn assert_success(&self) {
+        assert_eq!(self.code, 0, "errors: {}", self.errors);
+    }
+}
+
+/// Calls the `run` function of a tool with `args`, as `main` calls it, and keeps the text that it writes.
+pub fn run_tool(run: impl FnOnce(Vec<OsString>, &mut dyn Write, &mut dyn Write) -> u8, args: &[impl AsRef<OsStr>]) -> Run {
+    let (mut output, mut errors) = (Vec::new(), Vec::new());
+    let code = run(args.iter().map(|arg| arg.as_ref().to_owned()).collect(), &mut output, &mut errors);
+    Run {
+        code,
+        output: String::from_utf8(output).expect("UTF-8 on stdout"),
+        errors: String::from_utf8(errors).expect("UTF-8 on stderr"),
+    }
+}
+
+/// The variable that holds the setup command of a child test run.
+const CHILD_SETUP: &str = "TESTKIT_CHILD_SETUP";
+
+/// Runs the test `name` again in a child process for each shell command of `setups`, such as `umask 002`, and fails
+/// unless each child run passes. `name` is the path of the test in its crate, as `--exact` takes it.
+///
+/// The parent gets `None`, and its test stops. A child gets its setup command, and its test runs the body under it.
+#[track_caller]
+pub fn rerun_under_shell(name: &str, setups: &[&str]) -> Option<String> {
+    if let Some(setup) = std::env::var_os(CHILD_SETUP) {
+        return Some(setup.into_string().expect("a UTF-8 setup command"));
+    }
+    for setup in setups {
+        let output = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(format!(r#"{setup} && exec "$0" --exact "$1" --nocapture"#))
+            .arg(std::env::current_exe().expect("the test binary"))
+            .arg(name)
+            .env(CHILD_SETUP, setup)
+            .output()
+            .expect("a child test run");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            output.status.success() && stdout.contains(" 1 passed;"),
+            "the run under `{setup}` failed:\n{stdout}\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    None
 }
 
 #[cfg(test)]

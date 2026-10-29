@@ -3,15 +3,9 @@ package com.intellij.database.run.ui.table;
 import com.intellij.database.datagrid.DataGrid;
 import com.intellij.database.datagrid.GridColumn;
 import com.intellij.database.datagrid.GridRow;
-import com.intellij.database.datagrid.ResultView;
-import com.intellij.database.datagrid.ViewIndex;
 import com.intellij.database.datagrid.ViewIndexSet;
-import com.intellij.ui.table.JBTable;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-
-import javax.swing.JScrollPane;
-import java.awt.Point;
 
 enum GridSelectionGrowerStrategy {
   CELL {
@@ -25,18 +19,9 @@ enum GridSelectionGrowerStrategy {
     }
 
     @Override
-    public void changeSelection(@NotNull DataGrid panel, @NotNull ResultView resultView, @NotNull JBTable table) {
-      JScrollPane pane = (JScrollPane)panel.getMainResultViewComponent();
-      Point position = pane.getViewport() == null ? new Point(0, 0) : pane.getViewport().getViewPosition();
-      int rowAtPoint = get(table.rowAtPoint(position), table.getRowCount());
-      int columnAtPoint = get(table.columnAtPoint(position), table.getColumnCount());
-      boolean transposed = resultView.isTransposed();
-      panel.getSelectionModel().setSelection(ViewIndex.forRow(panel, !transposed ? rowAtPoint : columnAtPoint).toModel(panel),
-                                             ViewIndex.forColumn(panel, !transposed ? columnAtPoint : rowAtPoint).toModel(panel));
-    }
-
-    private static int get(int value, int upperBound) {
-      return value < 0 || value >= upperBound ? 0 : value;
+    public void changeSelection(@NotNull DataGrid panel, @NotNull TableResultView view) {
+      var cell = view.firstVisibleCell();
+      panel.getSelectionModel().setSelection(cell.getFirst().toModel(panel), cell.getSecond().toModel(panel));
     }
   },
   COLUMN(true) {
@@ -51,7 +36,7 @@ enum GridSelectionGrowerStrategy {
     }
 
     @Override
-    public void changeSelection(@NotNull DataGrid panel, @NotNull ResultView resultView, @NotNull JBTable table) {
+    public void changeSelection(@NotNull DataGrid panel, @NotNull TableResultView view) {
       panel.getSelectionModel().selectWholeColumn();
     }
   },
@@ -67,7 +52,7 @@ enum GridSelectionGrowerStrategy {
     }
 
     @Override
-    public void changeSelection(@NotNull DataGrid panel, @NotNull ResultView resultView, @NotNull JBTable table) {
+    public void changeSelection(@NotNull DataGrid panel, @NotNull TableResultView view) {
       panel.getSelectionModel().selectWholeRow();
     }
   },
@@ -83,7 +68,7 @@ enum GridSelectionGrowerStrategy {
     }
 
     @Override
-    public void changeSelection(@NotNull DataGrid panel, @NotNull ResultView resultView, @NotNull JBTable table) {
+    public void changeSelection(@NotNull DataGrid panel, @NotNull TableResultView view) {
       panel.getSelectionModel().selectWholeRow();
       panel.getSelectionModel().selectWholeColumn();
     }
@@ -113,14 +98,14 @@ enum GridSelectionGrowerStrategy {
     return myNeedStore;
   }
 
-  abstract void changeSelection(@NotNull DataGrid panel, @NotNull ResultView resultView, @NotNull JBTable table);
+  abstract void changeSelection(@NotNull DataGrid panel, @NotNull TableResultView view);
 
   abstract boolean isSuitable(@NotNull ViewIndexSet<GridRow> selectedRows,
                               @NotNull ViewIndexSet<GridColumn> selectedColumns,
                               int rowCount,
                               int columnCount,
                               boolean transposed);
-  static @Nullable GridSelectionGrowerStrategy of(@NotNull DataGrid grid, @NotNull ResultView view) {
+  static @Nullable GridSelectionGrowerStrategy of(@NotNull DataGrid grid, @NotNull TableResultView view) {
     ViewIndexSet<GridRow> rows = grid.getSelectionModel().getSelectedRows().toView(grid);
     ViewIndexSet<GridColumn> columns = grid.getSelectionModel().getSelectedColumns().toView(grid);
     int rowCount = grid.getVisibleRows().size();

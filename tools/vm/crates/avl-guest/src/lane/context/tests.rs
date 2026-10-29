@@ -13,6 +13,7 @@ use serde_json::Value;
 use super::*;
 use crate::lane::identity::{KeyInputs, LaneIdentity};
 use crate::lane::services::testing::{FIXTURE_JAVA, fixture_jar};
+use crate::lane::testing::lane_context_testdata;
 
 /// The daemon port of the default lane daemon, `AIR_VM_DAEMON_PORT`.
 const DAEMON_PORT: u16 = 27_100;
@@ -24,14 +25,9 @@ const OPTION_FILES_DIGEST: &str = "e1abc8fc017dfeaa535168b652f8624bd88d626773b0c
 /// A controlled agent of the fixture. The IDE serves the control channel of every controlled agent.
 const IDE_OWNED_AGENT: &str = "genui-agent";
 
-fn testdata(name: &str) -> PathBuf {
-    let path = avl_testkit::crate_path!(&format!("testdata/lane-context/{name}"));
-    std::path::absolute(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()))
-}
-
 /// The bytes of the fixture: the committed lane document of the lane `UI`.
 fn document_bytes() -> Vec<u8> {
-    fs::read(testdata("ui.json")).expect("the fixture lane document")
+    fs::read(lane_context_testdata("ui.json")).expect("the fixture lane document")
 }
 
 fn document() -> LaneDocument {
@@ -227,7 +223,7 @@ fn the_option_templates_have_the_pinned_digest() {
 #[test]
 fn the_context_of_the_ui_lane_is_the_golden() {
     let (prepared, _, _) = written(&document());
-    expect_test::expect_file![testdata("ui-context.txt")].assert_eq(&tree(&prepared.context));
+    expect_test::expect_file![lane_context_testdata("ui-context.txt")].assert_eq(&tree(&prepared.context));
 }
 
 /// `ui-acp-json.dump` holds the `acp.json` lines of the lane `UI` from a recorded launch dump, with its masks:
@@ -250,7 +246,7 @@ fn acp_json_equals_the_recorded_dump_except_the_key_derived_values() {
             }
         }
     }
-    let dump = fs::read_to_string(testdata("ui-acp-json.dump")).unwrap();
+    let dump = fs::read_to_string(lane_context_testdata("ui-acp-json.dump")).unwrap();
     let dump_text: String = dump.lines().map(|line| line.strip_prefix("UI acp.json ").unwrap()).collect();
     assert_eq!(masked, serde_json::from_str::<Value>(&dump_text).unwrap());
     assert_eq!(
@@ -319,7 +315,14 @@ fn a_second_write_keeps_the_general_settings_and_the_next_start_file_and_drops_a
 
 #[test]
 fn the_files_carry_the_values_of_the_identity() {
-    let (prepared, identity, ports) = written(&document());
+    // One controlled agent lists sessions, so its credential states it, and the one of its terminal sign-in does not.
+    let mut listing = document();
+    listing
+        .agents
+        .iter_mut()
+        .filter(|agent| agent.key == IDE_OWNED_AGENT)
+        .for_each(|agent| agent.lists_sessions = true);
+    let (prepared, identity, ports) = written(&listing);
     let bridge = Path::new(&prepared.paths.config_dir).join(BRIDGE_DIR);
     let read = |name: &str| serde_json::from_str::<Value>(&fs::read_to_string(bridge.join(name)).unwrap()).unwrap();
     assert_eq!(
@@ -339,15 +342,20 @@ fn the_files_carry_the_values_of_the_identity() {
     );
     let control = read(CONTROL_FILE);
     assert_eq!(control["port"], Value::from(identity.control_port()));
-    let expected: Vec<Value> = document()
+    let expected: Vec<Value> = listing
         .agents
         .iter()
         .filter(|agent| agent.controlled)
         .flat_map(|agent| {
             let login = terminal_login_key(&agent.key);
             [
-                serde_json::json!({ "agentKey": agent.key, "token": identity.secret(&agent.key), "terminalLogin": false }),
-                serde_json::json!({ "agentKey": login, "token": identity.secret(&login), "terminalLogin": true }),
+                serde_json::json!({
+                    "agentKey": agent.key,
+                    "token": identity.secret(&agent.key),
+                    "terminalLogin": false,
+                    "listsSessions": agent.key == IDE_OWNED_AGENT,
+                }),
+                serde_json::json!({ "agentKey": login, "token": identity.secret(&login), "terminalLogin": true, "listsSessions": false }),
             ]
         })
         .collect();
@@ -375,6 +383,7 @@ fn document_with_a_cloud_agent() -> LaneDocument {
         display_name: "Cloud".to_owned(),
         controlled: true,
         control_owner: Some(ControlOwner::Ide),
+        lists_sessions: false,
         deterministic: None,
         required_executable: None,
         acp_json: None,

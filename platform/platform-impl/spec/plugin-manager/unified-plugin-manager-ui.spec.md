@@ -68,7 +68,7 @@ targets:
 # Unified Plugin Manager UI
 
 Status: Active
-Date: 2026-10-13
+Date: 2026-10-27
 
 ## Purpose
 
@@ -263,6 +263,11 @@ Untested: Product welcome buttons on a remote backend keep the Settings route be
 - Enabling or disabling a plugin must update this filter before Apply or restart.
   [@test] ../../testSrc/com/intellij/ide/plugins/unified/UnifiedPluginsPageSourceCoordinatorTest.kt (
     `update filter follows session enablement with cached disabled updates`
+  )
+
+- Update available must exclude a plugin while its update source change is pending.
+  [@test] ../../testSrc/com/intellij/ide/plugins/UnifiedPluginsPageSessionTest.kt (
+    `pending source changes suppress row details and Update All availability`
   )
 
 - An empty search field must show `Search all plugins` and the Filter control.
@@ -652,6 +657,12 @@ Untested: No focused test verifies Shift-selection across sections.
     `sticky expansion control collapses its section`
   )
 
+- A section header must remain visible after the first layout, a section replacement, and a resize.
+  [@test] ../../testSrc/com/intellij/ide/plugins/unified/UnifiedPluginsPageViewTest.kt (
+    `initial layout keeps the repository header visible`;
+    `new repository header stays visible after a section replacement`
+  )
+
 - A long section title must yield space to its count and actions.
 - A shortened title must expose its full value as its accessible name and tooltip.
   [@test] ../../testSrc/com/intellij/ide/plugins/unified/UnifiedPluginsPageViewTest.kt (
@@ -733,6 +744,11 @@ Untested: No focused test verifies Shift-selection across sections.
   [@test] ../../testSrc/com/intellij/ide/plugins/unified/LegacyPluginRowFactoryTest.kt (
     `details page spacing is enabled only for the unified page`
   )
+
+- In both Plugins pages, Additional Info must let users select text and copy it with the standard shortcut.
+- This applies to the plugin ID, version, rating, download count, size, date, required plugins, and internal repository field.
+
+Untested: No focused test verifies text selection and copying in Additional Info.
 
 - The first action in unified plugin details must show its complete focus outline.
   [@test] ../../testSrc/com/intellij/ide/plugins/unified/LegacyPluginRowFactoryTest.kt (

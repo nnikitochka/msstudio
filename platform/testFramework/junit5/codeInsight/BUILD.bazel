@@ -16,11 +16,6 @@ jvm_provided_library(
 )
 
 jvm_provided_library(
-    name = "libraries_junit6-jupiter_provided",
-    lib = "//libraries/junit6-jupiter",
-)
-
-jvm_provided_library(
     name = "libraries_junit4_provided",
     lib = "//libraries/junit4",
 )
@@ -58,7 +53,6 @@ jvm_library(
         "//platform/ide-core",
         "//platform/syntax/syntax-api:syntax",
         ":libraries_junit6_provided",
-        ":libraries_junit6-jupiter_provided",
         ":libraries_junit4_provided",
     ],
 )
@@ -77,8 +71,6 @@ jvm_library(
         ":codeInsight",
         "//libraries/junit6",
         "//libraries/junit6:junit6_test_lib",
-        "//libraries/junit6-jupiter",
-        "//libraries/junit6-jupiter:junit6-jupiter_test_lib",
         "//libraries/kotlinx/coroutines/core:core_test_lib",
         "//platform/testFramework:testFramework_test_lib",
         "//platform/testFramework/junit5:junit5_test_lib",
@@ -117,6 +109,11 @@ jvm_library(
     ),
     module_name = "intellij.platform.testFramework.junit5.codeInsight.tests",
     visibility = ["//visibility:public"],
+    runtime_deps = [
+        # do not sort,
+        "//platform/main/intellij.platform.monolith.main:monolith-main",
+        "//community-resources:customization",
+    ],
 )
 
 jvm_library(
@@ -130,12 +127,14 @@ jvm_library(
         ],
         allow_empty = True,
     ),
-    associates = [
-        "//platform/testFramework/junit5/codeInsight",
-        "//platform/testFramework/junit5/codeInsight:codeInsight_test_lib",
-    ],
+    module_name = "intellij.platform.testFramework.junit5.codeInsight.tests",
     visibility = ["//visibility:public"],
-    runtime_deps = [":testFramework-junit5-codeInsight-tests"],
+    runtime_deps = [
+        # do not sort,
+        ":testFramework-junit5-codeInsight-tests",
+        "//platform/main/intellij.platform.monolith.main:monolith-main_test_lib",
+        "//community-resources:customization_test_lib",
+    ],
     deps = [
         # do not sort,
         "@lib//:kotlin-stdlib",
@@ -147,12 +146,16 @@ jvm_library(
         "//platform/testFramework:testFramework_test_lib",
         "//platform/testFramework/junit5",
         "//platform/testFramework/junit5:junit5_test_lib",
+        "//platform/testFramework/junit5/codeInsight",
+        "//platform/testFramework/junit5/codeInsight:codeInsight_test_lib",
         "//platform/util",
         "//platform/util:util_test_lib",
         "//platform/syntax/syntax-api:syntax",
         "//platform/syntax/syntax-api:syntax_test_lib",
         "//platform/syntax/syntax-util:util",
         "//platform/syntax/syntax-util:util_test_lib",
+        "//platform/core-impl",
+        "//platform/core-impl:core-impl_test_lib",
     ],
 )
 ### auto-generated section `build intellij.platform.testFramework.junit5.codeInsight.tests` end

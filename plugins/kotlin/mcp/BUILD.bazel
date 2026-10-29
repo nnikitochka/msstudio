@@ -102,6 +102,7 @@ jvm_library(
     visibility = ["//visibility:public"],
     runtime_deps = [
         # do not sort,
+        "//plugins/kotlin/mcp",
         "//plugins/mcp-server/mcpserver.plugin",
         "//platform/structure-view-impl/plugin",
         "//platform/structuralsearch/plugin",
@@ -109,6 +110,8 @@ jvm_library(
         "//platform/testRunner/plugin",
         "//plugins/kotlin:kotlin-plugin-community-main",
         "//xml/plugin",
+        "//platform/vcs/plugin",
+        "//java/plugin",
     ],
 )
 
@@ -123,10 +126,7 @@ jvm_library(
         ],
         allow_empty = True,
     ),
-    associates = [
-        "//plugins/kotlin/mcp",
-        "//plugins/kotlin/mcp:mcp_test_lib",
-    ],
+    module_name = "intellij.kotlin.mcp.tests",
     resource_strip_prefix = "testResources",
     resources = glob(
         ["testResources/**/*"],
@@ -135,6 +135,7 @@ jvm_library(
     runtime_deps = [
         # do not sort,
         ":mcp-tests",
+        "//plugins/kotlin/mcp:mcp_test_lib",
         "//plugins/mcp-server/mcpserver.plugin:mcpserver.plugin_test_lib",
         "//platform/structure-view-impl/plugin:plugin_test_lib",
         "//platform/structuralsearch/plugin:plugin_test_lib",
@@ -142,6 +143,8 @@ jvm_library(
         "//platform/testRunner/plugin:plugin_test_lib",
         "//plugins/kotlin:kotlin-plugin-community-main_test_lib",
         "//xml/plugin:plugin_test_lib",
+        "//platform/vcs/plugin:plugin_test_lib",
+        "//java/plugin:plugin_test_lib",
     ],
     deps = [
         # do not sort,
@@ -178,6 +181,10 @@ jvm_library(
         "//platform/testFramework:testFramework_test_lib",
         "//platform/testFramework/junit5",
         "//platform/testFramework/junit5:junit5_test_lib",
+        "//plugins/kotlin/base/pluginTestFramework:kotlin-base-plugin-testFramework",
+        "//plugins/kotlin/base/pluginTestFramework:kotlin-base-plugin-testFramework_test_lib",
+        "//platform/scratch/plugin",
+        "//platform/scratch/plugin:plugin_test_lib",
     ],
 )
 ### auto-generated section `build intellij.kotlin.mcp.tests` end

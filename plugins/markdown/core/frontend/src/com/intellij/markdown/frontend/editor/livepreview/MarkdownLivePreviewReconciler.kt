@@ -26,9 +26,11 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.util.Key
 import com.intellij.openapi.util.TextRange
+import com.intellij.util.concurrency.ThreadingAssertions
 import com.intellij.util.concurrency.annotations.RequiresEdt
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import org.intellij.plugins.markdown.editor.livepreview.MarkdownLivePreviewSpecSet
 import org.intellij.plugins.markdown.editor.livepreview.isLivePreviewEnabled
@@ -94,22 +96,52 @@ class MarkdownLivePreviewReconciler private constructor(
 
   /**
    * Hands over the specs computed for one state of the document and brings the editor in line with them.
-   * Called on the EDT once the highlighting pass has finished computing.
+   * The fold preparation runs on a background thread. Then the EDT applies the folds.
    */
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
-  fun publishSpecs(specSet: MarkdownLivePreviewSpecSet?) {
-    if (editor.isDisposed || disposed) return
-    if (specSet != null && !specSet.documentVersion.matches(editor.document, project)) return
-    if (specSet != null && presentation?.documentVersion?.matchesDocument(specSet.documentVersion) != true) {
+  suspend fun publishSpecs(specSet: MarkdownLivePreviewSpecSet?) {
+    if (specSet == null) {
+      withContext(Dispatchers.EDT) { applySpecs(null, emptyList()) }
+      return
+    }
+    val (presentation, jobs) = withContext(Dispatchers.EDT) {
+      val presentation = prepareSpecs(specSet) ?: return@withContext null
+      presentation to presentation.elements.flatMap { it.folds }.mapNotNull { it.prepare() }
+    } ?: return
+    val actions = if (jobs.isEmpty()) {
+      emptyList()
+    } else {
+      withContext(Dispatchers.Default) {
+        jobs.map { job ->
+          ensureActive()
+          job.get()
+        }
+      }
+    }
+    withContext(Dispatchers.EDT) { applySpecs(presentation, actions) }
+  }
+
+  private fun prepareSpecs(specSet: MarkdownLivePreviewSpecSet): MarkdownLivePreviewPresentation? {
+    ThreadingAssertions.assertEventDispatchThread()
+    if (editor.isDisposed || disposed) return null
+    if (!specSet.documentVersion.matches(editor.document, project)) return null
+    if (presentation?.documentVersion?.matchesDocument(specSet.documentVersion) != true) {
       presentationFactory.documentChanged()
     }
-    presentation = specSet?.let(presentationFactory::create)
+    return presentationFactory.create(specSet)
+  }
+
+  private fun applySpecs(presentation: MarkdownLivePreviewPresentation?, actions: List<Runnable>) {
+    ThreadingAssertions.assertEventDispatchThread()
+    if (editor.isDisposed || disposed) return
+    if (presentation?.documentVersion?.matches(editor.document, project) == false) return
+    actions.forEach { it.run() }
+    this@MarkdownLivePreviewReconciler.presentation = presentation
     revealedElements = emptySet()
     reconcileNow()
   }
 
   @TestOnly
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   fun hasCurrentSpecs(): Boolean = currentPresentation() != null
 
   /**
@@ -117,7 +149,7 @@ class MarkdownLivePreviewReconciler private constructor(
    * only what actually differs. Does nothing while the specs describe an older state of the document; the
    * next highlighting pass supersedes them.
    */
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   fun reconcileNow() {
     if (updating || editor.isDisposed || disposed || editor.document.isInBulkUpdate) return
     if (!editor.isLivePreviewEnabled() || presentation == null) {
@@ -402,7 +434,7 @@ class MarkdownLivePreviewReconciler private constructor(
     private val KEY = Key.create<MarkdownLivePreviewReconciler>("markdown.live.preview.reconciler")
 
     /** The reconciler for [editor], attaching one on first use. Null in cases a reconciler can't be created. */
-    @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+    @RequiresEdt
     fun getOrCreate(editor: Editor): MarkdownLivePreviewReconciler? {
       if (editor !is EditorEx || editor.isDisposed) return null
       val project = editor.project ?: return null

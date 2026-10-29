@@ -273,9 +273,6 @@ internal class TestingTasksImpl(context: CompilationContext, private val options
       }
     }
     else if (options.testSimplePatterns != null) {
-      if (TeamCityHelper.isUnderTeamCity) {
-        context.messages.logErrorAndThrow("'intellij.build.test.simple.patterns' option should be used only for local runs")
-      }
       if (options.testGroups != null) {
         errorOptionIgnored("intellij.build.test.simple.patterns", testGroupSystemPropertyKey)
       }
@@ -362,8 +359,6 @@ internal class TestingTasksImpl(context: CompilationContext, private val options
     "test.group.roots".let { systemProperties[it]?.run { System.setProperty(it, this) } }  // from systemProperties
     testPatternSystemPropertyKey.let { options.testPatterns?.run { System.setProperty(it, this) } }  // from options, e.g. TestingTasksImpl#runTestsSkippedInHeadlessEnvironment
     testGroupSystemPropertyKey.let { options.testGroups?.run { System.setProperty(it, this) } }  // from options, e.g. RunAnyTestTheSameWayTeamCityDoes#run
-    setPropertyFromPass(TestCaseLoader.INCLUDE_UNCONVENTIONALLY_NAMED_TESTS_FLAG)
-    setPropertyFromPass(TestCaseLoader.INCLUDE_ALL_UNCONVENTIONALLY_NAMED_TESTS_FLAG)
 
     // configure TestCaseLoader#matchesCurrentBucket with the properties from the test process
     listOf(
@@ -419,9 +414,14 @@ internal class TestingTasksImpl(context: CompilationContext, private val options
       systemProperties.put("test.group.roots", testGroupRoots.joinToString(File.pathSeparator, transform = Path::absolutePathString))
     }
 
-    //filter out only for community (ALL_EXCLUDE_DEFINED)
+    //filter out for:
+    // - community (ALL_EXCLUDE_DEFINED)
+    // - community java tests (COMMUNITY_JAVA_TESTS)
     val isBazelMigratedGroup =
-      options.testGroups?.contains(GroupBasedTestClassFilter.ALL_EXCLUDE_DEFINED) == true && mainModule.name == "intellij.idea.community.main.tests"
+      mainModule.name == "intellij.idea.community.main.tests" && (
+        options.testGroups?.contains(GroupBasedTestClassFilter.ALL_EXCLUDE_DEFINED) == true ||
+        options.testGroups?.contains("COMMUNITY_JAVA_TESTS") == true
+      )
 
     val searchForTestsAcrossModuleDependencies = options.searchScope == JUnitRunConfigurationProperties.TestSearchScope.MODULE_WITH_DEPENDENCIES.serialized
     val testModules = let {
@@ -458,7 +458,7 @@ internal class TestingTasksImpl(context: CompilationContext, private val options
               mainModule.name != "intellij.clion.main.tests" &&
               !(mainModule.name == "intellij.idea.ultimate.tests.main" && options.testGroups?.split(';')?.contains("COMMUNITY_JAVA_TESTS") == true) &&
               !(testModule.name == "intellij.idea.ultimate.tests.integration" && options.testGroups?.split(';')?.contains(GroupBasedTestClassFilter.ALL_EXCLUDE_DEFINED) == true) &&
-              !(testModule.name == "intellij.idea.ultimate.codeInsight.tests" && options.testGroups?.split(';')?.contains(GroupBasedTestClassFilter.ALL_EXCLUDE_DEFINED) == true)
+              !(testModule.name == "intellij.idea.ultimate.codeInsight.tests" && options.testGroups?.split(';')?.any { it == GroupBasedTestClassFilter.ALL_EXCLUDE_DEFINED || it == "IdeaSmokeTests" } == true)
             } ?: mainModule,
             testGroups = options.testGroups,
             testPatterns = options.testPatterns,
@@ -919,7 +919,7 @@ internal class TestingTasksImpl(context: CompilationContext, private val options
       val outputRoots = context.outputProvider.getModuleOutputRoots(module, forTests = true)
       if (outputRoots.isEmpty()) return@mapConcurrent emptyList()
       val root = requireNotNull(outputRoots.singleOrNull()) { "More than one output root for module '${module.name}': ${outputRoots.joinToString()}" }
-      ClassFinder(root, "", false).classes
+      ClassFinder(root, "").classes
         .filter(finder::isSkippedInHeadlessEnvironment)
         .map { Pair(it, module.name) }
     }.flatten()
@@ -1493,6 +1493,23 @@ private fun publishTestDiscovery(messages: BuildMessages, file: String?) {
 }
 
 private val COMMUNITY_AGGREGATOR_JPS_MODULES_ALLOWLIST = setOf(
+  "intellij.devkit.kotlin.tests",
+  "intellij.devkit.themes.tests",
+  "intellij.gradle.java.toml.tests",
+  "intellij.gradle.tests",
+  "intellij.java.dumb.completion.tests",
+  "intellij.kotlin.common.tests",
+  "intellij.platform.jewel.markdown.testing",
+  "intellij.platform.lang.testEntities",
+  "intellij.platform.remoteServers.targetsIntegrationTests",
+  "intellij.platform.workspace.storage.testEntities",
+  "intellij.python.test.env.common",
+  "intellij.python.test.env.conda",
+  "intellij.python.test.env.core",
+  "intellij.python.test.env.junit4",
+  "intellij.python.test.env.plain",
+  "intellij.python.test.env.uv",
+  "intellij.terminal.completion.tests",
   // no tests
   "kotlin.jvm-debugger.testFramework",
 )

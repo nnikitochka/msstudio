@@ -3,7 +3,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use testkit::{TempDir, WorkingDirectory, read_bytes, reference_bytes, require_error, write_file};
+use testkit::{REFERENCE_CONTENT_HASHES, TempDir, WorkingDirectory, read_bytes, reference_bytes, require_error, write_file};
 
 use super::*;
 
@@ -29,8 +29,6 @@ fn mode(entry: &ComponentEntry) -> Option<u32> {
 fn packed_jar(source: &str, relative_path: &str) -> JarRecord {
     JarRecord::Jar(SourcedFile::new(source, relative_path))
 }
-
-const REFERENCE_SIZES: [usize; 10] = [0, 1, 3, 240, 241, 262143, 262144, 262145, 524288, 524301];
 
 fn header(kind: &str) -> ManifestHeader {
     ManifestHeader {
@@ -83,7 +81,7 @@ fn platform_manifest_bytes() {
     let directory = TempDir::new();
     let mut records = Vec::new();
     let mut files = Vec::new();
-    for size in REFERENCE_SIZES {
+    for (size, _) in REFERENCE_CONTENT_HASHES {
         let name = format!("vector-{size}.jar");
         let jar = directory.path().join("inputs").join(&name);
         write_file(&jar, reference_bytes(size));
@@ -283,56 +281,28 @@ fn inventory_rejects_a_link_with_an_executable_override() {
     require_error(inventory(&[file]), "symbolic link has an executable override: bin/current");
 }
 
-/// A file of an unpacked archive keeps no executable bit of its source unnoticed: the record must state the bit.
+/// The inventory takes the executable bit from the record, never from the source. Bazel can give a source of a restored
+/// repository the mode `0555`.
 #[cfg(unix)]
 #[test]
-fn inventory_refuses_an_executable_source_that_the_record_does_not_mark() {
+fn inventory_ignores_the_mode_of_the_source() {
     let directory = TempDir::new();
     let java = directory.join("jbr/bin/java");
     write_file(&java, "program");
-    testkit::set_mode(&java, 0o755);
-    let unmarked = SourcedFile {
-        check_source_mode: true,
-        ..SourcedFile::new(&java, "jbr/bin/java")
-    };
-    require_error(
-        inventory(&[unmarked]),
-        &format!(
-            "source of 'jbr/bin/java' has an executable mode bit, but the record states no executable bit: {java}. \
-             unpacked_archive_executables must name 'jbr/bin/java'"
-        ),
-    );
-}
-
-/// The mode check passes an executable file, a source without an executable bit, and a file outside an unpacked archive.
-#[cfg(unix)]
-#[test]
-fn inventory_accepts_the_source_mode_that_the_record_states() {
-    let directory = TempDir::new();
-    let java = directory.join("jbr/bin/java");
-    write_file(&java, "program");
-    testkit::set_mode(&java, 0o755);
+    testkit::set_mode(&java, 0o555);
     let release = directory.join("jbr/release");
     write_file(&release, "data");
-    testkit::set_mode(&release, 0o644);
+    testkit::set_mode(&release, 0o555);
     let files = [
         SourcedFile {
             executable: true,
-            check_source_mode: true,
             ..SourcedFile::new(&java, "jbr/bin/java")
         },
-        SourcedFile {
-            check_source_mode: true,
-            ..SourcedFile::new(&release, "jbr/release")
-        },
-        SourcedFile::new(&java, "bin/java-copy"),
+        SourcedFile::new(&release, "jbr/release"),
     ];
     let (entries, _) = inventory(&files).unwrap();
     let executables: Vec<(&str, bool)> = entries.iter().map(|entry| (entry.relative_path(), entry.executable())).collect();
-    assert_eq!(
-        executables,
-        [("bin/java-copy", false), ("jbr/bin/java", true), ("jbr/release", false)]
-    );
+    assert_eq!(executables, [("jbr/bin/java", true), ("jbr/release", false)]);
 }
 
 #[test]

@@ -116,7 +116,7 @@ import kotlin.time.TimeSource
  * The application scope owns started install and update work, so that work can finish after the page closes.
  * The plugin session owns prepared settings changes. Disposal closes that session when no apply or reset operation owns it.
  */
-internal class UnifiedPluginsPageSession @RequiresEdt(generateAssertion = false /* IJPL-115548 */) constructor(
+internal class UnifiedPluginsPageSession @RequiresEdt constructor(
   initialNavigation: PluginsPageInitialNavigation?,
   openSource: PluginManagerOpenSourceEnum,
   private val isStandaloneConfigurable: Boolean = false,
@@ -154,6 +154,7 @@ internal class UnifiedPluginsPageSession @RequiresEdt(generateAssertion = false 
     compactRows = densityVariant.compactRows,
   )
   private var updateAllOperationEventSink: (PluginModelEvent) -> Unit = {}
+  private val sessionPluginUpdates = host.filterPluginUpdates(pluginUpdates)
   private val listModel = ListPluginModel()
   private val repositoryCache = UnifiedPluginRepositoryCache(pageScope, repositoryDataProviderFactory())
   private val enrichmentReadiness: suspend () -> Unit = {
@@ -163,7 +164,7 @@ internal class UnifiedPluginsPageSession @RequiresEdt(generateAssertion = false 
   private val localSource = UnifiedPluginLocalSourceCoordinator(
     scope = pageScope,
     dataProvider = localDataProviderFactory(host).withEnrichmentReadiness(enrichmentReadiness),
-    updates = pluginUpdates,
+    updates = sessionPluginUpdates,
     hostEvents = host.events,
     sessionId = host.sessionId,
     loadErrorMessage = IdeBundle.message("plugins.configurable.local.plugins.not.loaded"),
@@ -176,7 +177,7 @@ internal class UnifiedPluginsPageSession @RequiresEdt(generateAssertion = false 
     scope = pageScope,
     loadGroup = internalGroupLoader,
     dataEnricher = marketplaceDataProvider,
-    updates = pluginUpdates,
+    updates = sessionPluginUpdates,
     loadingTitle = IdeBundle.message("plugins.configurable.internal"),
     loadErrorMessage = IdeBundle.message("plugins.configurable.internal.plugins.not.loaded"),
     loadingDelay = internalLoadingDelay,
@@ -185,14 +186,14 @@ internal class UnifiedPluginsPageSession @RequiresEdt(generateAssertion = false 
     scope = pageScope,
     initialQuery = initialQueryState,
     dataProvider = marketplaceDataProvider,
-    updates = pluginUpdates,
+    updates = sessionPluginUpdates,
     loadErrorMessage = IdeBundle.message("plugins.configurable.search.result.not.loaded"),
   )
   private val repositorySource = UnifiedPluginRepositorySourceCoordinator(
     scope = pageScope,
     repositoryCache = repositoryCache,
     dataEnricher = marketplaceDataProvider,
-    updates = pluginUpdates,
+    updates = sessionPluginUpdates,
     loadErrorMessage = IdeBundle.message("plugins.configurable.repository.plugins.not.loaded"),
   )
   private val pageSource = UnifiedPluginsPageSourceCoordinator(
@@ -328,7 +329,7 @@ internal class UnifiedPluginsPageSession @RequiresEdt(generateAssertion = false 
       }
     }
     updateAllUpdatesCollectionJob = pageScope.launch(start = CoroutineStart.UNDISPATCHED) {
-      pluginUpdates.combine(localSource.state) { updates, localState ->
+      sessionPluginUpdates.combine(localSource.state) { updates, localState ->
         val enabledPluginIds = localState.sections.asSequence()
           .filter { it.id == PluginSectionId.Installed || it.id == PluginSectionId.Bundled }
           .flatMap { it.items.asSequence() }
@@ -343,7 +344,7 @@ internal class UnifiedPluginsPageSession @RequiresEdt(generateAssertion = false 
     pageSource.start()
   }
 
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   override fun getCenterComponent(controller: Configurable.TopComponentController): JComponent {
     controller.showProgressIndicator(false)
     controller.showResetAction(false)
@@ -464,10 +465,10 @@ internal class UnifiedPluginsPageSession @RequiresEdt(generateAssertion = false 
     }
   }
 
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   override fun enableSearch(option: String?): Runnable? = enableSearch(option, ignoreTagMarketplaceTab = false)
 
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   override fun enableSearch(option: String?, ignoreTagMarketplaceTab: Boolean): Runnable? {
     val query = option.orEmpty()
     val calledFromSpotlight = isCalledFromSpotlightPainter()
@@ -490,7 +491,7 @@ internal class UnifiedPluginsPageSession @RequiresEdt(generateAssertion = false 
     }
   }
 
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   override fun openMarketplaceTab(option: String) {
     applyQueryIntent(
       normalizeMarketplaceNavigationQuery(option),
@@ -499,7 +500,7 @@ internal class UnifiedPluginsPageSession @RequiresEdt(generateAssertion = false 
     )
   }
 
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   override fun openInstalledTab(option: String) {
     applyQueryIntent(
       option,
@@ -508,13 +509,13 @@ internal class UnifiedPluginsPageSession @RequiresEdt(generateAssertion = false 
     )
   }
 
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   override fun openInstalledTabWithSearch(option: String): Runnable? {
     openInstalledTab(option)
     return null
   }
 
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   override fun dispose() {
     synchronized(callbackLock) {
       if (disposeStarted) return
@@ -716,7 +717,7 @@ internal class UnifiedPluginsPageSession @RequiresEdt(generateAssertion = false 
     recalculatePluginUpdates()
   }
 
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   private fun handleUpdateAllIntent(intent: UnifiedPluginUpdateAllIntent) {
     when (intent) {
       UnifiedPluginUpdateAllIntent.Update -> updateAllController.requestUpdateAll()
@@ -731,7 +732,7 @@ internal class UnifiedPluginsPageSession @RequiresEdt(generateAssertion = false 
     }
   }
 
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   private fun renderPageSourceState(state: UnifiedPluginsPageSourceState) {
     pendingSelectionSourcesSettled = state.sourcesSettled
     if (renderedRepositoryContentRevision != state.repositoryContentRevision) {

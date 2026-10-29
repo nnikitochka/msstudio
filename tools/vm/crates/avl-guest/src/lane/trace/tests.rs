@@ -37,7 +37,17 @@ impl Transport for Recording {
 }
 
 fn hello() -> HelloCommand {
-    Trace::hello(Path::new("/vm/iterations/iter-1"), None, "iter-1", false, None)
+    Trace::hello(Path::new("/vm/iterations/iter-1"), "iter-1", &TraceInputs::default(), None)
+}
+
+/// A trace of the iteration `iter-1` under `root` whose recorder is the returned recording.
+fn recorded(root: &Path) -> (Trace, Recording) {
+    let recording = Recording::default();
+    let trace = Trace::open(
+        Box::new(recording.clone()),
+        Trace::hello(root, "iter-1", &TraceInputs::default(), None),
+    );
+    (trace, recording)
 }
 
 fn scenario(name: &str) -> ScenarioCommand {
@@ -186,8 +196,7 @@ fn only_a_recorder_that_did_not_start_is_a_failure_of_a_quiet_session() {
 #[test]
 fn an_attachment_is_a_file_under_the_attach_directory_of_the_run() {
     let root = tempfile::TempDir::new().unwrap();
-    let recording = Recording::default();
-    let mut trace = Trace::open(Box::new(recording.clone()), Trace::hello(root.path(), None, "iter-1", false, None));
+    let (mut trace, recording) = recorded(root.path());
     trace.open_scenario(scenario("attaches"));
     let span = trace.open_span(SpanKind::Action, "dump", "[action] dump", Some((None, Side::Host, 1_000)));
     assert!(trace.attach("IDE dump", "text/plain", b"threads", "txt"));
@@ -203,19 +212,129 @@ fn an_attachment_is_a_file_under_the_attach_directory_of_the_run() {
     );
 }
 
+// Outside a recorded scenario an attachment goes to the loose directory that lane-run names, before a scenario opens and
+// with the trace off alike. The command does not go out, and the session without the directory drops the attachment.
+#[test]
+fn an_attachment_outside_a_recorded_scenario_goes_to_the_loose_directory() {
+    let root = tempfile::TempDir::new().unwrap();
+    let loose = root.path().join("outputs/lane/attachments");
+    let (trace, recording) = recorded(root.path());
+    let mut trace = trace.keep_loose_attachments_in(Some(loose.clone()), MAX_LOOSE_BYTES);
+
+    assert!(!trace.attach("IDE dump of the slow step lane launch", "text/plain", b"threads", "txt"));
+    trace.open_scenario(scenario("attaches"));
+    assert!(trace.attach("IDE dump", "text/plain", b"in the scenario", "txt"));
+    trace.finish_scenario(None);
+    let mut off = Trace::off().keep_loose_attachments_in(Some(loose.clone()), MAX_LOOSE_BYTES);
+    assert!(!off.attach("Codex daemon ledger.json", "application/json", b"{}", "json"));
+    assert!(!Trace::off().attach("dropped", "text/plain", b"nowhere", "txt"));
+
+    let mut files: Vec<String> = fs::read_dir(&loose)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    files.sort();
+    assert_eq!(
+        files,
+        ["001-codex-daemon-ledger-json.json", "001-ide-dump-of-the-slow-step-lane-launch.txt"]
+    );
+    assert_eq!(
+        fs::read_to_string(loose.join("001-ide-dump-of-the-slow-step-lane-launch.txt")).unwrap(),
+        "threads"
+    );
+    assert!(
+        recording
+            .lines
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|line| line.starts_with(r#"{"op":"attach""#))
+            .count()
+            == 1,
+        "only the attachment in the scenario went to the recorder"
+    );
+    assert_eq!(
+        fs::read_to_string(root.path().join(ROOT_DIR_NAME).join("iter-1/attach/2.txt")).unwrap(),
+        "in the scenario"
+    );
+}
+
+// The loose attachments stop at their cap. The first attachment past it is dropped, and so is every later one, also one
+// that fits in what the cap leaves. That latch is what lets the drop give only one line of the log, which the test
+// cannot read.
+#[test]
+fn the_loose_attachments_stop_at_their_cap() {
+    let root = tempfile::TempDir::new().unwrap();
+    let loose = root.path().join("outputs/lane/attachments");
+    let mut trace = Trace::off().keep_loose_attachments_in(Some(loose.clone()), 10);
+
+    assert!(!trace.attach("first", "text/plain", b"123456", "txt"));
+    assert!(!trace.attach("second", "text/plain", b"123456", "txt"));
+    assert!(!trace.attach("third", "text/plain", b"1", "txt"));
+
+    let files: Vec<String> = fs::read_dir(&loose)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(files, ["001-first.txt"]);
+    assert_eq!(fs::read(loose.join("001-first.txt")).unwrap(), b"123456");
+}
+
 // The lane daemon roots the bundles of an iteration in its directory with the launcher `daemon`. Under a Bazel test,
 // lane-run roots them in the outputs directory with the launcher `bazel`, where Bazel keeps them.
 #[test]
 fn a_bazel_test_roots_the_bundles_in_its_outputs_directory() {
     let iteration = Path::new("/state/iterations/iter-1");
-    let daemon = Trace::hello(iteration, None, "iter-1", false, None);
+    let daemon = Trace::hello(iteration, "iter-1", &TraceInputs::default(), None);
     assert_eq!(
         (daemon.root.as_str(), daemon.launcher),
         ("/state/iterations/iter-1/air-traces", Launcher::Daemon)
     );
-    let bazel = Trace::hello(iteration, Some(Path::new("/testlogs/outputs")), "iter-1", false, None);
+    let outputs = TraceInputs {
+        bazel_outputs: Some("/testlogs/outputs".into()),
+        ..TraceInputs::default()
+    };
+    let bazel = Trace::hello(iteration, "iter-1", &outputs, None);
     assert_eq!(
         (bazel.root.as_str(), bazel.launcher),
         ("/testlogs/outputs/air-traces", Launcher::Bazel)
     );
+}
+
+// The hello asks for the screen and the Allure results only when the trace inputs do. The line of a hello without them
+// names neither, so the golden transcript of the lane daemon keeps its hello.
+#[test]
+fn the_hello_asks_for_the_allure_results_only_when_the_inputs_do() {
+    let iteration = Path::new("/state/iterations/iter-1");
+    let plain = Trace::hello(iteration, "iter-1", &TraceInputs::default(), None);
+    assert_eq!((plain.screen, plain.allure), (false, false));
+    let line = String::from_utf8(protocol::encode_command(&protocol::Command::Hello(plain)).unwrap()).unwrap();
+    assert!(!line.contains("allure") && !line.contains("screen"), "{line}");
+    let asked = TraceInputs {
+        allure: true,
+        ..TraceInputs::default()
+    };
+    let hello = Trace::hello(iteration, "iter-1", &asked, None);
+    assert_eq!((hello.screen, hello.allure), (false, true));
+    let line = String::from_utf8(protocol::encode_command(&protocol::Command::Hello(hello)).unwrap()).unwrap();
+    assert!(line.contains(r#""allure":true"#), "{line}");
+}
+
+// The hello keeps every video unless the trace inputs keep the video of a scenario that did not pass only. The line of a
+// hello that keeps every video names no retention.
+#[test]
+fn the_hello_keeps_the_videos_that_the_inputs_keep() {
+    let iteration = Path::new("/state/iterations/iter-1");
+    let plain = Trace::hello(iteration, "iter-1", &TraceInputs::default(), None);
+    assert_eq!(plain.keep_video, protocol::VideoRetention::Always);
+    let line = String::from_utf8(protocol::encode_command(&protocol::Command::Hello(plain)).unwrap()).unwrap();
+    assert!(!line.contains("keepVideo"), "{line}");
+    let failed = TraceInputs {
+        keep_video: protocol::VideoRetention::Failed,
+        ..TraceInputs::default()
+    };
+    let hello = Trace::hello(iteration, "iter-1", &failed, None);
+    assert_eq!(hello.keep_video, protocol::VideoRetention::Failed);
+    let line = String::from_utf8(protocol::encode_command(&protocol::Command::Hello(hello)).unwrap()).unwrap();
+    assert!(line.contains(r#""keepVideo":"failed""#), "{line}");
 }

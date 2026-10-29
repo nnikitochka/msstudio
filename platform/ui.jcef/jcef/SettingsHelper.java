@@ -199,8 +199,20 @@ final class SettingsHelper {
       args = ArrayUtil.mergeArrays(args, "--remote-debugging-port=0", "--remote-allow-origins=*");
     }
 
-    args = ArrayUtil.mergeArrays(args, "--autoplay-policy=no-user-gesture-required", "--disable-component-update");
-    args = ArrayUtil.mergeArrays(args, "--disable-features=WaylandFractionalScaleV1");
+
+    if (Registry.is("ide.browser.jcef.component.update.disable")) {
+      args = ArrayUtil.mergeArrays(args, "--disable-component-update");
+    }
+
+    args = ArrayUtil.mergeArrays(args, "--autoplay-policy=no-user-gesture-required");
+    if (SystemInfoRt.isLinux) {
+      if (StringUtil.isEmptyOrSpaces(System.getenv("DISPLAY"))) {
+        args = ArrayUtil.mergeArrays(args, "--disable-features=WaylandFractionalScaleV1");
+      }
+      else {
+        args = ArrayUtil.mergeArrays(args, "--ozone-platform=x11");
+      }
+    }
 
     if (!SKIP_CHROMIUM_SPECIAL_ARGS) {
       final PropertiesComponent props = PropertiesComponent.getInstance();

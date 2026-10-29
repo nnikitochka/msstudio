@@ -120,8 +120,6 @@
                     serviceImplementation="com.intellij.openapi.module.DummyAutomaticModuleUnloader"/>
     <projectService serviceInterface="com.intellij.workspaceModel.ide.legacyBridge.ModuleDependencyIndex"
                     serviceImplementation="com.intellij.workspaceModel.ide.impl.legacyBridge.module.ModuleDependencyIndexImpl"/>
-    <applicationService serviceInterface="com.intellij.openapi.roots.AdditionalLibraryRootsListenerHelper"
-                        serviceImplementation="com.intellij.openapi.roots.impl.AdditionalLibraryRootsListenerHelperImpl"/>
     <workspaceModel.preUpdateHandler implementation="com.intellij.workspaceModel.ide.impl.ModulePreUpdateHandler"/>
     <workspaceModel.serializerHook implementation="com.intellij.workspaceModel.ide.impl.RemoveTransientJpsEntities"/>
     <projectService serviceInterface="com.intellij.openapi.roots.impl.DirectoryIndex"
@@ -158,8 +156,6 @@
     <extensionPoint qualifiedName="com.intellij.pathMacroSubstitutorProvider" interface="com.intellij.openapi.components.impl.PathMacroSubstitutorProvider"
                     dynamic="true"/>
     <extensionPoint qualifiedName="com.intellij.workspaceModel.facetContributor" interface="com.intellij.workspaceModel.ide.legacyBridge.WorkspaceFacetContributor"
-                    dynamic="true"/>
-    <extensionPoint qualifiedName="com.intellij.workspaceFileIndexContributorEnforcer" interface="com.intellij.workspaceModel.core.fileIndex.WorkspaceFileIndexContributorEnforcer"
                     dynamic="true"/>
   </extensionPoints>
   <applicationListeners>

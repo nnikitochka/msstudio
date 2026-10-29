@@ -76,13 +76,15 @@ jvm_library(
         "//platform/util/jdom:jdom_test_lib",
     ],
 )
+### auto-generated section `build intellij.findUsagesMl` end
 
+### auto-generated section `plugin intellij.findUsagesMl` start
 ij_plugin(
     name = "findUsagesMl_plugin",
     descriptor_module = ":findUsagesMl",
     visibility = ["//visibility:public"],
 )
-### auto-generated section `build intellij.findUsagesMl` end
+### auto-generated section `plugin intellij.findUsagesMl` end
 
 ### auto-generated section `iml intellij.findUsagesMl` start
 exports_files(
@@ -116,10 +118,7 @@ jvm_library(
         ],
         allow_empty = True,
     ),
-    associates = [
-        "//plugins/findUsagesMl",
-        "//plugins/findUsagesMl:findUsagesMl_test_lib",
-    ],
+    module_name = "intellij.findUsagesMl.tests",
     visibility = ["//visibility:public"],
     runtime_deps = [
         # do not sort,
@@ -128,30 +127,23 @@ jvm_library(
     ],
     deps = [
         # do not sort,
-        "@lib//:kotlin-stdlib",
         "//libraries/commons/text",
         "//libraries/commons/text:text_test_lib",
-        "//platform/indexing-api:indexing",
-        "//platform/indexing-api:indexing_test_lib",
         "//platform/util",
         "//platform/util:util_test_lib",
-        "//platform/statistics",
-        "//platform/statistics:statistics_test_lib",
         "//platform/platform-impl:ide-impl",
         "//platform/core-api:core",
         "//platform/core-api:core_test_lib",
         "//platform/ml-logs",
         "//platform/ml-logs:ml-logs_test_lib",
-        "//platform/projectModel-api:projectModel",
-        "//platform/projectModel-api:projectModel_test_lib",
-        "//platform/util/jdom",
-        "//platform/util/jdom:jdom_test_lib",
         "//libraries/kotlin/test:libraries-kotlinTest",
         "//libraries/kotlin/test:libraries-kotlinTest_test_lib",
         "//libraries/junit6",
         "//libraries/junit6:junit6_test_lib",
         "//platform/core-impl",
         "//platform/core-impl:core-impl_test_lib",
+        "//plugins/findUsagesMl",
+        "//plugins/findUsagesMl:findUsagesMl_test_lib",
     ],
 )
 ### auto-generated section `build intellij.findUsagesMl.tests` end

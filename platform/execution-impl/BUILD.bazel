@@ -35,7 +35,7 @@ jvm_library(
     exports = ["//platform/terminal"],
     deps = [
         # do not sort,
-        "//platform/kernel/rpc.lite",
+        "//platform/kernel/rpc",
         "@lib//:kotlin-stdlib",
         "//platform/analysis-api:analysis",
         "//platform/core-impl",
@@ -117,7 +117,7 @@ jvm_library(
     runtime_deps = [
         # do not sort,
         ":execution-impl",
-        "//platform/kernel/rpc.lite:rpc.lite_test_lib",
+        "//platform/kernel/rpc:rpc_test_lib",
         "//platform/analysis-api:analysis_test_lib",
         "//platform/core-impl:core-impl_test_lib",
         "//platform/core-api:core_test_lib",
@@ -207,6 +207,8 @@ jvm_library(
         "@lib//:kotlin-stdlib",
         "//platform/forms_rt:java-guiForms-rt",
         "//libraries/pty4j",
+        "//platform/main/intellij.platform.monolith.main:monolith-main",
+        "//community-resources:customization",
     ],
 )
 
@@ -232,6 +234,8 @@ jvm_library(
         "//platform/platform-util-io:ide-util-io_test_lib",
         "//platform/ide-core:ide-core_test_lib",
         "//platform/platform-impl:ide-impl_test_lib",
+        "//platform/main/intellij.platform.monolith.main:monolith-main_test_lib",
+        "//community-resources:customization_test_lib",
     ],
     deps = [
         # do not sort,
@@ -289,6 +293,8 @@ jvm_library(
         "//platform/testFramework/junit5:junit5_test_lib",
         "//platform/eel-nioFs",
         "//platform/eel-nioFs:eel-nioFs_test_lib",
+        "//platform/util/jdom",
+        "//platform/util/jdom:jdom_test_lib",
     ],
 )
 ### auto-generated section `build intellij.platform.execution.tests` end

@@ -8,7 +8,6 @@ import com.intellij.openapi.application.readAction
 import com.intellij.openapi.application.runReadActionBlocking
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.thisLogger
-import com.intellij.openapi.module.Module
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.vfs.VirtualFileManager
@@ -22,7 +21,7 @@ import com.intellij.python.lsp.core.PyLspToolCustomization
 import com.intellij.python.lsp.core.PyLspToolDescriptor
 import com.intellij.python.lsp.core.PyLspToolIntegrationProvider
 import com.intellij.python.lsp.core.PyToolChangeDebouncer
-import com.intellij.python.lsp.core.pyLspModulesToServeWith
+import com.intellij.python.lsp.core.pyLspProjectsToServeWith
 import com.intellij.python.ruff.RuffBundle
 import com.intellij.python.ruff.RuffConfiguration
 import com.intellij.python.ruff.RuffFolderFallback
@@ -38,6 +37,7 @@ import com.intellij.python.ruff.ruffGetsProjectConfig
 import com.intellij.python.ruff.ruffInitializationOptions
 import com.intellij.python.ruff.ruffProjectDir
 import com.jetbrains.python.NON_INTERACTIVE_ROOT_TRACE_CONTEXT
+import com.jetbrains.python.project.PyProject
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
 import org.eclipse.lsp4j.Diagnostic
@@ -50,9 +50,9 @@ class RuffLspIntegrationProvider : PyLspToolIntegrationProvider() {
    * interpreter, so one server answers for every module that runs the same Ruff. A module whose environment pins
    * another Ruff version gets a server of its own, because one server runs one binary.
    */
-  override fun getDescriptor(module: Module): RuffLspClientDescriptor {
-    val servedModules = pyLspModulesToServeWith(module, RuffPyTool.getInstance())
-    return RuffLspClientDescriptor(servedModules.first(), servedModules)
+  override fun getDescriptor(pyProject: PyProject): RuffLspClientDescriptor {
+    val servedProjects = pyLspProjectsToServeWith(pyProject, RuffPyTool.getInstance())
+    return RuffLspClientDescriptor(servedProjects.first(), servedProjects)
   }
 
   override fun pyTool(project: Project): PyLspTool<*> = RuffPyTool.getInstance()
@@ -94,9 +94,9 @@ class RuffLspIntegrationProvider : PyLspToolIntegrationProvider() {
 }
 
 class RuffLspClientDescriptor(
-  module: Module,
-  servedModules: List<Module> = listOf(module),
-) : PyLspToolDescriptor(module, RuffPyTool.getInstance(), servedModules) {
+  pyProject: PyProject,
+  servedProjects: List<PyProject> = listOf(pyProject),
+) : PyLspToolDescriptor(pyProject, RuffPyTool.getInstance(), servedProjects) {
   override val toolConfig: RuffSettings
     get() = project.service<RuffConfiguration>()
 
@@ -150,6 +150,9 @@ class RuffLspClientDescriptor(
     }
     return ruffInitializationOptions(fallback, configPath, ::getFileUri)
   }
+
+  // Ruff says "Please refer to the logs for more details" and writes the details, such as a TOML parse error, to stderr.
+  override val offerServerLogInNotifications: Boolean = true
 
   override val lspCustomization: PyLspToolCustomization = object : PyLspToolCustomization(toolConfig, pyTool, project) {
     // `Reformat Code` is delegated to the Ruff LSP server (`textDocument/formatting`), which keeps the long-lived

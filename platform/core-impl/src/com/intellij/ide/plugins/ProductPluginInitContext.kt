@@ -419,6 +419,7 @@ private val externalNonBundledPluginCompatibilityDependencies = listOf(
   "intellij.platform.todo",
   "intellij.platform.bookmarks",
   "intellij.platform.smRunner",
+  "intellij.platform.scratch",
 ).map { DependencyRef.of(PluginModuleId(it, PluginModuleId.JETBRAINS_NAMESPACE)) }
 
 /**
@@ -487,6 +488,7 @@ private val contentModulesExtractedInCorePluginWhichCanBeUsedFromExternalPlugins
   "intellij.platform.tasks.impl",
   "intellij.platform.remoteServers",
   "intellij.platform.remoteServers.impl",
+  "intellij.platform.scratch",
   "intellij.platform.scriptDebugger.ui",
   "intellij.platform.scriptDebugger.backend",
   "intellij.platform.scriptDebugger.protocolReaderRuntime",

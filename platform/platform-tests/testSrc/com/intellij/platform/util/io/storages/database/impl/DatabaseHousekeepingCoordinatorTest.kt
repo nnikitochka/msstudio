@@ -2,6 +2,7 @@
 package com.intellij.platform.util.io.storages.database.impl
 
 import com.intellij.platform.util.io.storages.CommonKeyDescriptors.stringAsUTF8
+import com.intellij.platform.util.io.storages.database.DurableMapImplementation.KEY_VALUE_TOGETHER
 import com.intellij.platform.util.io.storages.database.spi.BlocksDatabaseFactory
 import com.intellij.platform.util.io.storages.database.DurableDatabaseFactory
 import com.intellij.platform.util.io.storages.database.impl.housekeeping.DatabaseHousekeepingCoordinator
@@ -13,9 +14,9 @@ import com.intellij.platform.util.io.storages.database.spi.BlocksStore.Block.Lif
 import com.intellij.platform.util.io.storages.database.spi.BlocksStore.Block.LifecycleState.RETIRED
 import com.intellij.platform.util.io.storages.database.spi.BlocksStore.Block.LifecycleState.SEALED
 import com.intellij.platform.util.io.storages.database.spi.metrics.DatabaseMetrics
-import com.intellij.platform.util.io.storages.database.storages.durablemap.RetireUnusedBlockInDurableMapHousekeeper
+import com.intellij.platform.util.io.storages.database.storages.durablemap.RetireUnusedBlocksHousekeeper
 import com.intellij.platform.util.io.storages.database.storages.durablemap.DurableMapOverBlocks
-import com.intellij.platform.util.io.storages.database.storages.durablemap.DurableMapBlockCatalog.DurableMapBlockRole.DATA
+import com.intellij.platform.util.io.storages.database.storages.durablemap.DurableMapBlockCatalog.DurableMapBlockRole.ENTRIES
 import com.intellij.util.ConcurrencyUtil
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -240,7 +241,7 @@ class DatabaseHousekeepingCoordinatorTest {
         val database = reconfiguredFactory.open(directory)
         database.use {
           val descriptor = stringAsUTF8()
-          val map = database.openMap("map", 1, descriptor, descriptor)
+          val map = database.openMap("map", 1, KEY_VALUE_TOGETHER, descriptor, descriptor)
           map.put("key", "value")
           assertEquals("value", map.get("key"))
         }
@@ -356,27 +357,27 @@ class DatabaseHousekeepingCoordinatorTest {
   }
 
   @Test
-  fun `dead block sweep retires only unreachable sealed data blocks`(@TempDir directory: Path) {
+  fun `dead block sweep retires only unreachable sealed entries blocks`(@TempDir directory: Path) {
     val firstValue = "a".repeat(70 * 1024)
     val liveValue = "b".repeat(70 * 1024)
     val replacementValue = "c".repeat(70 * 1024)
     BlocksDatabaseFactory(1024 * 1024).open(directory).use { blocksDatabase ->
       DurableDatabaseImpl(blocksDatabase).use { database ->
         val descriptor = stringAsUTF8()
-        val map = database.openMap("map", 1, descriptor, descriptor)
+        val map = database.openMap("map", 1, KEY_VALUE_TOGETHER, descriptor, descriptor)
         map.put("updated", firstValue)
         map.put("live", liveValue)
         map.put("updated", replacementValue)
 
         val store = requireNotNull(blocksDatabase.findStore("map"))
-        val dataBlocks = store.blocks().filter { it.role() == DATA.persistentCode() }
-        assertEquals(listOf(SEALED, SEALED, ACTIVE), dataBlocks.map { it.state() })
+        val entriesBlocks = store.blocks().filter { it.role() == ENTRIES.persistentCode() }
+        assertEquals(listOf(SEALED, SEALED, ACTIVE), entriesBlocks.map { it.state() })
 
-        val housekeeper = RetireUnusedBlockInDurableMapHousekeeper(map as DurableMapOverBlocks<*, *>)
+        val housekeeper = RetireUnusedBlocksHousekeeper(map as DurableMapOverBlocks<*, *>)
         housekeeper.runHousekeeping { false }
         housekeeper.runHousekeeping { false }
 
-        assertEquals(listOf(RETIRED, SEALED, ACTIVE), dataBlocks.map { it.state() })
+        assertEquals(listOf(RETIRED, SEALED, ACTIVE), entriesBlocks.map { it.state() })
         assertEquals(liveValue, map.get("live"))
         assertEquals(replacementValue, map.get("updated"))
       }
@@ -385,7 +386,7 @@ class DatabaseHousekeepingCoordinatorTest {
     BlocksDatabaseFactory(1024 * 1024).open(directory).use { blocksDatabase ->
       DurableDatabaseImpl(blocksDatabase).use { database ->
         val descriptor = stringAsUTF8()
-        val map = database.openMap("map", 1, descriptor, descriptor)
+        val map = database.openMap("map", 1, KEY_VALUE_TOGETHER, descriptor, descriptor)
         assertEquals(liveValue, map.get("live"))
         assertEquals(replacementValue, map.get("updated"))
       }

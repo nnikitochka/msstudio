@@ -37,7 +37,7 @@ internal class ScopeViewNodeProvider(
   override suspend fun getChildren(parent: TreeStructureProjectViewNode?): List<TreeStructureProjectViewNode>? = onInvoker {
     if (parent == null) {
       val root = treeModel.root as? AbstractTreeNode<*> ?: return@onInvoker null
-      listOf(ScopeViewNode(root))
+      listOf(ScopeViewNode("", root))
     }
     else {
       val parentNode = parent.legacyNode
@@ -46,7 +46,7 @@ internal class ScopeViewNodeProvider(
       // its own comparator is deliberately left unset so that we can sort by the new settings.
       treeModel.getChildren(parentNode)
         .sortedWith(comparator)
-        .map { ScopeViewNode(it) }
+        .map { ScopeViewNode(it.name ?: "", it) }
     }
   }
 
@@ -81,9 +81,29 @@ internal class ScopeViewNodeProvider(
 }
 
 /** A [TreeStructureProjectViewNode] backed by a legacy node of [ScopeViewTreeModel]. */
-private data class ScopeViewNode(
+private class ScopeViewNode(
+  override val name: String,
   override val elementDescriptor: AbstractTreeNode<*>,
-) : TreeStructureProjectViewNode
+) : TreeStructureProjectViewNode {
+  override fun equals(other: Any?): Boolean {
+    if (this === other) return true
+    if (javaClass != other?.javaClass) return false
+
+    other as ScopeViewNode
+
+    if (elementDescriptor != other.elementDescriptor) return false
+
+    return true
+  }
+
+  override fun hashCode(): Int {
+    return elementDescriptor.hashCode()
+  }
+
+  override fun toString(): String {
+    return "ScopeViewNode(elementDescriptor=$elementDescriptor)"
+  }
+}
 
 private val TreeStructureProjectViewNode.legacyNode: AbstractTreeNode<*>
   get() = (this as ScopeViewNode).elementDescriptor

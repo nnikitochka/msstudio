@@ -29,10 +29,12 @@ intellij.execution.process.mediator.client.tests
 intellij.execution.process.mediator.common.tests
 intellij.featuresTrainer.tests
 intellij.findUsagesMl.tests
+intellij.golsp.performanceTests
 intellij.gradle.backend.tests
 intellij.gradle.completion.tests
 intellij.gradle.java.maven.tests
 intellij.gradle.toolingExtension.tests
+intellij.grazie.tests
 intellij.groovy.propertyBased.tests
 intellij.groovy.structuralSearch.tests
 intellij.groovy.tests
@@ -69,6 +71,7 @@ intellij.java.rareRefactorings.tests
 intellij.java.structuralSearch.tests
 intellij.java.terminal.tests
 intellij.java.testFramework.tests
+intellij.java.tests
 intellij.java.typeMigration.tests
 intellij.java.ui.tests
 intellij.javaFX.community.tests
@@ -77,6 +80,7 @@ intellij.javaee.appServers.weblogic.jps.tests
 intellij.json.networknt.wrapper.tests
 intellij.json.tests
 intellij.jsonpath.tests
+intellij.junit.v5.rt.tests
 intellij.jvm.analysis.java.tests
 intellij.kotlin.gradle.tooling.impl.tests
 intellij.kotlin.jvm.debugger.eval4j.tests
@@ -108,6 +112,7 @@ intellij.platform.collaborationTools.tests
 intellij.platform.completion.common.tests
 intellij.platform.compose.swing.tests
 intellij.platform.compose.tests
+intellij.platform.concurrency.tests
 intellij.platform.configurationStore.tests
 intellij.platform.core.impl.tests
 intellij.platform.core.nio.fs.tests
@@ -178,6 +183,7 @@ intellij.platform.searchEverywhere.backend.tests
 intellij.platform.searchEverywhere.frontend.tests
 intellij.platform.serviceContainer.tests
 intellij.platform.settings.local.tests
+intellij.platform.settings.v2.test
 intellij.platform.smRunner.tests
 intellij.platform.sqlite.tests
 intellij.platform.statistics.devkit.tests
@@ -201,6 +207,7 @@ intellij.platform.testRunner.tests
 intellij.platform.tests
 intellij.platform.threadDumpParser.tests
 intellij.platform.uast.tests
+intellij.platform.util.concurrency.tests
 intellij.platform.util.coroutines.tests
 intellij.platform.util.nanoxml.tests
 intellij.platform.util.progress.tests

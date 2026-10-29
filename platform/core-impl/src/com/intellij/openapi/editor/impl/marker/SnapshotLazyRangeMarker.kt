@@ -5,6 +5,7 @@ import com.intellij.openapi.editor.impl.DocumentImpl
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.fileEditor.impl.FileDocumentManagerBase
 import com.intellij.openapi.util.TextRange
+import com.intellij.openapi.util.TextRangeScalarUtil
 import com.intellij.openapi.vfs.isTooLarge
 import com.intellij.util.DocumentUtil
 
@@ -12,10 +13,11 @@ import com.intellij.util.DocumentUtil
 internal class SnapshotLazyRangeMarker(
   fileRoot: VirtualFileMarkerRoot,
   markerId: Long,
-  spec: MarkerSpec,
-  initialRange: TextRange,
+  spec: Byte,
+  initialRange: Long,
   @Volatile private var initialLineColumns: LineColumns?,
-) : SnapshotRangeMarkerImpl(fileRoot, markerId, spec, initialRange) {
+  policy: MarkerPolicy = DefaultMarkerPolicy,
+) : SnapshotRangeMarkerImpl(fileRoot, markerId, spec, initialRange, policy) {
 
   override fun getStartOffset(): Int {
     loadDocumentForInitialLineColumns()
@@ -34,17 +36,18 @@ internal class SnapshotLazyRangeMarker(
 
   override fun isValid(): Boolean {
     if (!super.isValid()) return false
-    val file = checkNotNull(fileRoot).file
+    val file = fileRoot!!.file
     if (FileDocumentManager.getInstance().getCachedDocument(file) != null) return true
     if (file.isDirectory || FileDocumentManagerBase.isBinaryWithoutDecompiler(file)) return false
     return !file.fileType.isBinary || !file.isTooLarge()
   }
 
-  internal fun initialRange(document: DocumentImpl, tabSize: Int): TextRange? {
-    val lineColumns = initialLineColumns ?: return null
+  /** Returns the initial range, or [PMarkerResolution.UNRESOLVED] when no line and column data remains. */
+  internal fun initialRange(document: DocumentImpl, tabSize: Int): Long {
+    val lineColumns = initialLineColumns ?: return PMarkerResolution.UNRESOLVED
     val startOffset = DocumentUtil.calculateOffset(document, lineColumns.startLine, lineColumns.startColumn, tabSize)
     val endOffset = DocumentUtil.calculateOffset(document, lineColumns.endLine, lineColumns.endColumn, tabSize)
-    return TextRange(startOffset, endOffset)
+    return TextRangeScalarUtil.toScalarRange(startOffset, endOffset)
   }
 
   internal fun markInitialRangeResolved() {

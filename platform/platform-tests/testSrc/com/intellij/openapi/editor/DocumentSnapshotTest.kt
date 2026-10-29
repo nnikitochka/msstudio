@@ -3,6 +3,7 @@ package com.intellij.openapi.editor
 
 import com.intellij.openapi.editor.ex.DocumentOp
 import com.intellij.openapi.editor.ex.DocumentSnapshot
+import com.intellij.openapi.editor.ex.experimental.DocumentBranch
 import com.intellij.openapi.editor.impl.DocumentImpl
 import com.intellij.testFramework.junit5.TestApplication
 import org.junit.jupiter.api.Test
@@ -36,7 +37,7 @@ internal class DocumentSnapshotTest {
   @Test
   fun `withClearedLineFlags of an untouched text returns the same snapshot`() {
     val snapshot = snapshot("a\nb\nc")
-    val op = DocumentOp.unmodifiedLinesOp(0, Int.MAX_VALUE, IntArray(0))
+    val op = DocumentOp.cleanLinesOp(0, Int.MAX_VALUE, IntArray(0))
     assertSame(snapshot, snapshot.applyOp(op))
   }
 
@@ -85,7 +86,7 @@ internal class DocumentSnapshotTest {
       .applyOp(DocumentOp.modStampOp(snapshot.modState().stamp() + 1, false))
   }
 
-  private fun snapshot(text: String): DocumentSnapshot {
+  private fun snapshot(text: String): DocumentBranch {
     return DocumentImpl(text).core.snapshot()
   }
 }

@@ -88,6 +88,7 @@ import kotlin.io.path.isRegularFile
 import kotlin.io.path.name
 import kotlin.io.path.useDirectoryEntries
 import kotlin.math.min
+import kotlin.time.ComparableTimeMark
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.DurationUnit
 import kotlin.time.toDuration
@@ -180,6 +181,7 @@ internal class PerformanceWatcherImpl(providedScope: CoroutineScope) : Performan
     }
 
     startEdtSampling()
+    startProcessStallWatcher()
 
     if (Registry.`is`("performance.watcher.pooled.enabled", true)) {
       CoroutineDispatcherWatcher(Dispatchers.Default, coroutineScope, ::calculatePooledUnresponsiveInterval, pooledCompensationInterval)
@@ -207,6 +209,18 @@ internal class PerformanceWatcherImpl(providedScope: CoroutineScope) : Performan
       finally {
         LOG.debug("EDT sampling stopped")
       }
+    }
+  }
+
+  private fun startProcessStallWatcher() {
+    val watcher = ProcessStallWatcher(
+      sliceMs = Registry.intValue("performance.watcher.stall.slice.ms", 250).toLong().coerceAtLeast(10),
+      slicesPerTick = Registry.intValue("performance.watcher.stall.slices.per.tick", 4).coerceAtLeast(1),
+      reportThresholdMs = Registry.intValue("performance.watcher.stall.report.threshold.ms", 1000).toLong().coerceAtLeast(1),
+    )
+    @OptIn(DelicateCoroutinesApi::class)
+    coroutineScope.launchWithSafeContext(CoroutineName("Process stall watcher") + blockingDispatcher) {
+      watcher.run()
     }
   }
 
@@ -648,14 +662,14 @@ private class CoroutineDispatcherWatcher(
   compensationIntervalMs: Int,
 ) {
   @Volatile
-  private var lastSampleNs = System.nanoTime()
+  private var lastSample: ComparableTimeMark = SystemClock.now()
 
   private val threadDumper = PooledThreadDumper(dispatcher, getUnresponsiveIntervalMs)
 
   private val parallelismCompensator = ParallelismCompensator(
     pool = DefaultCompensatablePool(
       dispatcher = dispatcher,
-      getLastSampleNs = { lastSampleNs },
+      getLastSample = { lastSample },
       unresponsiveIntervalMs = compensationIntervalMs.toLong(),
     ),
     maxGrantsAllowed = Registry.intValue("performance.watcher.pooled.compensation.max.grants", 100).coerceAtLeast(1),
@@ -682,8 +696,8 @@ private class CoroutineDispatcherWatcher(
     return coroutineScope.launchWithSafeContext(CoroutineName("$dispatcher sampling") + dispatcher) {
       try {
         while (true) {
-          delay(pooledSamplingInterval.milliseconds)
-          lastSampleNs = System.nanoTime()
+          SystemClock.delay(pooledSamplingInterval.milliseconds)
+          lastSample = SystemClock.now()
         }
       }
       finally {
@@ -698,8 +712,14 @@ private class CoroutineDispatcherWatcher(
     return coroutineScope.launchWithSafeContext(CoroutineName("$dispatcher watcher") + blockingDispatcher) {
       try {
         while (true) {
-          delay(pooledSamplingInterval.milliseconds)
-          threadDumper.dumpThreadsIfNeeded(lastSampleNs)
+          val beforeSleep = SystemClock.now()
+          SystemClock.delay(pooledSamplingInterval.milliseconds)
+          val oversleptMs = ((SystemClock.now() - beforeSleep).inWholeMilliseconds - pooledSamplingInterval).coerceAtLeast(0)
+          // Skip the check if the thread overslept too much to avoid false positives when the host is overloaded.
+          // This check provides an estimate, not 100% accuracy.
+          if (oversleptMs <= pooledSamplingInterval / 2) {
+            threadDumper.dumpThreadsIfNeeded(lastSample, oversleptMs)
+          }
         }
       }
       finally {
@@ -707,43 +727,55 @@ private class CoroutineDispatcherWatcher(
       }
     }
   }
+}
 
-  private fun CoroutineScope.launchWithSafeContext(context: CoroutineContext, block: suspend () -> Unit): Job {
-    // See IJPL-234553
-    // We keep the Job from application scope to get cancellation, but strip everything else that might influence the coroutine execution
-    val effectiveContext = context + coroutineContext[Job]!!
-    @Suppress("OPT_IN_USAGE")
-    return GlobalScope.launch(effectiveContext) {
-      block()
-    }
+private fun CoroutineScope.launchWithSafeContext(context: CoroutineContext, block: suspend () -> Unit): Job {
+  // See IJPL-234553
+  // We keep the Job from application scope to get cancellation, but strip everything else that might influence the coroutine execution
+  val effectiveContext = context + coroutineContext[Job]!!
+  @Suppress("OPT_IN_USAGE")
+  return GlobalScope.launch(effectiveContext) {
+    block()
   }
 }
 
-private class PooledThreadDumper(
+/**
+ * @param clock the time sources used to measure unresponsiveness; tests replace it with a fake clock to simulate a stall
+ * @param maxDumps reads the dump limit; tests replace it to avoid the registry
+ * @param dumpThreads saves a thread dump and returns its path; tests replace it to record the call
+ * @param warn writes the exhaustion warning; tests replace it to capture the message
+ */
+internal class PooledThreadDumper(
   private val dispatcher: CoroutineDispatcher,
   private val getUnresponsiveIntervalMs: (dumpCount: Int) -> Int,
+  private val clock: ProcessClock = SystemClock,
+  private val maxDumps: () -> Int = { Registry.intValue("performance.watcher.pooled.maximum.dumps", 10) },
+  private val dumpThreads: () -> Path? = { PerformanceWatcher.getInstance().dumpThreads("$dispatcher", true, true) },
+  private val warn: (String) -> Unit = { LOG.warn(it) },
 ) {
   private var reportedDumpsCount = 0
-  private var lastReportedNs = System.nanoTime()
+  private var lastReported = clock.now()
 
-  fun dumpThreadsIfNeeded(lastSampleNs: Long) {
-    val unresponsiveIntervalMs = getUnresponsiveIntervalMs(reportedDumpsCount)
-
-    if (TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - lastSampleNs) <= unresponsiveIntervalMs ||
-        TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - lastReportedNs) <= unresponsiveIntervalMs) {
+  fun dumpThreadsIfNeeded(lastSample: ComparableTimeMark, oversleptMs: Long) {
+    // Add the overslept time to the unresponsiveness threshold to handle stalled processes.
+    val unresponsiveIntervalMs = getUnresponsiveIntervalMs(reportedDumpsCount) + oversleptMs
+    val unresponsiveMs = (clock.now() - lastSample).inWholeMilliseconds
+    if (unresponsiveMs <= unresponsiveIntervalMs ||
+        (clock.now() - lastReported).inWholeMilliseconds <= unresponsiveIntervalMs) {
       return
     }
 
-    val maxDumps = Registry.intValue("performance.watcher.pooled.maximum.dumps", 10)
+    val message = "Thread pool exhaustion: $dispatcher is not responding for $unresponsiveMs ms (threshold: $unresponsiveIntervalMs ms)."
+    val maxDumps = maxDumps()
     if (reportedDumpsCount < maxDumps || maxDumps == -1) {
-      val file = PerformanceWatcher.getInstance().dumpThreads("$dispatcher", true, true)
-      LOG.warn("Thread pool exhaustion: $dispatcher is not responding for $unresponsiveIntervalMs ms." + if (file == null) "" else "; thread dump is saved to '$file'")
+      val file = dumpThreads()
+      warn(message + if (file == null) "" else " Thread dump is saved to '$file'")
     }
     else {
-      LOG.warn("Thread pool exhaustion: $dispatcher is not responding for $unresponsiveIntervalMs ms.")
+      warn(message)
     }
 
-    lastReportedNs = System.nanoTime()
+    lastReported = clock.now()
     reportedDumpsCount++
   }
 }
@@ -828,27 +860,39 @@ internal interface CompensatablePool {
  *
  *
  * @param dispatcher the dispatcher whose pool is monitored
- * @param getLastSampleNs returns the timestamp, in nanoseconds, of the latest successful dispatcher health check.
+ * @param getLastSample returns the point of [clock] at the latest successful dispatcher health check.
  * This reuses the existing health check coroutine managed by [CoroutineDispatcherWatcher] instead of submitting
  * a separate probe coroutine.
  * @param unresponsiveIntervalMs the interval, in milliseconds, after which the pool is considered unresponsive
+ * @param clock the time sources used to measure the wait; tests replace it with a fake clock to simulate a stall
  */
 internal class DefaultCompensatablePool(
   private val dispatcher: CoroutineDispatcher,
-  private val getLastSampleNs: () -> Long,
+  private val getLastSample: () -> ComparableTimeMark,
   private val unresponsiveIntervalMs: Long,
+  private val clock: ProcessClock = SystemClock,
 ) : CompensatablePool {
   override fun waitForStatus(timeMs: Long): Boolean {
-    // This function checks the pool's health using `getLastSampleNs`. The health check coroutine is managed by
+    // This function checks the pool's health using `getLastSample`. The health check coroutine is managed by
     // [CoroutineDispatcherWatcher].
     //
     // Using an empty coroutine as a probe would cause canceled probe coroutines to accumulate in a starved pool's queue.
     // Cancelling a coroutine before it starts does not remove it from the queue; it is removed only when a worker dequeues it.
     // When the pool is starved, no worker is available to drain these canceled probes.
 
-    Thread.sleep(timeMs)
-    val now = System.nanoTime()
-    return TimeUnit.NANOSECONDS.toMillis(now - getLastSampleNs()) < unresponsiveIntervalMs
+    while (true) {
+      val beforeSleep = clock.now()
+      clock.sleep(timeMs.milliseconds)
+      val now = clock.now()
+      val overslept = ((now - beforeSleep).inWholeMilliseconds - timeMs).coerceAtLeast(0)
+      if (overslept <= timeMs / 2) {
+        // Avoid granting parallelism when the host is overloaded:
+        // * Skip the check if the thread overslept too much.
+        // * Add the overslept time to the unresponsiveness threshold to handle stalled processes.
+        // This check provides an estimate, not 100% accuracy.
+        return (now - getLastSample()).inWholeMilliseconds < unresponsiveIntervalMs + overslept
+      }
+    }
   }
 
   override fun withGrantedParallelism(block: () -> Unit) {

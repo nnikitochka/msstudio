@@ -18,6 +18,8 @@ import org.jetbrains.kotlin.analysis.api.symbols.KaSymbolOrigin
 import org.jetbrains.kotlin.analysis.api.symbols.containingSymbol
 import org.jetbrains.kotlin.asJava.toLightMethods
 import org.jetbrains.kotlin.asJava.unwrapped
+import org.jetbrains.kotlin.idea.base.analysis.api.utils.allowAnalysisFromWriteActionInEdt
+import org.jetbrains.kotlin.idea.k2.refactoring.changeSignature.usages.CallableReferenceFix
 import org.jetbrains.kotlin.idea.k2.refactoring.changeSignature.usages.KotlinByConventionCallUsage
 import org.jetbrains.kotlin.idea.k2.refactoring.changeSignature.usages.KotlinCallableReferenceUsage
 import org.jetbrains.kotlin.idea.k2.refactoring.changeSignature.usages.KotlinCallerCallUsage
@@ -99,24 +101,35 @@ class KotlinChangeSignatureUsageProvider : ChangeSignatureUsageProvider {
                                     functionSymbol.name.asString() == "copy" && (functionSymbol.containingSymbol as? KaNamedClassSymbol)?.isData == true
                         }
                         if (isCopyOfDataClass) return null
-                        isCaller(changeInfo, reference.resolve())
-                        val callers = (changeInfo as? JavaChangeInfo)?.methodsToPropagateParameters
-                        if (callers != null && callers.isNotEmpty()) {
-                            val targets = reference.resolve()?.toLightMethods()
-                            if (targets != null && targets.any { child -> callers.any { child == it || PsiSuperMethodUtil.isSuperMethod(child, it) } } ) {
-                                return KotlinCallerCallUsage(callElementParent)
-                            }
-                        }
+                        if (isCaller(changeInfo, reference.resolve()))
+                            return KotlinCallerCallUsage(callElementParent)
+
                         return KotlinFunctionCallUsage(callElementParent, method)
                     }
+
                     parent is KtConstructorDelegationCall ->
                         return KotlinConstructorDelegationCallUsage(parent, method)
-                    parent is KtCallableReferenceExpression ->
-                        return KotlinCallableReferenceUsage(parent)
+
+                    parent is KtCallableReferenceExpression && parent.callableReference == element -> {
+                        val usage = fromJavaChangeInfo(changeInfo, UsageInfo(parent), true)
+                            ?.let { kotlinInfo ->
+                                allowAnalysisFromWriteActionInEdt(parent) {
+                                    KotlinCallableReferenceUsage.create(
+                                        parent,
+                                        kotlinInfo
+                                    )
+                                }
+                            }
+                            ?: KotlinCallableReferenceUsage(parent, CallableReferenceFix.None)
+                        return usage
+                    }
+
                     element is KtSimpleNameExpression && (method is KtProperty || method is KtParameter) ->
                         return KotlinPropertyCallUsage(element, changeInfo as KotlinChangeInfoBase)
+
                     element is KtSuperTypeCallEntry ->
                         return KotlinFunctionCallUsage(element, method)
+
                     else -> {
                         //skip imports for now, they are removed by optimize imports
                         if (PsiTreeUtil.getParentOfType(element, KtImportDirective::class.java, true, KtDeclaration::class.java) != null) {

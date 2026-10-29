@@ -2,12 +2,11 @@
 //! runs in a [`testkit::WorkingDirectory`]. A test of [`crate::inventory`] or [`crate::plugin_classpath`] uses absolute
 //! paths in a [`testkit::TempDir`] instead. It holds a working directory only when it gives a relative source.
 
-use std::ffi::OsString;
 use std::path::Path;
 
 use filemeta::{Entry, EntryType};
 use serde_json::{Value, json};
-use testkit::write_file;
+use testkit::{Run, write_file};
 
 pub(crate) fn write_json(name: impl AsRef<Path>, value: &Value) {
     write_file(name, value.to_string());
@@ -77,40 +76,28 @@ pub(crate) fn directory_entry(relative_path: &str, mode: u32) -> Entry {
     }
 }
 
-/// The outcome of one run of the collector.
-pub(crate) struct Outcome {
-    pub(crate) code: u8,
-    pub(crate) output: String,
-    pub(crate) errors: String,
+/// The record of `plugins/plugin-classpath.txt` that the Java writer gives for the plugin `plugin` with the descriptor
+/// `<idea-plugin/>\n`. The names are ASCII, so their Java modified UTF-8 is their bytes.
+#[expect(clippy::cast_possible_truncation, reason = "a fixture writes small lengths into record fields")]
+pub(crate) fn class_path_fixture(plugin: &str, names: &[&str]) -> Vec<u8> {
+    fn append_name(data: &mut Vec<u8>, value: &str) {
+        data.extend_from_slice(&(value.len() as u16).to_be_bytes());
+        data.extend_from_slice(value.as_bytes());
+    }
+    let mut data = (names.len() as u16).to_be_bytes().to_vec();
+    append_name(&mut data, plugin);
+    let descriptor = b"<idea-plugin/>\n";
+    data.extend_from_slice(&(descriptor.len() as u32).to_be_bytes());
+    data.extend_from_slice(descriptor);
+    for name in names {
+        append_name(&mut data, name);
+    }
+    data
 }
 
-impl Outcome {
-    /// Fails the test unless the run failed with an error that holds `message`.
-    #[track_caller]
-    pub(crate) fn assert_error(&self, message: &str) {
-        assert!(
-            self.code != 0 && self.errors.contains(message),
-            "exit {}, errors {:?}, expected {message:?}",
-            self.code,
-            self.errors
-        );
-    }
-
-    #[track_caller]
-    pub(crate) fn assert_success(&self) {
-        assert_eq!(self.code, 0, "errors: {}", self.errors);
-    }
-}
-
-pub(crate) fn run_collector<S: AsRef<str>>(args: &[S]) -> Outcome {
-    let args: Vec<OsString> = args.iter().map(|arg| OsString::from(arg.as_ref())).collect();
-    let (mut output, mut errors) = (Vec::new(), Vec::new());
-    let code = crate::run(args, &mut output, &mut errors);
-    Outcome {
-        code,
-        output: String::from_utf8(output).unwrap(),
-        errors: String::from_utf8(errors).unwrap(),
-    }
+pub(crate) fn run_collector<S: AsRef<str>>(args: &[S]) -> Run {
+    let args: Vec<&str> = args.iter().map(AsRef::as_ref).collect();
+    testkit::run_tool(crate::run, &args)
 }
 
 pub(crate) fn base_args(mode: &str) -> Vec<String> {

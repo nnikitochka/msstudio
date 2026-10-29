@@ -9,6 +9,10 @@
 //!
 //! A case that started and never finished, and a class of the plan that the run never reached, fail as they fail in
 //! the XML, when the `summary` of their iteration arrives or the run ends.
+//!
+//! A step after a Bazel test publishes its traces with [`Messages::published`]: the test reported through its XML, so
+//! the step gives each trace the cases of the XML beside it and adds only artifacts and metadata. Those messages carry
+//! no flow, because no test of the step runs.
 
 use std::collections::BTreeSet;
 
@@ -21,7 +25,7 @@ use avl_junit::cases::{
     simple_class_name,
 };
 pub use avl_junit::teamcity::TEAMCITY_VERSION;
-use avl_junit::teamcity::{is_team_city, message};
+use avl_junit::teamcity::{is_team_city, message, publish_artifacts};
 use avl_junit::{TYPE_UNFINISHED, XML_OUTPUT_FILE};
 
 #[cfg(test)]
@@ -34,6 +38,48 @@ pub const TRACES_ARTIFACT_DIR: &str = "air-traces";
 /// [`XML_OUTPUT_FILE`] is unset. A Bazel test reports through its XML, so the controller inside one writes no message.
 pub fn is_build_step(variable: impl Fn(&str) -> Option<String>) -> bool {
     variable(XML_OUTPUT_FILE).is_none() && is_team_city(variable)
+}
+
+/// A `message` of the build log with the normal status. TeamCity shows a URL in it as a link.
+pub fn log_message(text: &str) -> String {
+    message("message", &[("text", text)], None)
+}
+
+/// A `message` of the build log with the status `WARNING`. TeamCity shows it as a warning, and the build stays green.
+pub fn warning(text: &str) -> String {
+    message("message", &[("text", text), ("status", "WARNING")], None)
+}
+
+/// The flow of the messages of [`Messages::published`]: none, so a message names no `flowId`.
+const NO_FLOW: &str = "";
+
+/// One trace that a step after the tests publishes, by the artifact paths of its files.
+#[derive(Clone, Copy, Debug)]
+pub struct PublishedTrace<'a> {
+    /// The zip of the bundle as an artifact path, such as `air-traces.zip!/<lane>/<runId>/<TestClass>/<scenario>.zip`.
+    pub trace: &'a str,
+    pub test_class: &'a str,
+    pub scenario: &'a str,
+    /// The artifact path of the video, when the step publishes one.
+    pub video: Option<&'a str>,
+    /// The artifact path of the picture of the failure, when the step publishes one.
+    pub still: Option<&'a str>,
+    /// The page of the published viewer that opens the trace, when the step publishes the viewer.
+    pub link: Option<&'a str>,
+    /// The cases of the JUnit XML of the trace's own test target, as `(class, case)`, which TeamCity imported. Only
+    /// they name the trace's test, so a trace of one lane never names the test of another lane.
+    pub cases: &'a [(String, String)],
+}
+
+/// The test name of the scenario `scenario` of `test_class` among the cases `named`, as `(class, case)`: the last case
+/// of that name and of a class of the same simple name, else `<test_class>.<scenario>`. A recorder can name the class
+/// without its package, so the simple names are compared.
+fn test_name(named: &[(String, String)], test_class: &str, scenario: &str) -> String {
+    named
+        .iter()
+        .rev()
+        .find(|(class, name)| name == scenario && simple_class_name(class) == simple_class_name(test_class))
+        .map_or_else(|| format!("{test_class}.{scenario}"), |(class, name)| format!("{class}.{name}"))
 }
 
 /// The state of the messages of one run: what each flow has open, and which zips are published.
@@ -121,36 +167,52 @@ impl Messages {
         let flow = self.flow(flow);
         let name = flow.test_of(&trace.test_class, &trace.scenario);
         let bundle = format!("{target}/{zip_name}!/{}", trace.entry.trim_end_matches('/'));
-        let mut metadata = |label: &str, kind: &str, value: &str| {
-            out.push(message(
-                "testMetadata",
-                &[
-                    ("testName", &name),
-                    ("name", label),
-                    ("type", kind),
-                    ("value", value),
-                    ("flowId", &flow.id),
-                ],
-                None,
-            ));
-        };
-        metadata("trace", "artifact", &bundle);
+        flow.trace_metadata(&mut out, &name, "trace", "artifact", &bundle);
         if trace.has_video {
-            metadata("video", "video", &format!("{bundle}/{video_file}"));
+            flow.trace_metadata(&mut out, &name, "video", "video", &format!("{bundle}/{video_file}"));
         }
         out
     }
 
-    /// The messages that end the run: every open case fails as unfinished, and every open suite finishes.
-    /// Publishes the host file `file` into the artifact directory `target`, once for each file.
-    pub fn artifact(&mut self, file: &str, target: &str) -> Vec<String> {
+    /// The metadata of the test of a trace that a step after the tests publishes. They are the zip of the bundle, the
+    /// viewer page of the trace, its video and its failure picture. The step publishes the files itself.
+    pub fn published(&mut self, trace: &PublishedTrace<'_>) -> Vec<String> {
+        let mut out = Vec::new();
+        let flow = self.flow(NO_FLOW);
+        let name = test_name(trace.cases, trace.test_class, trace.scenario);
+        flow.trace_metadata(&mut out, &name, "trace", "artifact", trace.trace);
+        if let Some(link) = trace.link {
+            flow.trace_metadata(&mut out, &name, "trace viewer", "link", link);
+        }
+        if let Some(video) = trace.video {
+            flow.trace_metadata(&mut out, &name, "video", "video", video);
+        }
+        if let Some(still) = trace.still {
+            flow.trace_metadata(&mut out, &name, "failure", "image", still);
+        }
+        out
+    }
+
+    /// Publishes the host file `file` at the top of the artifacts under its own name, once for each file. An archive
+    /// stays as it is, because no target asks TeamCity to pack it.
+    pub fn artifact_file(&mut self, file: &str) -> Vec<String> {
         if self.published.insert(file.to_owned()) {
-            vec![message("publishArtifacts", &[], Some(&format!("{file} => {target}")))]
+            vec![message("publishArtifacts", &[], Some(file))]
         } else {
             Vec::new()
         }
     }
 
+    /// Publishes the host file `file` into the artifact directory `target`, once for each file.
+    pub fn artifact(&mut self, file: &str, target: &str) -> Vec<String> {
+        if self.published.insert(file.to_owned()) {
+            vec![publish_artifacts(file, target)]
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// The messages that end the run: every open case fails as unfinished, and every open suite finishes.
     pub fn finish(&mut self) -> Vec<String> {
         let mut out = Vec::new();
         for flow in &mut self.flows {
@@ -304,13 +366,18 @@ impl Flow {
         self.end_suite(out);
     }
 
+    /// One `testMetadata` of a trace file, with the flow when there is one.
+    fn trace_metadata(&self, out: &mut Vec<String>, test: &str, label: &str, kind: &str, value: &str) {
+        let mut attributes = vec![("testName", test), ("name", label), ("type", kind), ("value", value)];
+        if self.id != NO_FLOW {
+            attributes.push(("flowId", &self.id));
+        }
+        out.push(message("testMetadata", &attributes, None));
+    }
+
     /// The test name of the scenario `scenario` of `test_class`, as the flow named it. A recorder can name the class
     /// without its package, so the simple names are compared.
     fn test_of(&self, test_class: &str, scenario: &str) -> String {
-        self.named
-            .iter()
-            .rev()
-            .find(|(class, name)| name == scenario && simple_class_name(class) == simple_class_name(test_class))
-            .map_or_else(|| format!("{test_class}.{scenario}"), |(class, name)| format!("{class}.{name}"))
+        test_name(&self.named, test_class, scenario)
     }
 }

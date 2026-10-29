@@ -75,7 +75,7 @@ import java.util.function.Supplier
 import javax.swing.JComponent
 import kotlin.time.TimeSource
 
-internal class MarketplacePluginsTab @RequiresEdt(generateAssertion = false /* IJPL-115548 */) constructor(
+internal class MarketplacePluginsTab @RequiresEdt constructor(
   facade: PluginModelFacade,
   scope: CoroutineScope,
   customizer: PluginManagerCustomizer?,
@@ -107,7 +107,7 @@ internal class MarketplacePluginsTab @RequiresEdt(generateAssertion = false /* I
     customizeSearchTextField()
   }
 
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   override fun createPluginsPanel(): JComponent {
     val project = ProjectUtil.getActiveProject()
     computeAndApplyMarketplacePanelModel(selectionListener, project)
@@ -234,7 +234,7 @@ internal class MarketplacePluginsTab @RequiresEdt(generateAssertion = false /* I
     return marketplaceData
   }
 
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   private fun applyMarketplacePanelModel(
     project: Project?,
     model: CreateMarketplacePanelModel,

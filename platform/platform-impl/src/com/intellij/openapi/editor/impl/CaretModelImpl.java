@@ -24,10 +24,9 @@ import com.intellij.openapi.editor.ex.PrioritizedDocumentListener;
 import com.intellij.openapi.editor.ex.RangeMarkers;
 import com.intellij.openapi.editor.ex.util.EditorUtil;
 import com.intellij.openapi.editor.markup.TextAttributes;
+import com.intellij.openapi.editor.registry.EditorRegistry;
 import com.intellij.openapi.ide.CopyPasteManager;
 import com.intellij.openapi.util.Disposer;
-import com.intellij.openapi.util.registry.Registry;
-import com.intellij.openapi.util.registry.RegistryValue;
 import com.intellij.util.EventDispatcher;
 import com.intellij.util.concurrency.ThreadingAssertions;
 import com.intellij.util.containers.ContainerUtil;
@@ -51,9 +50,6 @@ import java.util.ListIterator;
 import java.util.Objects;
 
 public final class CaretModelImpl implements CaretModel, PrioritizedDocumentListener, Disposable, Dumpable, InlayModel.Listener {
-  private static final RegistryValue MAX_CARET_COUNT = Registry.get("editor.max.caret.count");
-  private static final RegistryValue PRIMARY_SELECTION_CARET_UPDATE = Registry.get("editor.caret.update.primary.selection");
-
   private final EditorImpl editor;
   private final DocumentEx document;
   private final EventDispatcher<CaretListener> caretListeners;
@@ -76,7 +72,7 @@ public final class CaretModelImpl implements CaretModel, PrioritizedDocumentList
     this.caretListeners = EventDispatcher.create(CaretListener.class);
     this.caretActionListeners = EventDispatcher.create(CaretActionListener.class);
     this.snapshotMarkerStorage = document instanceof DocumentImpl documentImpl && RangeMarkers.Holder.USE_PMARKER_IMPLEMENTATION
-                                 ? new SnapshotCaretMarkerStorage(documentImpl, this::snapshotMarkersChanged)
+                                 ? new SnapshotCaretMarkerStorage(documentImpl)
                                  : null;
     this.positionMarkerTree = snapshotMarkerStorage == null ? new RangeMarkerTree<>(document) : null;
     this.selectionMarkerTree = snapshotMarkerStorage == null ? new RangeMarkerTree<>(document) : null;
@@ -117,7 +113,7 @@ public final class CaretModelImpl implements CaretModel, PrioritizedDocumentList
 
   @Override
   public int getMaxCaretCount() {
-    return Math.max(1, MAX_CARET_COUNT.asInteger());
+    return Math.max(1, EditorRegistry.current().maxCaretCount());
   }
 
   @Override
@@ -379,16 +375,14 @@ public final class CaretModelImpl implements CaretModel, PrioritizedDocumentList
 
   @Override
   public void beforeDocumentChange(@NotNull DocumentEvent e) {
+    if (snapshotMarkerStorage != null) {
+      snapshotMarkerStorage.beforeDocumentChange();
+    }
     boolean cacheLogicalPosition = !isInBulkUpdate() && e.isWholeTextReplaced();
-    if (cacheLogicalPosition || snapshotMarkerStorage != null) {
+    if (cacheLogicalPosition) {
       for (CaretImpl caret : allCarets) {
-        if (cacheLogicalPosition) {
-          // logical position will be needed to restore caret position via diff
-          caret.updateCachedStateIfNeeded();
-        }
-        if (snapshotMarkerStorage != null) {
-          caret.beforeSnapshotMarkerChange();
-        }
+        // logical position will be needed to restore caret position via diff
+        caret.updateCachedStateIfNeeded();
       }
     }
     documentInUpdate = true;
@@ -558,7 +552,7 @@ public final class CaretModelImpl implements CaretModel, PrioritizedDocumentList
 
   void updateSystemSelection() {
     if (GraphicsEnvironment.isHeadless() ||
-        !PRIMARY_SELECTION_CARET_UPDATE.asBoolean() ||
+        !EditorRegistry.current().isPrimarySelectionUpdateEnabled() ||
         editor.isRendererMode() ||
         !CopyPasteManager.getInstance().isSystemSelectionSupported()) {
       return;
@@ -600,12 +594,6 @@ public final class CaretModelImpl implements CaretModel, PrioritizedDocumentList
   @TestOnly
   boolean isUsingSnapshotMarkerStorage() {
     return snapshotMarkerStorage != null;
-  }
-
-  private void snapshotMarkersChanged(@NotNull DocumentEvent event) {
-    for (CaretImpl caret : allCarets) {
-      caret.snapshotMarkersChanged(event);
-    }
   }
 
   private void mergeOverlappingCaretsAndSelections() {

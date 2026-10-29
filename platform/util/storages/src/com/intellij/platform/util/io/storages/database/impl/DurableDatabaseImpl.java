@@ -5,6 +5,7 @@ import com.intellij.platform.util.io.storages.DataExternalizerEx;
 import com.intellij.platform.util.io.storages.KeyDescriptorEx;
 import com.intellij.platform.util.io.storages.UnsupportedFormatException;
 import com.intellij.platform.util.io.storages.database.DurableDatabase;
+import com.intellij.platform.util.io.storages.database.DurableMapImplementation;
 import com.intellij.platform.util.io.storages.database.impl.housekeeping.DatabaseHousekeepingCoordinator;
 import com.intellij.platform.util.io.storages.database.impl.housekeeping.DatabaseHousekeepingScheduler;
 import com.intellij.platform.util.io.storages.database.spi.housekeeping.Housekeeper;
@@ -14,7 +15,10 @@ import com.intellij.platform.util.io.storages.database.spi.BlocksDatabase;
 import com.intellij.platform.util.io.storages.database.spi.BlocksStore;
 import com.intellij.platform.util.io.storages.database.spi.StoreMetadata;
 import com.intellij.platform.util.io.storages.database.spi.metrics.DatabaseMetrics;
+import com.intellij.platform.util.io.storages.database.storages.appenablerecords.RecordStorageOverBlocks;
+import com.intellij.platform.util.io.storages.database.storages.durablemap.DurableMapMetadata;
 import com.intellij.platform.util.io.storages.database.storages.durablemap.DurableMapOverBlocks;
+import com.intellij.platform.util.io.storages.database.storages.durablemap.DurableMapWithKeyCatalogOverBlocks;
 import com.intellij.platform.util.io.storages.durablemap.DefaultEntryExternalizer;
 import com.intellij.platform.util.io.storages.durablemap.DurableMap;
 import com.intellij.platform.util.io.storages.durablemap.PatchableDurableMap;
@@ -66,13 +70,14 @@ public final class DurableDatabaseImpl implements DurableDatabase {
   @Override
   public <K, V> @NotNull DurableMap<K, V> openMap(@NotNull String name,
                                                   int dataVersion,
+                                                  @NotNull DurableMapImplementation implementation,
                                                   @NotNull KeyDescriptorEx<K> keyDescriptor,
                                                   @NotNull DataExternalizerEx<V> valueExternalizer) throws IOException {
     synchronized (lock) {
       ensureNotClosed();
       var cachedMap = openedMapsByName.get(name);
       if (cachedMap != null && !cachedMap.map.isClosed()) {
-        return cachedMap.ifCompatible(name, dataVersion);
+        return cachedMap.ifCompatible(name, dataVersion, implementation);
       }
 
       var blocksStore = new HousekeepingBlocksStore(
@@ -80,37 +85,78 @@ public final class DurableDatabaseImpl implements DurableDatabase {
         housekeepingCoordinator
       );
 
-      var entryExternalizer = new DefaultEntryExternalizer<>(keyDescriptor, valueExternalizer);
-      DurableMap<K, V> map;
+      //check implementation is consistent with requested one:
+      var storedImplementation = implementationFromMetadata(blocksStore.storeMetadata(), implementation);
+      if (storedImplementation != implementation) {
+        throw implementationMismatch(name, implementation, storedImplementation);
+      }
+
       EqualityPolicy<? super V> valueEquality = equalityIfSupported(valueExternalizer);
-      if (valueExternalizer instanceof PatchableDurableMap.PatchableValueExternalizer<V, ?> patchExternalizer) {
-        map = DurableMapOverBlocks.openPatchable(
-          blocksStore, DurableMapOverBlocks.DEFAULT_DATA_BLOCK_CONTENT_LENGTH, keyDescriptor,
-          valueEquality, entryExternalizer, patchExternalizer
-        );
-      }
-      else {
-        map = DurableMapOverBlocks.open(
-          blocksStore, DurableMapOverBlocks.DEFAULT_DATA_BLOCK_CONTENT_LENGTH, keyDescriptor,
-          valueEquality, entryExternalizer
-        );
-      }
-      openedMapsByName.put(name, new OpenedMap(blocksStore.dataVersion(), map));
+      DurableMap<K, V> map = switch (storedImplementation) {
+        case KEY_VALUE_TOGETHER -> {
+          var entryExternalizer = new DefaultEntryExternalizer<>(keyDescriptor, valueExternalizer);
+          if (valueExternalizer instanceof PatchableDurableMap.PatchableValueExternalizer<V, ?> patchExternalizer) {
+            yield DurableMapOverBlocks.openPatchable(
+              blocksStore, RecordStorageOverBlocks.ADAPTIVE_BLOCK_SIZE_POLICY, keyDescriptor,
+              valueEquality, entryExternalizer, patchExternalizer
+            );
+          }
+          else {
+            yield DurableMapOverBlocks.open(
+              blocksStore, RecordStorageOverBlocks.ADAPTIVE_BLOCK_SIZE_POLICY, keyDescriptor,
+              valueEquality, entryExternalizer
+            );
+          }
+        }
+        case KEY_VALUE_SEPARATELY -> {
+          if (valueExternalizer instanceof PatchableDurableMap.PatchableValueExternalizer<V, ?> patchExternalizer) {
+            yield DurableMapWithKeyCatalogOverBlocks.openPatchable(
+              blocksStore, RecordStorageOverBlocks.ADAPTIVE_BLOCK_SIZE_POLICY,
+              keyDescriptor, valueEquality, patchExternalizer
+            );
+          }
+          else {
+            yield DurableMapWithKeyCatalogOverBlocks.open(
+              blocksStore, RecordStorageOverBlocks.ADAPTIVE_BLOCK_SIZE_POLICY,
+              keyDescriptor, valueEquality, valueExternalizer
+            );
+          }
+        }
+      };
+
+      openedMapsByName.put(name, new OpenedMap(blocksStore.dataVersion(), storedImplementation, map));
       return map;
     }
   }
 
   @Override
-  public <K, V, P> @NotNull PatchableDurableMap<K, V, P> openMap(@NotNull String name,
-                                                                 int dataVersion,
-                                                                 @NotNull KeyDescriptorEx<K> keyDescriptor,
-                                                                 @NotNull PatchableDurableMap.PatchableValueExternalizer<V, P> valueExternalizer)
-    throws IOException {
-    var map = openMap(name, dataVersion, keyDescriptor, (DataExternalizerEx<V>)valueExternalizer);
+  public <K, V, P> @NotNull PatchableDurableMap<K, V, P> openMap(
+    @NotNull String name,
+    int dataVersion,
+    @NotNull DurableMapImplementation implementation,
+    @NotNull KeyDescriptorEx<K> keyDescriptor,
+    @NotNull PatchableDurableMap.PatchableValueExternalizer<V, P> valueExternalizer
+  ) throws IOException {
+    var map = openMap(name, dataVersion, implementation, keyDescriptor, (DataExternalizerEx<V>)valueExternalizer);
     if (!(map instanceof PatchableDurableMap<?, ?, ?>)) {
       throw new IllegalStateException("The map is already open without patch support: " + name);
     }
     return (PatchableDurableMap<K, V, P>)map;
+  }
+
+  private static @NotNull DurableMapImplementation implementationFromMetadata(@NotNull StoreMetadata metadata,
+                                                                              @NotNull DurableMapImplementation requested)
+    throws IOException {
+    if (metadata.version() == 0) {
+      return requested;
+    }
+    return DurableMapMetadata.fromStoreMetadata(metadata).mapImplementation();
+  }
+
+  private static @NotNull UnsupportedFormatException implementationMismatch(@NotNull String name,
+                                                                            @NotNull DurableMapImplementation expected,
+                                                                            @NotNull DurableMapImplementation actual) {
+    return new UnsupportedFormatException("map '" + name + "' implementation", expected.name(), actual.name());
   }
 
   @SuppressWarnings("unchecked")
@@ -228,12 +274,18 @@ public final class DurableDatabaseImpl implements DurableDatabase {
     return (DurableMap<K, V>)map;
   }
 
-  private record OpenedMap(int dataVersion, @NotNull DurableMap<?, ?> map) {
+  private record OpenedMap(int dataVersion,
+                           @NotNull DurableMapImplementation implementation,
+                           @NotNull DurableMap<?, ?> map) {
 
-    @NotNull<K, V> DurableMap<K, V> ifCompatible(@NotNull String name,
-                                                 int dataVersion) throws UnsupportedFormatException {
+    @NotNull <K, V> DurableMap<K, V> ifCompatible(@NotNull String name,
+                                                  int dataVersion,
+                                                  @NotNull DurableMapImplementation implementation) throws UnsupportedFormatException {
       if (this.dataVersion != dataVersion) {
         throw new UnsupportedFormatException("store '" + name + "'", dataVersion, this.dataVersion);
+      }
+      if (this.implementation != implementation) {
+        throw implementationMismatch(name, implementation, this.implementation);
       }
       return castMap(this.map);
     }

@@ -15,6 +15,7 @@ jvm_library(
         "//plugins/junit_rt:junit-rt",
         "//platform/smRunner",
         "//platform/testRunner/plugin",
+        "//platform/main/intellij.platform.monolith.main:monolith-main",
     ],
 )
 
@@ -41,6 +42,7 @@ jvm_library(
         "//platform/platform-util-io:ide-util-io_test_lib",
         "//platform/ide-core:ide-core_test_lib",
         "//platform/testRunner/plugin:plugin_test_lib",
+        "//platform/main/intellij.platform.monolith.main:monolith-main_test_lib",
     ],
     deps = [
         # do not sort,
@@ -104,12 +106,6 @@ jvm_library(
         "//platform/testFramework/junit5:junit5_test_lib",
         "//platform/execution",
         "//platform/execution:execution_test_lib",
-        "//images:images-tests",
-        "//images:images-tests_test_lib",
-        "//RegExpSupport:regexp-tests",
-        "//RegExpSupport:regexp-tests_test_lib",
-        "//platform/xdebugger-impl:debugger-impl-tests",
-        "//platform/xdebugger-impl:debugger-impl-tests_test_lib",
         "//platform/code-style-api:codeStyle",
         "//platform/code-style-api:codeStyle_test_lib",
         "//platform/testRunner",

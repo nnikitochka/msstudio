@@ -2,6 +2,7 @@
 package com.intellij.openapi.editor.impl.view;
 
 import com.intellij.openapi.editor.ex.DocumentText;
+import com.intellij.openapi.editor.ex.DocumentTextUtil;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.DocumentInternalUtil;
 import org.jetbrains.annotations.NotNull;
@@ -29,7 +30,7 @@ final class LogicalColumns {
     int end = document.lineEndOffset(line);
     int cacheSize = (end - start) / CACHE_FREQUENCY;
     int[] cache = ArrayUtil.newIntArray(cacheSize);
-    CharSequence text = document.cachedChars();
+    CharSequence text = document.luckyChars();
     int column = 0;
     boolean hasTabsOrSurrogates = false;
     for (int i = start; i < end; i++) {
@@ -73,7 +74,7 @@ final class LogicalColumns {
     int startOffset = lineStartOffset + cacheIndex * CACHE_FREQUENCY;
     int startColumn = cacheIndex == 0 ? 0 : columnCache[cacheIndex - 1];
     return DocumentInternalUtil.calcLogicalColumn(
-      document.cachedChars(),
+      document.luckyChars(),
       startOffset,
       startColumn,
       offset,
@@ -93,12 +94,12 @@ final class LogicalColumns {
     int pos = Arrays.binarySearch(columnCache, column);
     if (pos >= 0) {
       int result = lineStartOffset + (pos + 1) * CACHE_FREQUENCY;
-      return DocumentInternalUtil.isInsideSurrogatePair(document, result) ? result - 1 : result;
+      return DocumentTextUtil.isInsideSurrogatePair(document, result) ? result - 1 : result;
     }
     int startOffset = lineStartOffset + (- pos - 1) * CACHE_FREQUENCY;
     int cachedColumn = pos == -1 ? 0 : columnCache[- pos - 2];
     return DocumentInternalUtil.calcLogicalOffset(
-      document.cachedChars(),
+      document.luckyChars(),
       column,
       cachedColumn,
       startOffset,

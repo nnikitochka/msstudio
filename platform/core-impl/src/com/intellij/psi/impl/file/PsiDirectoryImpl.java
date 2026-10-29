@@ -410,7 +410,7 @@ public class PsiDirectoryImpl extends PsiElementBase implements PsiDirectory, Qu
   public @NotNull PsiFile copyFileFrom(@NotNull String newName, @NotNull PsiFile originalFile) throws IncorrectOperationException {
     checkCreateFile(newName);
 
-    Document document = PsiDocumentManager.getInstance(getProject()).getDocument(originalFile);
+    Document document = PsiDocumentManager.getInstance(getProject()).getCachedDocument(originalFile);
     if (document != null) {
       FileDocumentManager.getInstance().saveDocument(document);
     }

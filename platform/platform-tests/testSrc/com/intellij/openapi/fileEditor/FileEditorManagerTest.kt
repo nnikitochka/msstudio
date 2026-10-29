@@ -10,6 +10,7 @@ import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.EDT
 import com.intellij.openapi.application.ModalityState
+import com.intellij.openapi.application.UI
 import com.intellij.openapi.application.UiWithModelAccess
 import com.intellij.openapi.application.readAction
 import com.intellij.openapi.components.ExpandMacroToPathMap
@@ -59,6 +60,7 @@ import com.intellij.openapi.util.Pair
 import com.intellij.openapi.util.TextRange
 import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.util.io.IoTestUtil
+import com.intellij.openapi.vfs.FileIdAdapter
 import com.intellij.openapi.vfs.StandardFileSystems
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.vfs.VirtualFileManager
@@ -67,6 +69,7 @@ import com.intellij.openapi.vfs.impl.VirtualFilePointerTracker
 import com.intellij.openapi.wm.IdeFocusManager
 import com.intellij.openapi.wm.IdeFrame
 import com.intellij.platform.backend.navigation.NavigationRequest
+import com.intellij.platform.fileEditor.FileEntry
 import com.intellij.platform.ide.navigation.NavigationService
 import com.intellij.platform.ide.progress.runWithModalProgressBlocking
 import com.intellij.platform.util.progress.createProgressPipe
@@ -86,6 +89,7 @@ import com.intellij.testFramework.common.timeoutRunBlocking
 import com.intellij.testFramework.common.waitUntil
 import com.intellij.testFramework.executeSomeCoroutineTasksAndDispatchAllInvocationEvents
 import com.intellij.testFramework.junit5.RegistryKey
+import com.intellij.testFramework.junit5.SystemProperty
 import com.intellij.testFramework.junit5.TestApplication
 import com.intellij.testFramework.junit5.TestDisposable
 import com.intellij.testFramework.junit5.fixture.fileEditorManagerFixture
@@ -108,6 +112,7 @@ import kotlinx.coroutines.plus
 import kotlinx.coroutines.withContext
 import org.assertj.core.api.Assertions.assertThat
 import org.intellij.lang.annotations.Language
+import org.jdom.Element
 import org.jetbrains.jps.model.serialization.PathMacroUtil
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
@@ -195,6 +200,82 @@ class FileEditorManagerTest {
     val (repeatedEditorComponent, consumedEditorState) = fileEditorManager.init()
     assertThat(repeatedEditorComponent).isSameAs(editorComponent)
     assertThat(consumedEditorState).isNull()
+  }
+
+  @Test
+  @SystemProperty(propertyKey = "idea.delayed.editor.composite", propertyValue = "true")
+  fun testDelayedEditorStateIsReadBeforeTheEditorsArePublished(): Unit = timeoutRunBlocking {
+    val release = CompletableDeferred<Unit>()
+    val selectedFile = LightVirtualFile("selected.txt", PlainTextFileType.INSTANCE, "text")
+    val delayedFile = LightVirtualFile("delayed.txt", PlainTextFileType.INSTANCE, "text")
+    val provider = object : MockFileEditorProvider(editorTypeId = "delayed", policy = FileEditorPolicy.HIDE_DEFAULT_EDITOR),
+                            AsyncFileEditorProvider {
+      override fun accept(project: Project, file: VirtualFile): Boolean = file === delayedFile
+
+      override suspend fun createFileEditor(
+        project: Project,
+        file: VirtualFile,
+        document: Document?,
+        editorCoroutineScope: CoroutineScope,
+      ): FileEditor {
+        release.await()
+        return createEditor(project, file)
+      }
+
+      override fun readState(sourceElement: Element, project: Project, file: Lazy<VirtualFile?>): FileEditorState {
+        return DelayedEditorState(sourceElement.getAttributeValue("value"))
+      }
+    }
+    registerProvider(provider)
+    val state = createRestoreState(selectedFile, delayedFile) { file ->
+      if (file === delayedFile) """<provider selected="true" editor-type-id="delayed"><state value="saved" /></provider>""" else ""
+    }
+    try {
+      manager.mainSplitters.createTestEditors(state)
+      val composite = withContext(Dispatchers.EDT) {
+        assertThatNotNull(manager.windows.firstNotNullOfOrNull { it.getComposite(delayedFile) })
+      }
+      withContext(Dispatchers.EDT) {
+        assertThat(composite.isAvailable()).isFalse()
+        assertThat(manager.readDelayedEditorState(composite, provider)).isEqualTo(DelayedEditorState("saved"))
+        assertThat(composite.allEditors).isEmpty()
+      }
+
+      release.complete(Unit)
+      composite.waitForAvailable()
+
+      withContext(Dispatchers.EDT) {
+        assertThat(manager.readDelayedEditorState(composite, provider)).describedAs("the state after the editors").isNull()
+      }
+    }
+    finally {
+      release.complete(Unit)
+      withContext(Dispatchers.EDT) {
+        manager.closeFile(delayedFile)
+        manager.closeFile(selectedFile)
+      }
+    }
+  }
+
+  private data class DelayedEditorState(val value: String?) : FileEditorState {
+    override fun canBeMergedWith(otherState: FileEditorState, level: FileEditorStateLevel): Boolean = false
+  }
+
+  /**
+   * Restores [files] as the project open restores a saved editor layout. The first file is the selected tab.
+   * [entryContent] gives the saved provider states of each file.
+   */
+  private fun createRestoreState(vararg files: VirtualFile, entryContent: (VirtualFile) -> String = { "" }): EditorSplitterState {
+    val adapter = FileIdAdapter.getInstance()
+    ApplicationManager.getApplication().replaceService(FileIdAdapter::class.java, object : FileIdAdapter by adapter {
+      override fun getFile(fileEntry: FileEntry, virtualFileManager: VirtualFileManager, project: Project): VirtualFile? {
+        return files.firstOrNull { it.url == fileEntry.url } ?: adapter.getFile(fileEntry, virtualFileManager, project)
+      }
+    }, disposable)
+    val entries = files.mapIndexed { index, file ->
+      """<file current-in-tab="${index == 0}"><entry file="${file.url}">${entryContent(file)}</entry></file>"""
+    }.joinToString("")
+    return EditorSplitterState(JDOMUtil.load("<component><leaf>$entries</leaf></component>"))
   }
 
   @Test
@@ -780,6 +861,34 @@ class FileEditorManagerTest {
   @Test
   fun testFileEditorOpenRequestUsesManagedMode() {
     assertThat(FileEditorOpenRequest.defaults().openMode).isEqualTo(FileEditorOpenMode.MANAGED)
+  }
+
+  @ParameterizedTest
+  @CsvSource("false, false, false, false", "true, false, false, true", "false, true, false, true",
+             "true, true, false, true", "false, true, true, false", "true, true, true, false")
+  fun testPreviewTabRequestOptions(
+    automaticPreview: Boolean,
+    forcePreview: Boolean,
+    forbidPreview: Boolean,
+    expectedPreview: Boolean,
+  ): Unit = timeoutRunBlocking {
+    val settings = UISettings.getInstance()
+    val wasEnabled = withContext(Dispatchers.UI) {
+      settings.openInPreviewTabIfPossible.also { settings.openInPreviewTabIfPossible = automaticPreview }
+    }
+    try {
+      val file = LightVirtualFile("preview.txt", "text")
+      file.putUserData(FileEditorManagerKeys.FORBID_PREVIEW_TAB, forbidPreview)
+      manager.openFile(file, FileEditorOpenOptions(usePreviewTab = !forcePreview, forcePreviewTab = forcePreview))
+      val isPreview = withContext(Dispatchers.EDT) { manager.getComposite(file)!!.isPreview }
+      assertThat(isPreview).isEqualTo(expectedPreview)
+      assertThat(withContext(Dispatchers.UI) { settings.openInPreviewTabIfPossible }).isEqualTo(automaticPreview)
+    }
+    finally {
+      withContext(NonCancellable + Dispatchers.UI) {
+        settings.openInPreviewTabIfPossible = wasEnabled
+      }
+    }
   }
 
   @ParameterizedTest
@@ -1460,7 +1569,7 @@ class FileEditorManagerTest {
     val providerDisposable = Disposer.newDisposable()
     Disposer.register(disposable, providerDisposable)
     providerDisposables.add(providerDisposable)
-    FileEditorProvider.EP_FILE_EDITOR_PROVIDER.point.registerExtension(provider, providerDisposable)
+    FileEditorProviderBean.EP_NAME.point.registerExtension(FileEditorProviderBean(provider), providerDisposable)
   }
 
   private fun registerPreCloseCheck(check: VirtualFilePreCloseCheck) {

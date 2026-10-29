@@ -26,7 +26,18 @@ interface IComponentStore {
 
   suspend fun initComponent(component: Any, serviceDescriptor: ServiceDescriptor?, pluginId: PluginId, parentScope: CoroutineScope? = null)
 
+  /**
+   * Loads the storage data behind [PersistentStateComponent] of [componentClass].
+   * The service container calls it before it creates the component instance.
+   * Thus, the file IO does not occur inside the critical section of initialization.
+   */
+  fun prefetchComponentState(componentClass: Class<out PersistentStateComponent<*>>) {}
+
   fun unloadComponent(component: Any)
+
+  /** Tracks [component] again after [unloadComponent]. The component keeps its state. */
+  fun reregisterComponent(component: Any, pluginId: PluginId) {
+  }
 
   fun initPersistencePlainComponent(component: Any, @NlsSafe key: String, pluginId: PluginId)
 

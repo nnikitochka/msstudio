@@ -99,6 +99,7 @@ jvm_library(
         "//platform/execution-impl",
         "//platform/consoleView",
         "//platform/consoleView/impl",
+        "//platform/scratch",
     ],
 )
 
@@ -169,6 +170,7 @@ jvm_library(
         "//platform/execution-impl:execution-impl_test_lib",
         "//platform/consoleView:consoleView_test_lib",
         "//platform/consoleView/impl:impl_test_lib",
+        "//platform/scratch:scratch_test_lib",
     ],
 )
 ### auto-generated section `build intellij.kotlin.base.scripting.scratch` end
@@ -197,6 +199,7 @@ jvm_library(
         "//plugins/kotlin:kotlin-plugin-community-main",
         "@lib//:kotlin-stdlib",
         "//libraries/kotlinc/kotlin-compiler-common:libraries-kotlinc-kotlin-compiler-common",
+        "//platform/main/intellij.platform.monolith.main:monolith-main",
     ],
 )
 
@@ -218,6 +221,7 @@ jvm_library(
         ":kotlin-base-scripting-scratch-tests",
         "//plugins/kotlin:kotlin-plugin-community-main_test_lib",
         "//platform/ide-core:ide-core_test_lib",
+        "//platform/main/intellij.platform.monolith.main:monolith-main_test_lib",
     ],
     deps = [
         # do not sort,
@@ -276,6 +280,8 @@ jvm_library(
         "//platform/testFramework/junit5/codeInsight:codeInsight_test_lib",
         "//libraries/junit6",
         "//libraries/junit6:junit6_test_lib",
+        "//platform/scratch/plugin",
+        "//platform/scratch/plugin:plugin_test_lib",
     ],
 )
 ### auto-generated section `build intellij.kotlin.base.scripting.scratch.tests` end

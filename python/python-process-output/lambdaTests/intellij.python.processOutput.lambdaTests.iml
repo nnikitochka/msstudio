@@ -9,8 +9,8 @@
         <compilerArguments>
           <stringArguments>
             <stringArg name="jvmTarget" arg="25" />
-            <stringArg name="apiVersion" arg="2.4" />
-            <stringArg name="languageVersion" arg="2.4" />
+            <stringArg name="apiVersion" arg="2.5" />
+            <stringArg name="languageVersion" arg="2.5" />
           </stringArguments>
         </compilerArguments>
       </configuration>
@@ -44,7 +44,6 @@
     <orderEntry type="module" module-name="intellij.tools.ide.starter.build.server" scope="TEST" />
     <orderEntry type="module" module-name="intellij.tools.ide.starter.product.pycharm" scope="TEST" />
     <orderEntry type="module" module-name="intellij.python.processOutput.common" scope="TEST" />
-    <orderEntry type="module" module-name="intellij.python.processOutput.frontend" scope="TEST" />
+    <orderEntry type="module" module-name="intellij.python.processOutput.frontend" scope="RUNTIME" />
   </component>
-  <component name="TestModuleProperties" production-module="intellij.python.processOutput.frontend" />
 </module>

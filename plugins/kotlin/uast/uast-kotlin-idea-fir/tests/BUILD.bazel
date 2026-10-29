@@ -21,6 +21,8 @@ jvm_library(
         "//platform/structuralsearch/plugin",
         "//platform/testRunner/plugin",
         "//platform/vcs/plugin",
+        "//platform/main/intellij.platform.monolith.main:monolith-main",
+        "//community-resources:customization",
     ],
 )
 
@@ -47,6 +49,8 @@ jvm_library(
         "//platform/structuralsearch/plugin:plugin_test_lib",
         "//platform/testRunner/plugin:plugin_test_lib",
         "//platform/vcs/plugin:plugin_test_lib",
+        "//platform/main/intellij.platform.monolith.main:monolith-main_test_lib",
+        "//community-resources:customization_test_lib",
     ],
     deps = [
         # do not sort,
@@ -81,6 +85,8 @@ jvm_library(
         "//platform/testFramework:testFramework_test_lib",
         "//plugins/kotlin/uast/uast-kotlin-fir/tests",
         "//plugins/kotlin/uast/uast-kotlin-fir/tests:tests_test_lib",
+        "//platform/scratch/plugin",
+        "//platform/scratch/plugin:plugin_test_lib",
     ],
 )
 ### auto-generated section `build intellij.kotlin.uast.idea.tests` end

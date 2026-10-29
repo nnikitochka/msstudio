@@ -14,8 +14,10 @@ import com.intellij.openapi.externalSystem.model.project.LibraryPathType
 import com.intellij.openapi.externalSystem.model.project.ModuleData
 import com.intellij.openapi.util.Key
 import org.gradle.tooling.model.idea.IdeaModule
+import org.jetbrains.kotlin.idea.gradle.utils.KotlinGradleModelFetchProperties
 import org.jetbrains.kotlin.idea.gradleTooling.model.kapt.KaptGradleModel
-import org.jetbrains.kotlin.idea.gradleTooling.model.kapt.KaptModelBuilderService
+import org.jetbrains.kotlin.idea.gradleTooling.model.kapt.KaptGradleModelProvider
+import org.jetbrains.plugins.gradle.model.ProjectImportModelProvider
 import org.jetbrains.plugins.gradle.model.data.GradleSourceSetData
 import org.jetbrains.plugins.gradle.service.project.AbstractProjectResolverExtension
 import org.jetbrains.plugins.gradle.util.GradleConstants
@@ -26,16 +28,19 @@ class KaptProjectResolverExtension : AbstractProjectResolverExtension() {
         private val LOG = Logger.getInstance(KaptProjectResolverExtension::class.java)
     }
 
-    override fun getExtraProjectModelClasses(): Set<Class<KaptGradleModel>> {
-        val isAndroidPluginRequestingKotlinGradleModelKey = Key.findKeyByName("IS_ANDROID_PLUGIN_REQUESTING_KAPT_GRADLE_MODEL_KEY")
-        if (isAndroidPluginRequestingKotlinGradleModelKey != null && resolverCtx.getUserData(isAndroidPluginRequestingKotlinGradleModelKey) != null) {
-            return emptySet()
-        }
-
-        return setOf(KaptGradleModel::class.java)
+    override fun getModelProvider(): ProjectImportModelProvider? {
+        if (isAndroidPluginRequestingKaptModel()) return null
+        return KaptGradleModelProvider(KotlinGradleModelFetchProperties.getExecutionMode())
     }
 
-    override fun getToolingExtensionsClasses() = setOf(KaptModelBuilderService::class.java, Unit::class.java)
+    override fun getToolingExtensionsClasses(): Set<Class<*>> {
+        return if (isAndroidPluginRequestingKaptModel()) emptySet() else KaptGradleModelProvider.MODELS
+    }
+
+    private fun isAndroidPluginRequestingKaptModel(): Boolean {
+        val key = Key.findKeyByName("IS_ANDROID_PLUGIN_REQUESTING_KAPT_GRADLE_MODEL_KEY") ?: return false
+        return resolverCtx.getUserData(key) != null
+    }
 
     override fun populateModuleExtraModels(gradleModule: IdeaModule, ideModule: DataNode<ModuleData>) {
         val kaptModel = resolverCtx.getExtraProject(gradleModule, KaptGradleModel::class.java)

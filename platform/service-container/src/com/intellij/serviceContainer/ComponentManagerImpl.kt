@@ -17,6 +17,7 @@ import com.intellij.diagnostic.LoadingState
 import com.intellij.diagnostic.PluginConflictException
 import com.intellij.diagnostic.PluginException
 import com.intellij.diagnostic.StartUpMeasurer
+import com.intellij.diagnostic.rethrowControlFlowException
 import com.intellij.ide.plugins.ContainerDescriptor
 import com.intellij.ide.plugins.IdeaPluginDescriptor
 import com.intellij.ide.plugins.IdeaPluginDescriptorImpl
@@ -52,6 +53,7 @@ import com.intellij.openapi.components.impl.stores.IComponentStore
 import com.intellij.openapi.diagnostic.Attachment
 import com.intellij.openapi.diagnostic.ControlFlowException
 import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.diagnostic.debug
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.diagnostic.trace
 import com.intellij.openapi.extensions.DefaultPluginDescriptor
@@ -75,6 +77,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Condition
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.util.UserDataHolderBase
+import com.intellij.openapi.util.registry.Registry
 import com.intellij.platform.instanceContainer.internal.ContainerDisposedException
 import com.intellij.platform.instanceContainer.internal.InstanceContainerImpl
 import com.intellij.platform.instanceContainer.internal.InstanceContainerInternal
@@ -153,6 +156,7 @@ private val defaultSupportedSignaturesOfLightServiceConstructors: List<MethodTyp
 
 /**
  * Finds the declared constructor matching [type]'s parameter list, or `null` if none matches.
+ * A constructor annotated [NonInjectable] never matches, because the container never calls it.
  *
  * Unlike [java.lang.invoke.MethodHandles.Lookup.findConstructor], this does not throw (and thus does not fill in a stack
  * trace) when a signature is absent, which is the common case while probing the prioritized list of supported signatures.
@@ -164,7 +168,8 @@ fun Array<Constructor<*>>.findConstructorOrNull(type: MethodType): Constructor<*
   val parameterTypes = type.parameterArray()
   for (constructor in this) {
     if (constructor.parameterCount == parameterTypes.size && constructor.parameterTypes.contentEquals(parameterTypes)) {
-      return constructor
+      // a class declares at most one constructor with these parameter types
+      return if (constructor.isAnnotationPresent(NonInjectable::class.java)) null else constructor
     }
   }
   return null
@@ -672,8 +677,17 @@ abstract class ComponentManagerImpl(
     }
     val result = registrar.complete()
     if (result != null) {
+      unloadShadowedComponents(result.shadowedInstances)
       setForwarding(result.shadowedInstances)
       pluginServicesStore.putServicesUnregisterHandle(pluginDescriptor, result.unregisterHandle)
+    }
+  }
+
+  private fun unloadShadowedComponents(shadowedInstances: Map<String, InstanceHolder>) {
+    for ((keyClassName, holder) in shadowedInstances) {
+      val instance = holder.createdInstanceOrNull() ?: continue
+      LOG.info("$keyClassName: ${instance.javaClass.name} is overridden after its creation, the store drops it")
+      componentStore.unloadComponent(instance)
     }
   }
 
@@ -1109,6 +1123,10 @@ abstract class ComponentManagerImpl(
 
     val unshadowedInstances = unregisterResult?.unshadowedInstances
     if (unshadowedInstances != null) {
+      for (holder in unshadowedInstances.values) {
+        val instance = holder.createdInstanceOrNull() ?: continue
+        store.reregisterComponent(instance, PluginUtil.getPluginId(instance.javaClass.classLoader))
+      }
       resetForwarding(unshadowedInstances)
     }
   }
@@ -1633,11 +1651,6 @@ val servicePreloadingAllowListForNonCorePlugin: Set<String> = java.util.Set.of(
   // Remote Development
   "com.intellij.cwm.plugin.driver.RemoteDriverHostService",
   "com.intellij.cwm.plugin.driver.RobotHostServiceImpl",
-  "com.intellij.cwm.plugin.following.FollowMeManagerService",
-  "com.intellij.cwm.plugin.following.GuestFollowMeManager",
-  "com.intellij.cwm.plugin.ui.BackendModalityHost",
-  "com.intellij.cwm.plugin.ports.CwmPortForwardingToolWindowManager",
-  "com.intellij.cwm.plugin.users.BackendUserManager",
   "com.intellij.platform.vcs.backend.split.BackendLocalChangesHost",
   "com.jetbrains.rdserver.BackendFileStructureHost",
   "com.jetbrains.rdserver.build.BuildHost",
@@ -1714,12 +1727,46 @@ internal fun getOrCreateInstanceBlocking(holder: InstanceHolder, debugString: St
   // if guiltyClassName is not null, it means that we are inside class initializer,
   // and so, we should execute it in a non-cancellable section
   if (inNonCancelableSection || guiltyClassName == null) {
+    prepareInitialization(holder, keyClass)
     return doGetOrCreateInstanceBlocking(holder, keyClass)
   }
   else {
     Cancellation.withNonCancelableSection().use {
+      prepareInitialization(holder, keyClass)
       return doGetOrCreateInstanceBlocking(holder, keyClass)
     }
+  }
+}
+
+private val isPreparingInitialization: ThreadLocal<Boolean> = ThreadLocal.withInitial { false }
+
+/**
+ * Runs the slow part of the initialization, for example, the read of the settings file, in the caller thread.
+ * Then it does not run inside the non-cancellable initialization, while other callers wait for the instance.
+ *
+ * The registry key `ide.service.preload.state` disables this step.
+ */
+private fun prepareInitialization(holder: InstanceHolder, keyClass: Class<*>?) {
+  // the preparation can request other instances; do not prepare them, to prevent an endless recursion
+  if (isPreparingInitialization.get() || !LoadingState.COMPONENTS_LOADED.isOccurred ||  !Registry.`is`("ide.service.preload.state", true)) {
+    return
+  }
+
+  isPreparingInitialization.set(true)
+  try {
+    rethrowCEasPCE(keyClass ?: holder) {
+      holder.prepareInitialization(keyClass)
+    }
+  }
+  catch (e: Throwable) {
+    if (e is ControlFlowException || e is CancellationException) {
+      throw e
+    }
+    // the initialization does the same work again and reports the error
+    LOG.debug(e) { "Cannot prepare initialization of $holder" }
+  }
+  finally {
+    isPreparingInitialization.set(false)
   }
 }
 
@@ -1919,5 +1966,16 @@ private suspend fun preloadAllInstances(container: InstanceContainerInternal) {
     catch (e: Throwable) {
       LOG.error("Cannot create ${holder.instanceClassName()}", e)
     }
+  }
+}
+
+private fun InstanceHolder.createdInstanceOrNull(): Any? {
+  return try {
+    tryGetInstance()
+  }
+  catch (e: Throwable) {
+    rethrowControlFlowException(e)
+    LOG.warn(e)
+    null
   }
 }

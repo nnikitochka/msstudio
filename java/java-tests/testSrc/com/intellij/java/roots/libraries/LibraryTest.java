@@ -1,12 +1,12 @@
 // Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.java.roots.libraries;
 
+import com.intellij.JavaTestUtil;
 import com.intellij.java.codeInsight.daemon.impl.quickfix.OrderEntryTest;
 import com.intellij.configurationStore.StoreUtil;
 import com.intellij.java.roots.ModuleRootManagerTestCase;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.WriteAction;
-import com.intellij.openapi.application.ex.PathManagerEx;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.ModuleRootEvent;
 import com.intellij.openapi.roots.ModuleRootListener;
@@ -36,28 +36,23 @@ import org.jetbrains.annotations.NotNull;
 
 import java.io.File;
 import java.io.IOException;
-import java.nio.file.Path;
 import java.util.Collections;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static com.intellij.testFramework.assertions.Assertions.assertThat;
 
 public class LibraryTest extends ModuleRootManagerTestCase {
-  public void testLibrarySerialization() throws IOException {
+  public void testLibrarySerialization() {
     long moduleModificationCount = ModuleRootManagerEx.getInstanceEx(myModule).getModificationCountForTests();
 
-    File projectDir = new File(myProject.getBasePath());
-    File localFastUtilJar = new File(projectDir, "lib.jar");
-    Path sources = getLibSources();
-    File localSources = new File(projectDir, "lib-sources.zip");
-
-    FileUtil.copy(new File(getFastUtilJar().getPath().replace("!", "")), localFastUtilJar);
-    FileUtil.copy(sources.toFile(), localSources);
+    var projectDir = getOrCreateProjectBaseDir().toNioPath().toFile();
+    var localJar = IoTestUtil.createTestJar(new File(projectDir, "lib.jar"));
+    var localSources = IoTestUtil.createTestJar(new File(projectDir, "lib-sources.zip"));
 
     PsiTestUtil.addProjectLibrary(
       myModule,
       "junit",
-      Collections.singletonList(StandardFileSystems.local().refreshAndFindFileByPath(localFastUtilJar.getAbsolutePath())),
+      Collections.singletonList(StandardFileSystems.local().refreshAndFindFileByPath(localJar.getAbsolutePath())),
       Collections.singletonList(StandardFileSystems.local().refreshAndFindFileByPath(localSources.getAbsolutePath()))
     );
 
@@ -142,7 +137,7 @@ public class LibraryTest extends ModuleRootManagerTestCase {
     LibraryTable table = getProjectLibraryTable();
     Library library = WriteAction.compute(() -> table.createLibrary("myLib"));
     Library.ModifiableModel model = library.getModifiableModel();
-    VirtualFile libJar = getVirtualFile(new File(PathManagerEx.getTestDataPath() + OrderEntryTest.BASE_PATH + "lib/lib.jar"));
+    VirtualFile libJar = getVirtualFile(new File(JavaTestUtil.getJavaTestDataPath() + OrderEntryTest.BASE_PATH + "lib/lib.jar"));
     copy(libJar, libDir, libJar.getName());
 
     model.addJarDirectory(libDir.getUrl(), false, OrderRootType.CLASSES);
@@ -188,10 +183,10 @@ public class LibraryTest extends ModuleRootManagerTestCase {
   public void testNavigationToSourceFromJarDirectory() {
     VirtualFile libDir = createChildDirectory(getOrCreateProjectBaseDir(), "lib");
     VirtualFile sourcesDir = createChildDirectory(libDir, "src");
-    VirtualFile originalLibJar = getVirtualFile(new File(PathManagerEx.getTestDataPath() + OrderEntryTest.BASE_PATH + "lib/lib.jar"));
+    VirtualFile originalLibJar = getVirtualFile(new File(JavaTestUtil.getJavaTestDataPath() + OrderEntryTest.BASE_PATH + "lib/lib.jar"));
     VirtualFile libJar = copy(originalLibJar, libDir, originalLibJar.getName());
 
-    File sourceRoot = new File(PathManagerEx.getTestDataPath() + OrderEntryTest.BASE_PATH + "lib/src");
+    File sourceRoot = new File(JavaTestUtil.getJavaTestDataPath() + OrderEntryTest.BASE_PATH + "lib/src");
     File sourceJarFile = IoTestUtil.createTestJar(new File(sourcesDir.getPath(), "lib-sources.jar"), sourceRoot);
     VirtualFile sourceJar = StandardFileSystems.local().refreshAndFindFileByPath(sourceJarFile.getAbsolutePath());
     assertNotNull(sourceJar);
@@ -235,7 +230,7 @@ public class LibraryTest extends ModuleRootManagerTestCase {
     LibraryTable table = getProjectLibraryTable();
     Library library = WriteAction.compute(() -> table.createLibrary("myLib"));
     Library.ModifiableModel model = library.getModifiableModel();
-    VirtualFile originalLibJar = getVirtualFile(new File(PathManagerEx.getTestDataPath() + OrderEntryTest.BASE_PATH + "lib/lib.jar"));
+    VirtualFile originalLibJar = getVirtualFile(new File(JavaTestUtil.getJavaTestDataPath() + OrderEntryTest.BASE_PATH + "lib/lib.jar"));
     VirtualFile libJar = copy(originalLibJar, libDir, originalLibJar.getName());
 
     String libUrl = "jar://" + libJar.getPath() + "!/";

@@ -16,6 +16,7 @@ import java.awt.font.GlyphVector;
 import java.awt.geom.Point2D;
 import java.awt.geom.Rectangle2D;
 import java.util.Arrays;
+import java.util.Objects;
 import java.util.function.Consumer;
 
 /**
@@ -49,7 +50,10 @@ public final class ComplexTextFragment extends TextFragment {
       isRtl,
       FontLayoutService.getInstance().layoutGlyphVector(
         fontInfo.getFont(),
-        fontInfo.getFontRenderContext(),
+        Objects.requireNonNull(
+          fontInfo.getFontRenderContext(),
+          "FontFallbackIterator.getFontInfo() always gives a FontRenderContext"
+        ),
         lineChars,
         start,
         end,
@@ -233,9 +237,13 @@ public final class ComplexTextFragment extends TextFragment {
 
   public static void flushDrawingCache(Graphics2D g) {
     if (lastFragment != null) {
-      g.setColor(lastColor);
-      lastFragment.doDraw(g, lastStartX, lastY, lastStartColumn, lastEndColumn);
-      lastFragment = null;
+      try {
+        g.setColor(lastColor);
+        lastFragment.doDraw(g, lastStartX, lastY, lastStartColumn, lastEndColumn);
+      }
+      finally {
+        lastFragment = null;
+      }
     }
   }
 

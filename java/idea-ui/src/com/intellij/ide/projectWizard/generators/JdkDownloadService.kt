@@ -25,10 +25,10 @@ class JdkDownloadService(private val project: Project, private val coroutineScop
 
   companion object {
     @ApiStatus.Internal
-    @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+    @RequiresEdt
     fun setupInstallableSdk(downloadTask: SdkDownloadTask): Sdk {
       return application.runWriteAction<Sdk> {
-        JdkDownloadUtil.createDownloadSdkInternal(JavaSdk.getInstance(), downloadTask)
+        JdkDownloadUtil.findOrCreateDownloadSdkInternal(JavaSdk.getInstance(), downloadTask)
       }
     }
   }

@@ -106,12 +106,6 @@
             "module": "intellij.python.ty.frontend"
         },
         {
-            "module": "intellij.python.zuban.common"
-        },
-        {
-            "module": "intellij.python.zuban.frontend"
-        },
-        {
             "module": "intellij.python.psi"
         },
         {
@@ -160,21 +154,27 @@
             "module": "intellij.python.community"
         },
         {
-            "destination": "lib/modules/intellij.python.community.impl.jar",
+            "module": "intellij.python.community.impl"
+        },
+        {
+            "module": "intellij.python.refactoring"
+        },
+        {
+            "destination": "lib/modules/intellij.python.codeInsight.jar",
             "recipe": {
                 "sources": [
                     {
-                        "input": "intellij.python.community.impl",
+                        "input": "intellij.python.codeInsight",
                         "kind": "module",
                         "filter": "module-v1"
                     },
                     {
-                        "input": "@lib//:python-community-impl-ml-completion-prev-exprs-models",
+                        "input": "@lib//:python-code_insight-ml-completion-prev-exprs-models",
                         "kind": "library",
                         "filter": "library-v1"
                     },
                     {
-                        "input": "@lib//:python-community-impl-completion-ranking-python-with-full-line",
+                        "input": "@lib//:python-code_insight-completion-ranking-python-with-full-line",
                         "kind": "library",
                         "filter": "library-v1"
                     }
@@ -183,6 +183,21 @@
                     "mergeEntities": true
                 }
             }
+        },
+        {
+            "module": "intellij.python.sourceRoots"
+        },
+        {
+            "module": "intellij.python.navigation"
+        },
+        {
+            "module": "intellij.python.spellchecker"
+        },
+        {
+            "module": "intellij.python.testing.codeInsight"
+        },
+        {
+            "module": "intellij.python.console"
         },
         {
             "module": "intellij.python.django.common"
@@ -364,9 +379,6 @@
         },
         {
             "module": "intellij.python.pyright"
-        },
-        {
-            "module": "intellij.python.zuban"
         },
         {
             "destination": "lib/modules/intellij.libraries.jsr305.jar",

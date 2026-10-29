@@ -79,6 +79,11 @@ fun <T : CommandChain> T.setupProjectSdk(sdk: SdkObject): T = apply {
   appendRawLine("${CMD_PREFIX}setupSDK \"${sdk.sdkName}\" \"${sdk.sdkType}\" \"${sdk.sdkPath}\"")
 }
 
+/** Brings the IDE in line with the project files that a test context cache rewound before the start, see AT-5404. */
+fun <T : CommandChain> T.syncRestoredProjectFiles(): T = apply {
+  appendRawLine("${CMD_PREFIX}syncRestoredProjectFiles")
+}
+
 private fun <T : CommandChain> T.appendRawLine(line: String): T = apply {
   require(!line.contains("\n")) { "Invalid line to include: $line" }
   addCommand(line)
@@ -784,8 +789,19 @@ fun <T : CommandChain> T.setupInlineCompletionListener(): T = apply {
   addCommand("${CMD_PREFIX}setupInlineCompletionListener")
 }
 
-fun <T : CommandChain> T.callInlineCompletionCommand(): T = apply {
-  addCommand("${CMD_PREFIX}callInlineCompletionCommand")
+/**
+ * Calls inline completion and measures it.
+ *
+ * @param warmupTimeout when it is not null, the command first calls inline completion again and again until a suggestion shows.
+ *   These calls record no spans. The command fails when no suggestion shows before the timeout.
+ * @param requireSuggestion when it is true, the command fails if the measured call completes without a shown suggestion.
+ */
+fun <T : CommandChain> T.callInlineCompletionCommand(warmupTimeout: Duration? = null, requireSuggestion: Boolean = false): T = apply {
+  val args = buildList {
+    if (warmupTimeout != null) add("warmup ${warmupTimeout.inWholeMilliseconds}")
+    if (requireSuggestion) add("requireSuggestion")
+  }
+  addCommand("${CMD_PREFIX}callInlineCompletionCommand", *args.toTypedArray())
 }
 
 fun <T : CommandChain> T.validateMavenGoal(settings: MavenGoalConfigurationDto): T = apply {

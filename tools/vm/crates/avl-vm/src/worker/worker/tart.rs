@@ -132,7 +132,8 @@ impl Manager {
     /// is what makes that true of a Ctrl-C as well - a run process in the controller's own process group would take
     /// the terminal's SIGINT with it - and it is deliberately not registered with the interrupt service: the stop
     /// path brings it down with `tart stop` and identity polling instead. It is never reaped, so a run process that
-    /// died at once is still there for the identity probe and the host-limit retry to read.
+    /// died at once is still there for the identity probe and the host-limit retry to read. It runs in the directory
+    /// of the worker, which holds its log, so it pins no checkout of the caller.
     async fn spawn_run(&self, ctx: &Ctx, worker: &str, argv: &[String]) -> Result<PidReceipt, Refusal> {
         let log_path = self.settings.tart_log_path(worker);
         let log = OpenOptions::new()
@@ -150,7 +151,7 @@ impl Manager {
         let program = argv.first().map(String::as_str).unwrap_or_default();
         let pid = self
             .runner
-            .spawn_detached(argv, None, log, log_for_stderr)
+            .spawn_detached(argv, &self.settings.worker_dir(worker), log, log_for_stderr)
             .or_refuse("spawn_failed", Exit::UNAVAILABLE, || {
                 format!("cannot start {} for {worker}", program.rsplit('/').next().unwrap_or(program))
             })?;
@@ -440,10 +441,7 @@ impl Manager {
         // The shares this process declared are mounted by the parity provisioning, and the layout is built over
         // them here. They do *not* attach on their own at guest boot. A macOS worker stages no Node: its Node comes
         // from the sealed golden image.
-        if guest.parity_broken().await? {
-            guest.provision_worker(self.share_mount()).await?;
-        }
-        guest.ensure_ready(self).await?;
+        self.ready_guest(&guest).await?;
         Ok(true)
     }
 
@@ -481,15 +479,12 @@ impl Manager {
     /// went from one it stopped watching. A record removed then leaves a running VM nothing recognises again: the
     /// next stop answers already-stopped and the next start boots a second one beside it.
     fn interrupted(&self, worker: &str, operation: &str) -> Refusal {
-        let cause = self.runner.interrupts().received().map_or("a cancellation", |signal| signal.name());
-        Refusal::new(
-            "worker_interrupted",
-            Exit::SOFTWARE,
+        self.interrupted_by(|cause| {
             format!(
                 "{cause} interrupted the {operation} of {worker}; its run process record is kept, so `pool stop \
                  {worker}` still finds it"
-            ),
-        )
+            )
+        })
     }
 
     // --- the readiness gates ---------------------------------------------------------------------------------
@@ -522,10 +517,7 @@ impl Manager {
             self.stop_without_lifecycle_lock(ctx, worker, Some(lease)).await?;
             return self.start_without_lifecycle_lock(ctx, worker).await.map(drop);
         }
-        if guest.parity_broken().await? {
-            guest.provision_worker(self.share_mount()).await?;
-        }
-        guest.ensure_ready(self).await
+        self.ready_guest(&guest).await
     }
 
     /// Whether the running worker was launched with a share that no longer describes the host.
@@ -546,16 +538,7 @@ impl Manager {
     /// without a start is the whole repair.
     pub(super) async fn require_tart_release_ready(&self, ctx: &Ctx, tart: &Tart, worker: &str) -> Result<(), Refusal> {
         tart.require_available(ctx, worker).await?;
-        if !tart.running(ctx, worker).await? {
-            return Err(Refusal::new(
-                "worker_stopped",
-                Exit::FAILURE,
-                format!("worker {worker} is stopped; run pool start {worker}"),
-            ));
-        }
-        if !self.guest_answers(ctx, worker, GUEST_PROBE_TIMEOUT).await {
-            return Err(self.guest_agent_unavailable(worker));
-        }
+        self.require_running_guest(ctx, worker, tart.running(ctx, worker).await?).await?;
         let channel = self.channel(worker);
         self.guest(ctx, channel.as_ref()).require_console_login().await
     }

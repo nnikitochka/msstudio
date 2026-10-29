@@ -9,8 +9,8 @@
         <compilerArguments>
           <stringArguments>
             <stringArg name="jvmTarget" arg="25" />
-            <stringArg name="apiVersion" arg="2.4" />
-            <stringArg name="languageVersion" arg="2.4" />
+            <stringArg name="apiVersion" arg="2.5" />
+            <stringArg name="languageVersion" arg="2.5" />
           </stringArguments>
         </compilerArguments>
       </configuration>
@@ -38,7 +38,8 @@
     <orderEntry type="module" module-name="intellij.python.test.env.junit5" scope="TEST" />
     <orderEntry type="module" module-name="intellij.python.requirements.backend" scope="TEST" />
     <orderEntry type="module" module-name="intellij.python.requirements.common" scope="TEST" />
+    <orderEntry type="module" module-name="intellij.platform.monolith.main" scope="RUNTIME" />
+    <orderEntry type="module" module-name="intellij.idea.community.customization" scope="RUNTIME" />
     <orderEntry type="module" module-name="intellij.xml.plugin" scope="RUNTIME" />
   </component>
-  <component name="TestModuleProperties" production-module="intellij.python.requirements.backend" />
 </module>

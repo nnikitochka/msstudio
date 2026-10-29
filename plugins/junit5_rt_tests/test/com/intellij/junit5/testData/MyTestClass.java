@@ -7,8 +7,8 @@ import org.junit.jupiter.api.TestFactory;
 
 import java.util.stream.Stream;
 
-@SuppressWarnings("NewClassNamingConvention")
-public class MyTestClass {
+@SuppressWarnings("unused")
+public abstract class MyTestClass {
   @Test
   void test1() {
   }

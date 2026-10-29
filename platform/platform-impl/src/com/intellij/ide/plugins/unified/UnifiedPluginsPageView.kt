@@ -80,7 +80,7 @@ import javax.swing.border.Border
 import javax.swing.event.DocumentEvent
 import org.jetbrains.annotations.Nls
 
-internal class UnifiedPluginsPageView @RequiresEdt(generateAssertion = false /* IJPL-115548 */) constructor(
+internal class UnifiedPluginsPageView @RequiresEdt constructor(
   private val onSearchChanged: (String) -> Unit,
   private val onSelectionChanged: (List<PluginOccurrenceId>) -> Unit,
   private val onSectionExpansionChanged: (PluginSectionId, Boolean) -> Unit,
@@ -232,7 +232,7 @@ internal class UnifiedPluginsPageView @RequiresEdt(generateAssertion = false /* 
     }
   }
 
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   fun render(state: UnifiedPluginsPageState) {
     val viewportAnchor = captureViewportAnchor()
     val selectedOccurrence = state.selectedOccurrence?.takeIf { it == renderedState?.selectedOccurrence }
@@ -299,12 +299,12 @@ internal class UnifiedPluginsPageView @RequiresEdt(generateAssertion = false /* 
     scheduleResultsAnnouncement()
   }
 
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   fun requestSearchFocus() {
     IdeFocusManager.getGlobalInstance().requestFocus(searchField, true)
   }
 
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   fun setSearchQuery(query: String) {
     updateSearchField(query)
   }
@@ -326,7 +326,7 @@ internal class UnifiedPluginsPageView @RequiresEdt(generateAssertion = false /* 
     searchToolbar.render(state)
   }
 
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   override fun close() {
     resultsAnnouncementTimer.stop()
     setStickySection(null)
@@ -466,7 +466,7 @@ internal class UnifiedPluginsPageView @RequiresEdt(generateAssertion = false /* 
     updateStickyHeader()
   }
 
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   fun revealKeyboardSelection(occurrenceId: PluginOccurrenceId) {
     if (revealOccurrence(occurrenceId)) updateStickyHeader()
   }
@@ -527,7 +527,7 @@ internal class UnifiedPluginsPageView @RequiresEdt(generateAssertion = false /* 
     stickyHeaderHost.showGradient = stickyY == viewportOrigin.y &&
                                         stickySection.hasItemsBehindHeader(sectionsPanel, viewRect.y, headerHeight)
     val stickyX = headerBounds.x - viewRect.x + viewportOrigin.x
-    val stickyWidth = headerBounds.width
+    val stickyWidth = viewRect.width
     stickyHeaderHost.updateOverflow(headerHeight)
     val stickyBounds = Rectangle(
       stickyX,

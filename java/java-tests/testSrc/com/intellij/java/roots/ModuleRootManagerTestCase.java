@@ -20,7 +20,6 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
-import java.nio.file.Path;
 
 public abstract class ModuleRootManagerTestCase extends JavaModuleTestCase {
   protected static void assertRoots(PathsList pathsList, VirtualFile... files) {
@@ -72,15 +71,6 @@ public abstract class ModuleRootManagerTestCase extends JavaModuleTestCase {
     return getMockJdk18WithRtJarOnly().getRootProvider().getFiles(OrderRootType.CLASSES)[0];
   }
 
-  protected static VirtualFile getFastUtilJar() {
-    return IntelliJProjectConfiguration.getVirtualFile(
-      IntelliJProjectConfiguration.getModuleLibrary("intellij.libraries.fastutil", "fastutil-min"));
-  }
-
-  protected static Path getLibSources() {
-    return IntelliJProjectConfiguration.getModuleLibrary("intellij.libraries.gson", "gson").getClasses().getFirst().toPath();
-  }
-
   protected VirtualFile addSourceRoot(Module module, boolean testSource) throws IOException {
     final VirtualFile root = getVirtualFile(createTempDir(module.getName() + (testSource ? "Test" : "Prod") + "Src"));
     PsiTestUtil.addSourceContentToRoots(module, root, testSource);
@@ -106,13 +96,5 @@ public abstract class ModuleRootManagerTestCase extends JavaModuleTestCase {
       model.commit();
       return library;
     });
-  }
-
-  protected Library createSampleLibrary() {
-    return createLibrary("byte-buddy", getSampleLibJar(), null);
-  }
-
-  protected VirtualFile getSampleLibJar() {
-    return IntelliJProjectConfiguration.getJarFromSingleJarModuleLibrary("intellij.libraries.byte.buddy", "byte-buddy");
   }
 }

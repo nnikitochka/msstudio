@@ -1,6 +1,27 @@
 load("@community//build:tests-options.bzl", "jps_test")
 load("@rules_jvm//:jvm.bzl", "jvm_library")
 
+filegroup(
+    name = "testData",
+    srcs = glob(["testData/**"]),
+    visibility = ["//plugins/maven/proofreading:__pkg__"],
+)
+
+jps_test(
+    name = "grazie-tests_test",
+    data = [
+        "@community//plugins/grazie/src/test:testData",
+        "@community//spellchecker:testData",
+    ],
+    jvm_flags = [
+        ## mirror settings set by org.jetbrains.intellij.build.impl.TestingTasksImpl.prepareEnvForTestRun
+        "-Djavax.xml.parsers.SAXParserFactory=com.sun.org.apache.xerces.internal.jaxp.SAXParserFactoryImpl",
+    ],
+    tags = ["grazie-tests"],
+    runtime_deps = [":grazie-tests_test_lib"],
+)
+### skip generation section `test intellij.grazie.tests`
+
 ### auto-generated section `build intellij.grazie.tests` start
 jvm_library(
     name = "grazie-tests",
@@ -10,13 +31,7 @@ jvm_library(
     ),
     module_name = "intellij.grazie.tests",
     visibility = ["//visibility:public"],
-    exports = [
-        # do not sort,
-        "//plugins/grazie",
-        "@lib//:grazie-tests-ai-grazie-spell-hunspell-de",
-        "@lib//:grazie-tests-ai-grazie-spell-hunspell-ru",
-        "@lib//:grazie-tests-ai-grazie-spell-hunspell-uk",
-    ],
+    exports = ["//plugins/grazie"],
     runtime_deps = [
         # do not sort,
         "//spellchecker",
@@ -37,6 +52,8 @@ jvm_library(
         "//plugins/yaml/spellchecker",
         "//spellchecker/xml/backend",
         "//platform/testRunner/plugin",
+        "//platform/main/intellij.platform.monolith.main:monolith-main",
+        "//community-resources:customization",
     ],
 )
 
@@ -61,9 +78,6 @@ jvm_library(
         # do not sort,
         "//plugins/grazie",
         "//plugins/grazie:grazie_test_lib",
-        "@lib//:grazie-tests-ai-grazie-spell-hunspell-de",
-        "@lib//:grazie-tests-ai-grazie-spell-hunspell-ru",
-        "@lib//:grazie-tests-ai-grazie-spell-hunspell-uk",
     ],
     runtime_deps = [
         # do not sort,
@@ -81,6 +95,8 @@ jvm_library(
         "//spellchecker/xml/backend:backend_test_lib",
         "//platform/ide-core:ide-core_test_lib",
         "//platform/testRunner/plugin:plugin_test_lib",
+        "//platform/main/intellij.platform.monolith.main:monolith-main_test_lib",
+        "//community-resources:customization_test_lib",
     ],
     deps = [
         # do not sort,
@@ -163,16 +179,12 @@ jvm_library(
         "//libraries/assertj-core:assertj-core_test_lib",
         "//platform/testFramework/junit5",
         "//platform/testFramework/junit5:junit5_test_lib",
+        "//platform/testFramework/junit5/codeInsight",
+        "//platform/testFramework/junit5/codeInsight:codeInsight_test_lib",
         "//tools/intellij.tools.ide.metrics.benchmark:ide-metrics-benchmark",
         "//tools/intellij.tools.ide.metrics.benchmark:ide-metrics-benchmark_test_lib",
         "//libraries/jetcheck",
         "//libraries/jetcheck:jetcheck_test_lib",
-        "//images:images-tests",
-        "//images:images-tests_test_lib",
-        "//RegExpSupport:regexp-tests",
-        "//RegExpSupport:regexp-tests_test_lib",
-        "//platform/xdebugger-impl:debugger-impl-tests",
-        "//platform/xdebugger-impl:debugger-impl-tests_test_lib",
         "//platform/ide-core",
         "//libraries/fastutil",
         "//libraries/fastutil:fastutil_test_lib",
@@ -190,6 +202,8 @@ jvm_library(
         "//libraries/gson:gson_test_lib",
         "//xml/relaxng",
         "//xml/relaxng:relaxng_test_lib",
+        "//platform/bazel-runfiles",
+        "//platform/bazel-runfiles:bazel-runfiles_test_lib",
     ],
 )
 ### auto-generated section `build intellij.grazie.tests` end
@@ -202,10 +216,3 @@ exports_files(
     visibility = ["//visibility:public"],
 )
 ### auto-generated section `iml intellij.grazie.tests` end
-
-### auto-generated section `test intellij.grazie.tests` start
-jps_test(
-    name = "grazie-tests_test",
-    runtime_deps = [":grazie-tests_test_lib"],
-)
-### auto-generated section `test intellij.grazie.tests` end

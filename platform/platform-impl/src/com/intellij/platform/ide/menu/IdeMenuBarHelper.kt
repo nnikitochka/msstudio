@@ -35,6 +35,7 @@ import com.intellij.openapi.wm.impl.ProjectFrameHelper
 import com.intellij.platform.diagnostic.telemetry.impl.rootTask
 import com.intellij.platform.diagnostic.telemetry.impl.span
 import com.intellij.platform.util.coroutines.flow.throttle
+import com.intellij.util.StartupUiGate
 import com.intellij.util.concurrency.ThreadingAssertions
 import com.intellij.util.concurrency.annotations.RequiresEdt
 import kotlinx.coroutines.CoroutineName
@@ -114,6 +115,11 @@ internal sealed class IdeMenuBarHelper(@JvmField val flavor: IdeMenuFlavor,
       context += rootTask() + CoroutineName("ide menu bar actions init")
     }
     val initJob = coroutineScope.launch(context) {
+      if (!StartupUiGate.isReady) {
+        span("ide menu bar actions init: startup UI gate waiting") {
+          StartupUiGate.awaitEditorsShown()
+        }
+      }
       val actions = expandMainActionGroup(isFirstUpdate = true)
       doUpdateVisibleActions(newVisibleActions = actions, forceRebuild = false)
     }
@@ -191,7 +197,7 @@ internal sealed class IdeMenuBarHelper(@JvmField val flavor: IdeMenuFlavor,
     return focusedWindow !is Dialog || !focusedWindow.isModal
   }
 
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   final override fun updateMenuActions(forceRebuild: Boolean) {
     if (forceRebuild && LOG.isDebugEnabled) {
       LOG.debug(Throwable("Force rebuild menu bar"))
@@ -199,7 +205,7 @@ internal sealed class IdeMenuBarHelper(@JvmField val flavor: IdeMenuFlavor,
     check(updateRequests.tryEmit(forceRebuild))
   }
 
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   protected abstract suspend fun doUpdateVisibleActions(newVisibleActions: List<ActionGroup>, forceRebuild: Boolean)
 }
 

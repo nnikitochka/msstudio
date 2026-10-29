@@ -78,8 +78,6 @@
 The refresh itself is toggled by (Preferences | Appearance &amp; Behavior | System Settings -> Periodically when IDE is inactive (experimental)"
                  restartRequired="true"
                  key="vfs.background.refresh.on.idle"/>
-    <registryKey key="wsl.list.prefer.verbose.output" os="windows" defaultValue="true" restartRequired="false"
-                 description="Use 'wsl.exe -l -v' to get distribution list. If it's disabled 'wsl.exe -l -q' will be used."/>
     <registryKey key="wsl.use.utf8.encoding" os="windows" defaultValue="true" restartRequired="false"
                  description="Use UTF-8 as default encoding for all WSL distributions, otherwise default console encoding will be used (see Preferences | Editor | General | Console )"/>
     <registryKey key="wsl.fix.initial.tty.size.when.running.without.tty"
@@ -222,6 +220,12 @@ The refresh itself is toggled by (Preferences | Appearance &amp; Behavior | Syst
                  description="Number of consecutive healthy checks required to confirm a tentative parallelism revoke"/>
     <registryKey key="performance.watcher.pooled.compensation.max.grants" defaultValue="100"
                  description="Maximum number of pooled-thread parallelism grants allowed"/>
+    <registryKey key="performance.watcher.stall.slice.ms" defaultValue="250"
+                 description="Sleep duration of one process stall watcher slice in ms"/>
+    <registryKey key="performance.watcher.stall.slices.per.tick" defaultValue="4"
+                 description="Number of slices in one process stall watcher tick. The watcher sums the wake-up lateness over one tick."/>
+    <registryKey key="performance.watcher.stall.report.threshold.ms" defaultValue="1000"
+                 description="Log a process stall when the summed wake-up lateness in one tick reaches the specified time in ms"/>
     <registryKey key="popup.advertiser.speed.search" defaultValue="false" description="Shows speed search advertiser in popups"/>
     <registryKey key="popup.menu.drag.distance.threshold.mac" defaultValue="10" description="The drag distance required to trigger a menu item by dragging with the right mouse button (macOS)"/>
     <registryKey key="popup.menu.drag.distance.threshold.linux" defaultValue="10" description="The drag distance required to trigger a menu item by dragging with the right mouse button (Linux)"/>

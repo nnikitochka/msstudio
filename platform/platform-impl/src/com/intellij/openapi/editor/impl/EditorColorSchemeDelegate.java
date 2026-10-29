@@ -15,7 +15,6 @@ import com.intellij.openapi.editor.colors.impl.DelegateColorScheme;
 import com.intellij.openapi.editor.colors.impl.EditorFontCacheImpl;
 import com.intellij.openapi.editor.colors.impl.FontPreferencesImpl;
 import com.intellij.openapi.editor.markup.TextAttributes;
-import com.intellij.openapi.util.Comparing;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.ui.JdkConstants;
 import com.jetbrains.JBR;
@@ -200,7 +199,7 @@ final class EditorColorSchemeDelegate extends DelegateColorScheme {
 
   @Override
   public void setFontPreferences(@NotNull FontPreferences preferences) {
-    if (myFontPreferencesAreSetExplicitly && Comparing.equal(preferences, myFontPreferences)) return;
+    if (myFontPreferencesAreSetExplicitly && preferences.getSnapshot() == myFontPreferences.getSnapshot()) return;
     if (LOG.isDebugEnabled()) {
       LOG.debug("Font preferences overridden for " + myEditor, new Throwable());
     }
@@ -219,7 +218,7 @@ final class EditorColorSchemeDelegate extends DelegateColorScheme {
 
   @Override
   public void setConsoleFontPreferences(@NotNull FontPreferences preferences) {
-    if (Comparing.equal(preferences, myConsoleFontPreferences)) return;
+    if (preferences.getSnapshot() == myConsoleFontPreferences.getSnapshot()) return;
     preferences.copyTo(myConsoleFontPreferences);
     reinitFontsAndSettings();
   }
@@ -429,17 +428,19 @@ final class EditorColorSchemeDelegate extends DelegateColorScheme {
     @Nullable Boolean useLigatures,
     @NotNull FontPreferences delegatePreferences
   ) {
-    preferences.clear();
-    preferences.register(fontName, fontSize);
-    List<String> families = delegatePreferences.getRealFontFamilies();
-    //skip delegate's primary font
-    for (int i = 1; i < families.size(); i++) {
-      String font = families.get(i);
-      preferences.register(font, fontSize);
-    }
-    preferences.setUseLigatures(useLigatures != null ? useLigatures : delegatePreferences.useLigatures());
-    preferences.setCharacterVariants(delegatePreferences.getCharacterVariants());
-    preferences.setRegularSubFamily(delegatePreferences.getRegularSubFamily());
-    preferences.setBoldSubFamily(delegatePreferences.getBoldSubFamily());
+    preferences.runBatchUpdate(draft -> {
+      draft.clear();
+      draft.register(fontName, fontSize);
+      List<String> families = delegatePreferences.getRealFontFamilies();
+      //skip delegate's primary font
+      for (int i = 1; i < families.size(); i++) {
+        String font = families.get(i);
+        draft.register(font, fontSize);
+      }
+      draft.setUseLigatures(useLigatures != null ? useLigatures : delegatePreferences.useLigatures());
+      draft.setCharacterVariants(delegatePreferences.getCharacterVariants());
+      draft.setRegularSubFamily(delegatePreferences.getRegularSubFamily());
+      draft.setBoldSubFamily(delegatePreferences.getBoldSubFamily());
+    });
   }
 }

@@ -9,6 +9,7 @@ import com.intellij.ide.gdpr.showDataSharingOptionsDialog
 import com.intellij.ide.plugins.PluginManagerConfigurable
 import com.intellij.ide.ui.laf.darcula.DarculaNewUIUtil
 import com.intellij.ide.ui.laf.darcula.DarculaUIUtil
+import com.intellij.ide.ui.laf.darcula.ui.ToolbarComboButtonUI
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.actionSystem.ActionButtonComponent
 import com.intellij.openapi.actionSystem.ActionManager
@@ -37,8 +38,11 @@ import com.intellij.openapi.ui.popup.PopupStep
 import com.intellij.openapi.ui.popup.util.BaseListPopupStep
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.util.NlsSafe
+import com.intellij.openapi.util.text.StringUtil
 import com.intellij.openapi.wm.ex.IdeFocusTraversalPolicy
 import com.intellij.openapi.wm.impl.ExpandableComboAction
+import com.intellij.openapi.wm.impl.ToolbarComboButton
+import com.intellij.openapi.wm.impl.ToolbarComboButtonModel
 import com.intellij.platform.diagnostic.telemetry.helpers.use
 import com.intellij.platform.ide.nonModalWelcomeScreen.NonModalWelcomeScreenBundle
 import com.intellij.platform.ide.nonModalWelcomeScreen.WelcomeScreenComboBoxKind
@@ -49,6 +53,7 @@ import com.intellij.platform.ide.nonModalWelcomeScreen.rightTab.WelcomeScreenRig
 import com.intellij.platform.ide.nonModalWelcomeScreen.rightTab.WelcomeScreenRightTabComboBoxModel.ThemeModel
 import com.intellij.platform.ide.nonModalWelcomeScreen.welcomeScreenStartupSpanTracer
 import com.intellij.platform.ide.nonModalWelcomeScreen.welcomeScreenStartupTracer
+import com.intellij.ui.JBColor
 import com.intellij.ui.components.ActionLink
 import com.intellij.ui.components.DisclosureButton
 import com.intellij.ui.components.labels.LinkLabel
@@ -82,6 +87,7 @@ import kotlinx.coroutines.withContext
 import java.awt.Container
 import java.awt.Dimension
 import java.awt.Graphics
+import java.awt.Graphics2D
 import java.awt.Insets
 import java.awt.KeyboardFocusManager
 import java.awt.Rectangle
@@ -714,6 +720,22 @@ private class ComboBoxInfoPanelAction(
     templatePresentation.icon = comboModel.icon
   }
 
+  override fun createToolbarComboButton(model: ToolbarComboButtonModel): ToolbarComboButton {
+    return object : ToolbarComboButton(model) {
+      override fun updateUI() {
+        setUI(object : ToolbarComboButtonUI() {
+          override fun paintHoverBorder(g: Graphics2D, innerRect: Rectangle) {
+            DarculaNewUIUtil.drawRoundedRectangle(g, innerRect, JBUI.CurrentTheme.ActionButton.hoverBorder(),
+                                                  DarculaUIUtil.BUTTON_ARC.float, DarculaUIUtil.LW.float)
+          }
+        })
+        foreground = JBColor.foreground()
+        hoverBackground = JBUI.CurrentTheme.ActionButton.hoverBackground()
+        transparentHoverBackground = hoverBackground
+      }
+    }
+  }
+
   override fun createCustomComponent(presentation: Presentation, place: String): JComponent {
     val component = super.createCustomComponent(presentation, place)
     component.isFocusable = true
@@ -728,7 +750,7 @@ private class ComboBoxInfoPanelAction(
   override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.EDT
 
   override fun update(e: AnActionEvent) {
-    e.presentation.setText(comboModel.itemPrefix + model.currentItemName(), false)
+    e.presentation.setText(comboModel.itemPrefix + StringUtil.trimMiddle(model.currentItemName(), 35), false)
     e.presentation.icon = if (model is ThemeModel) model.currentIcon() else comboModel.icon
   }
 

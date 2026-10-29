@@ -87,6 +87,7 @@ import com.intellij.openapi.editor.markup.ErrorStripeRenderer
 import com.intellij.openapi.editor.markup.InspectionWidgetActionProvider
 import com.intellij.openapi.editor.markup.RangeHighlighter
 import com.intellij.openapi.editor.markup.StatusItem
+import com.intellij.openapi.editor.registry.EditorRegistry
 import com.intellij.openapi.extensions.ExtensionPointListener
 import com.intellij.openapi.extensions.PluginDescriptor
 import com.intellij.openapi.fileEditor.FileEditorManagerEvent
@@ -101,7 +102,6 @@ import com.intellij.openapi.util.Key
 import com.intellij.openapi.util.Pair
 import com.intellij.openapi.util.ProperTextRange
 import com.intellij.openapi.util.SystemInfoRt
-import com.intellij.openapi.util.registry.Registry
 import com.intellij.openapi.util.text.StringUtil
 import com.intellij.openapi.wm.IdeFocusManager
 import com.intellij.platform.ide.CoreUiCoroutineScopeHolder
@@ -222,7 +222,7 @@ class EditorMarkupModelImpl internal constructor(private val editor: EditorImpl)
   private var myKeepHint: Boolean = false
 
   val statusToolbar: ActionToolbarImpl
-  private var showToolbar: Boolean = EditorSettingsExternalizable.getInstance().isShowInspectionWidget
+  private var showToolbar: Boolean = editor.settings.isShowInspectionWidget
   private var trafficLightVisible: Boolean = mayRenderTrafficLight
   private val toolbarComponentListener: ComponentListener
   private var cachedToolbarBounds: Rectangle = Rectangle()
@@ -337,7 +337,7 @@ class EditorMarkupModelImpl internal constructor(private val editor: EditorImpl)
     connection.subscribe(FileEditorManagerListener.FILE_EDITOR_MANAGER, object : FileEditorManagerListener {
       override fun selectionChanged(event: FileEditorManagerEvent) {
         if (isErrorStripeVisible) {
-          showToolbar = EditorSettingsExternalizable.getInstance().isShowInspectionWidget && analyzerStatus.controller.isToolbarEnabled
+          showToolbar = editor.settings.isShowInspectionWidget && analyzerStatus.controller.isToolbarEnabled
 
           updateTrafficLightVisibility()
         }
@@ -599,21 +599,21 @@ class EditorMarkupModelImpl internal constructor(private val editor: EditorImpl)
   }
 
   @ApiStatus.Internal
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   fun scheduleShowTrafficLightPopup(anchor: RelativeRectangle) {
     ThreadingAssertions.assertEventDispatchThread()
     trafficLightPopup.scheduleShow(anchor, analyzerStatus)
   }
 
   @ApiStatus.Internal
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   fun scheduleHideTrafficLightPopup() {
     ThreadingAssertions.assertEventDispatchThread()
     trafficLightPopup.scheduleHide()
   }
 
   @ApiStatus.Internal
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   fun hideTrafficLightPopup() {
     ThreadingAssertions.assertEventDispatchThread()
     trafficLightPopup.hidePopup()
@@ -632,7 +632,7 @@ class EditorMarkupModelImpl internal constructor(private val editor: EditorImpl)
     smallIconLabel.setIcon(analyzerStatus.icon)
 
     if (showToolbar != analyzerStatus.controller.isToolbarEnabled) {
-      showToolbar = EditorSettingsExternalizable.getInstance().isShowInspectionWidget && analyzerStatus.controller.isToolbarEnabled
+      showToolbar = editor.settings.isShowInspectionWidget && analyzerStatus.controller.isToolbarEnabled
       updateTrafficLightVisibility()
     }
 
@@ -914,7 +914,7 @@ class EditorMarkupModelImpl internal constructor(private val editor: EditorImpl)
 
   // startOffset == -1 || endOffset == -1 means whole document
   @JvmOverloads
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   fun repaint(startOffset: Int = -1, endOffset: Int = -1) {
     val range = offsetsToYPositions(startOffset, endOffset)
     markDirtied(range)
@@ -1007,7 +1007,7 @@ class EditorMarkupModelImpl internal constructor(private val editor: EditorImpl)
     override fun isThumbTranslucent(): Boolean = true
 
     override fun getThumbOffset(value: Int): Int {
-      if (SystemInfoRt.isMac || Registry.`is`("editor.full.width.scrollbar")) {
+      if (SystemInfoRt.isMac || EditorRegistry.current().isScrollBarFullWidth()) {
         return getMinMarkHeight() + scale(2)
       }
       @Suppress("DEPRECATION")

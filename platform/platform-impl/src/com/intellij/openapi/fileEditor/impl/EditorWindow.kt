@@ -334,7 +334,7 @@ class EditorWindow internal constructor(
     )
   }
 
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   internal fun addComposite(
     composite: EditorComposite,
     file: VirtualFile,
@@ -452,7 +452,7 @@ class EditorWindow internal constructor(
   }
 
   // we must select tab in the same EDT event (same command) - IdeDocumentHistoryImpl rely on that
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   internal fun setCurrentCompositeAndSelectTab(composite: EditorComposite) {
     tabbedPane.tabs.tabs.find { it.composite == composite }?.let {
       tabbedPane.editorTabs.select(info = it, requestFocus = false)
@@ -461,13 +461,13 @@ class EditorWindow internal constructor(
   }
 
   // we must select tab in the same EDT event (same command) - IdeDocumentHistoryImpl rely on that
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   internal fun setCurrentCompositeAndSelectTab(tab: TabInfo) {
     tabbedPane.editorTabs.select(info = tab, requestFocus = false)
     _currentCompositeFlow.value = tab.composite
   }
 
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   internal fun selectTabOnStartup(tab: TabInfo, requestFocus: Boolean, windowAdded: suspend () -> Unit) {
     val composite = tab.composite
     tabbedPane.editorTabs.selectTabSilently(tab)
@@ -493,7 +493,7 @@ class EditorWindow internal constructor(
   }
 
   @JvmOverloads
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   fun split(
     orientation: Int,
     forceSplit: Boolean,
@@ -672,7 +672,7 @@ class EditorWindow internal constructor(
     removedTabs.removeAll { it.isLoadedBy(classLoaders) }
   }
 
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   internal fun restoreClosedTab() {
     val info = removedTabs.removeLastOrNull() ?: return
     val file = info.restoreFile() ?: return
@@ -1150,8 +1150,9 @@ class EditorWindow internal constructor(
 
 private fun shouldReservePreview(file: VirtualFile, options: FileEditorOpenOptions, project: Project): Boolean {
   return when {
-    !UISettings.getInstance().openInPreviewTabIfPossible -> false
     FileEditorManagerKeys.FORBID_PREVIEW_TAB.get(file, false) -> false
+    options.forcePreviewTab -> true
+    !UISettings.getInstance().openInPreviewTabIfPossible -> false
     options.usePreviewTab -> true
     !options.selectAsCurrent || options.requestFocus -> false
     else -> {

@@ -237,6 +237,7 @@ jvm_library(
         "//libraries/kotlin/gradle-plugin-idea:libraries-kotlin-gradle-plugin-idea",
         "//libraries/kotlin/test:libraries-kotlinTest",
         "//plugins/kotlin/gradle/gradle-java",
+        "//platform/main/intellij.platform.monolith.main:monolith-main",
     ],
 )
 
@@ -251,10 +252,7 @@ jvm_library(
         ],
         allow_empty = True,
     ),
-    associates = [
-        "//plugins/kotlin/gradle/gradle-java/tests.shared",
-        "//plugins/kotlin/gradle/gradle-java/tests.shared:tests.shared_test_lib",
-    ],
+    module_name = "kotlin.gradle.gradle-java.tests.shared.tests",
     visibility = ["//visibility:public"],
     exports = [
         # do not sort,
@@ -267,9 +265,12 @@ jvm_library(
         "//platform/platform-util-io:ide-util-io_test_lib",
         "//platform/ide-core:ide-core_test_lib",
         "//plugins/kotlin:kotlin-plugin-community-main_test_lib",
+        "//platform/main/intellij.platform.monolith.main:monolith-main_test_lib",
     ],
     deps = [
         # do not sort,
+        "//plugins/kotlin/gradle/gradle-java/tests.shared",
+        "//plugins/kotlin/gradle/gradle-java/tests.shared:tests.shared_test_lib",
         "//libraries/assertj-core",
         "//libraries/assertj-core:assertj-core_test_lib",
         "//jps/model-api:model",
@@ -435,6 +436,8 @@ jvm_library(
         "//libraries/junit6:junit6_test_lib",
         "//libraries/junit6-params",
         "//libraries/junit6-params:junit6-params_test_lib",
+        "//platform/scratch/plugin",
+        "//platform/scratch/plugin:plugin_test_lib",
     ],
 )
 ### auto-generated section `build kotlin.gradle.gradle-java.tests.shared.tests` end

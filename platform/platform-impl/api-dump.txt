@@ -1020,6 +1020,7 @@ f:com.intellij.ide.browsers.WebBrowserManager
 - getWebPreviewReloadMode():com.intellij.ide.browsers.ReloadMode
 - isActive(com.intellij.ide.browsers.WebBrowser):Z
 - loadState(org.jdom.Element):V
+- noStateLoaded():V
 f:com.intellij.ide.browsers.actions.BaseOpenInBrowserAction
 - com.intellij.openapi.project.DumbAwareAction
 - <init>(com.intellij.ide.browsers.WebBrowser):V
@@ -3420,7 +3421,7 @@ a:com.intellij.openapi.options.BeanConfigurable
 - com.intellij.openapi.options.UnnamedConfigurable
 - p:<init>(java.lang.Object):V
 - apply():V
-- createComponent():javax.swing.JComponent
+- f:createComponent():javax.swing.JComponent
 - pf:getInstance():java.lang.Object
 - pf:setTitle(java.lang.String):V
 a:com.intellij.openapi.options.BoundCompositeConfigurable
@@ -4436,9 +4437,12 @@ a:com.intellij.ui.AbstractFontCombo
 f:com.intellij.ui.AdditionalPageAtBottomEditorCustomization
 - com.intellij.ui.SimpleEditorCustomization
 a:com.intellij.ui.AppIcon
-- s:getInstance():com.intellij.ui.AppIcon
+- sf:Companion:com.intellij.ui.AppIcon$Companion
+- sf:getInstance():com.intellij.ui.AppIcon
 - requestFocus():V
 - requestFocus(com.intellij.openapi.wm.IdeFrame):V
+f:com.intellij.ui.AppIcon$Companion
+- f:getInstance():com.intellij.ui.AppIcon
 f:com.intellij.ui.AppUIUtil
 - sf:INSTANCE:com.intellij.ui.AppUIUtil
 - f:createHorizontalGradientTexture(java.awt.Graphics,java.awt.Color,java.awt.Color,I,I,I):java.awt.TexturePaint

@@ -35,6 +35,7 @@ import git4idea.config.GitExecutableContext;
 import git4idea.config.GitExecutableManager;
 import git4idea.telemetry.GitBackendTelemetrySpan;
 import io.opentelemetry.api.trace.SpanBuilder;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -70,6 +71,7 @@ public abstract class GitHandler {
 
   private boolean myPreValidateExecutable = true;
   private boolean myEnableInteractiveCallbacks = true;
+  private boolean myAllowUntrustedWorkingDirectory;
 
   protected final GeneralCommandLine myCommandLine;
   private final Map<String, String> myCustomEnv = new HashMap<>();
@@ -183,6 +185,16 @@ public abstract class GitHandler {
   @Nullable
   Path getWorkingDirectory() {
     return myCommandLine.getWorkingDirectory();
+  }
+
+  /**
+   * Allows the command to run in a working directory that is not trusted.
+   * Use it only for a command that does not read the working directory, such as {@code git version}.
+   * The trust check of the project still applies.
+   */
+  @ApiStatus.Internal
+  public void setAllowUntrustedWorkingDirectory() {
+    myAllowUntrustedWorkingDirectory = true;
   }
 
   public VcsExecutableContext getExecutableContext() {
@@ -464,7 +476,9 @@ public abstract class GitHandler {
   }
 
   private void start() throws IOException {
-    if (myProject == null && !TrustedProjects.isProjectTrusted(Objects.requireNonNull(getWorkingDirectory()))) {
+    if (myProject == null &&
+        !myAllowUntrustedWorkingDirectory &&
+        !TrustedProjects.isProjectTrusted(Objects.requireNonNull(getWorkingDirectory()))) {
       throw new GitCommandNotTrustedException("Shouldn't be possible to run a Git command in potentially untrusted project. " +
                                               "Pass Project to GitHandler constructor if applicable.");
     }

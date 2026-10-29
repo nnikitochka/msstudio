@@ -61,7 +61,6 @@ jvm_library(
     ),
     module_name = "intellij.terminal.completion.tests",
     visibility = ["//visibility:public"],
-    exports = ["@lib//:terminal-completion-tests-terminal-completion-spec"],
 )
 
 jvm_library(
@@ -80,7 +79,6 @@ jvm_library(
         "//plugins/terminal/completion:completion_test_lib",
     ],
     visibility = ["//visibility:public"],
-    exports = ["@lib//:terminal-completion-tests-terminal-completion-spec"],
     runtime_deps = [":completion-tests"],
     deps = [
         # do not sort,
@@ -88,12 +86,10 @@ jvm_library(
         "@lib//:terminal-completion-tests-terminal-completion-spec",
         "//platform/util",
         "//platform/util:util_test_lib",
-        "//platform/util/base",
-        "//platform/util/base:base_test_lib",
-        "//libraries/junit4",
-        "//libraries/junit4:junit4_test_lib",
-        "//platform/testFramework",
-        "//platform/testFramework:testFramework_test_lib",
+        "//libraries/jetbrains/annotations",
+        "//libraries/jetbrains/annotations:annotations_test_lib",
+        "//libraries/junit6",
+        "//libraries/junit6:junit6_test_lib",
     ],
 )
 ### auto-generated section `build intellij.terminal.completion.tests` end

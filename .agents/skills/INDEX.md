@@ -11,9 +11,12 @@ One row per skill in this directory. `SKILL.md` holds the full instructions.
 | [code-style](code-style/SKILL.md) | Apply IntelliJ Kotlin and Java code style when writing or reviewing. |
 | [commits](commits/SKILL.md) | Create, amend, or rename IntelliJ commits and write commit messages. |
 | [compare-python-typecheckers](compare-python-typecheckers/SKILL.md) | Compare Python type inference with ty, pyrefly, and basedpyright. |
+| [compose-ui-architecture](compose-ui-architecture/SKILL.md) | Write Compose Desktop UI state, effects, and presenter boundaries. |
+| [compose-ui-audit](compose-ui-audit/SKILL.md) | Audit Compose Desktop UI state and effects. |
 | [conda-env-tests](conda-env-tests/SKILL.md) | Bump the pinned Miniconda version for the Python conda env tests. |
 | [debugging](debugging/SKILL.md) | Debug IntelliJ IDE failures with repository-specific techniques. |
 | [driver-ui-tests](driver-ui-tests/SKILL.md) | Write IntelliJ UI tests with IDE Starter or UI Driver. |
+| [duplicate-and-dead-code](duplicate-and-dead-code/SKILL.md) | Find semantic copies and dead code before a plan or a review. |
 | [eel](eel/SKILL.md) | Use IntelliJ EEL APIs for process execution, paths, WSL, or Docker. |
 | [extract-module](extract-module/SKILL.md) | Extract optional plugin dependencies into IntelliJ content modules. |
 | [fix-project-leak-from-tc-report](fix-project-leak-from-tc-report/SKILL.md) | Fix TeamCity project-leak test failures end to end. |
@@ -22,10 +25,14 @@ One row per skill in this directory. `SKILL.md` holds the full instructions.
 | [ide-diagnostics-mcp](ide-diagnostics-mcp/SKILL.md) | Inspect a running IntelliJ IDE for freezes or blocked threads via MCP. |
 | [jewel-markdown](jewel-markdown/SKILL.md) | Build or debug Jewel Markdown parsing, rendering, and styling. |
 | [jewel-release](jewel-release/SKILL.md) | Prepare a Jewel PR or release: checks, release notes, cherry-picks, tagging. |
+| [jewel-swing-interop](jewel-swing-interop/SKILL.md) | Embed Jewel Compose UI in Swing. |
+| [jewel-ui](jewel-ui/SKILL.md) | Build UI with Jewel components and themes. |
+| [jewel-ui-audit](jewel-ui-audit/SKILL.md) | Audit Jewel UI theming and idioms. |
 | [jna](jna/SKILL.md) | Implement or debug JNA bindings and ABI layouts in Kotlin or Java. |
 | [kotlin-ui-dsl](kotlin-ui-dsl/SKILL.md) | Write IntelliJ dialogs and settings with Kotlin UI DSL v2 panels. |
 | [kotlin-ui-swing-component-architecture](kotlin-ui-swing-component-architecture/SKILL.md) | Design IntelliJ Swing UI components, state flow, and EDT work. |
 | [markdown-library-update](markdown-library-update/SKILL.md) | Update markdown-jvm and regenerate Bazel/Fleet metadata. |
+| [migrate-settings-to-compose-swing](migrate-settings-to-compose-swing/SKILL.md) | Move a Swing settings page to Compose Swing, with previews and tests. |
 | [modcommand-migration](modcommand-migration/SKILL.md) | Convert LocalQuickFix or IntentionAction to the ModCommand API. |
 | [module-dependencies](module-dependencies/SKILL.md) | Add or modify IntelliJ module dependencies in `.iml` files. |
 | [module-set-pluginization](module-set-pluginization/SKILL.md) | Convert Product DSL module sets into bundled wrapper plugins. |

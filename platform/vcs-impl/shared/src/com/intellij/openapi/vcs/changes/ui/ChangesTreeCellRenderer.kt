@@ -16,6 +16,7 @@ import javax.accessibility.AccessibleContext
 import javax.accessibility.AccessibleRole
 import javax.accessibility.AccessibleStateSet
 import javax.accessibility.AccessibleValue
+import javax.swing.JComponent
 import javax.swing.JTree
 import javax.swing.tree.TreeCellRenderer
 
@@ -23,6 +24,9 @@ open class ChangesTreeCellRenderer(protected val textRenderer: ChangesBrowserNod
   private val updateScaleHelper: UpdateScaleHelper = UpdateScaleHelper()
 
   private val checkBox = ThreeStateCheckBox()
+  private val checkBoxPlaceholder = object : JComponent() {
+    override fun getPreferredSize(): Dimension = checkBox.preferredSize
+  }
 
   init {
     buildLayout()
@@ -31,7 +35,12 @@ open class ChangesTreeCellRenderer(protected val textRenderer: ChangesBrowserNod
   private fun buildLayout() {
     layout = BorderLayout()
 
-    add(checkBox, BorderLayout.WEST)
+    val checkBoxPanel = CellRendererPanel().apply {
+      layout = BorderLayout()
+      add(checkBox, BorderLayout.WEST)
+      add(checkBoxPlaceholder, BorderLayout.CENTER)
+    }
+    add(checkBoxPanel, BorderLayout.WEST)
     add(textRenderer, BorderLayout.CENTER)
   }
 
@@ -76,6 +85,7 @@ open class ChangesTreeCellRenderer(protected val textRenderer: ChangesBrowserNod
     }
 
     updateScaleHelper.saveScaleAndUpdateUIIfChanged(checkBox)
+    checkBoxPlaceholder.isVisible = tree.isShowCheckboxes && value is ChangesBrowserStructuralNode<*> && !checkBox.isVisible
 
     return this
   }

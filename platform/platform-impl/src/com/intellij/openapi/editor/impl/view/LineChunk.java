@@ -2,11 +2,14 @@
 package com.intellij.openapi.editor.impl.view;
 
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.editor.colors.EditorFontType;
+import com.intellij.openapi.editor.ex.DocumentText;
 import com.intellij.openapi.editor.impl.EditorImpl;
 import com.intellij.openapi.editor.impl.FontFallbackIterator;
 import com.intellij.openapi.editor.impl.FontInfo;
 import com.intellij.util.BitUtil;
 import com.intellij.util.text.CharArrayUtil;
+import com.intellij.util.ui.JdkConstants.FontStyle;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -67,7 +70,7 @@ class LineChunk {
     addFragments(chars, getStartOffset(), getEndOffset(), level, false, null, ffi, view);
   }
 
-  void ensureLayout(@NotNull EditorView view, int line, byte level) {
+  void ensureLayout(@NotNull EditorView view, @NotNull DocumentText document, int line, byte level) {
     if (isReal()) {
       view.getTextLayoutCache().onChunkAccess(this);
     }
@@ -77,7 +80,7 @@ class LineChunk {
     assert isReal();
     fragments = new ArrayList<>();
     EditorImpl editor = view.getEditor();
-    int lineStartOffset = view.getDocument().getLineStartOffset(line);
+    int lineStartOffset = document.lineStartOffset(line);
     int start = lineStartOffset + getStartOffset();
     int end = lineStartOffset + getEndOffset();
     if (LOG.isDebugEnabled()) {
@@ -93,18 +96,19 @@ class LineChunk {
       false,
       false
     );
-    FontFallbackIterator ffi = new FontFallbackIterator()
-      .setPreferredFonts(editor.getColorsScheme().getFontPreferences())
-      .setFontRenderContext(view.getFontRenderContext());
+    FontFallbackIterator ffi = new FontFallbackIterator(
+      editor.getColorsScheme().getFontPreferences(),
+      view.getFontRenderContext(),
+      Font.PLAIN
+    );
     boolean specialCharsEnabled = editor.getSettings().isShowingSpecialChars();
-    char[] chars = CharArrayUtil.fromSequence(view.getDocument().getImmutableCharSequence(), start, end);
-    int currentFontType = 0;
+    char[] chars = CharArrayUtil.fromSequence(document.chars(), start, end);
+    @FontStyle int currentFontType = Font.PLAIN;
     Color currentColor = null;
     int currentStart = start;
     while (!it.atEnd()) {
-      int fontType = it.getMergedAttributes().getFontType();
+      @FontStyle int fontType = it.getMergedAttributes().getFontType();
       Color color = it.getMergedAttributes().getForegroundColor();
-      //noinspection MagicConstant
       if (fontType != currentFontType || !color.equals(currentColor)) {
         int tokenStart = it.getStartOffset();
         if (tokenStart > currentStart) {
@@ -121,8 +125,8 @@ class LineChunk {
         }
         currentStart = tokenStart;
         currentColor = color;
-        //noinspection MagicConstant
-        ffi.setFontStyle(currentFontType = fontType);
+        currentFontType = fontType;
+        ffi.setFontStyle(currentFontType);
       }
       it.advance();
     }
@@ -144,6 +148,7 @@ class LineChunk {
 
   @NotNull LineChunk subChunk(
     @NotNull EditorView view,
+    @NotNull DocumentText document,
     int line,
     int targetStartOffset,
     int targetEndOffset,
@@ -165,7 +170,7 @@ class LineChunk {
     if (start == getStartOffset() && end == getEndOffset()) {
       return this;
     }
-    ensureLayout(view, line, level);
+    ensureLayout(view, document, line, level);
     LineChunk chunk0 = new SyntheticLineChunk(start, end, new ArrayList<>());
     int offset = getStartOffset();
     for (LineFragment fragment : fragments) {
@@ -194,6 +199,8 @@ class LineChunk {
     @NotNull FontFallbackIterator ffi,
     @NotNull EditorView view
   ) {
+    EditorViewSnapshot viewSnapshot = null;
+    Font font = null;
     assert start < end;
     boolean isRtl = BitUtil.isSet(level, 1);
     int last = start;
@@ -204,8 +211,12 @@ class LineChunk {
         assert level == 0;
         specialFragment = tabFragment;
       } else if (showSpecialChars) {
+        if (viewSnapshot == null) {
+          viewSnapshot = view.getSnapshot();
+          font = view.getEditor().getColorsScheme().getFont(EditorFontType.PLAIN);
+        }
         // only BMP special chars are supported currently, so there's no need to check for surrogate pairs
-        specialFragment = SpecialCharacterFragment.create(view, c, text, i);
+        specialFragment = SpecialCharacterFragment.create(viewSnapshot, font, c, text, i);
       }
       if (specialFragment != null) {
         addFragmentsNoTabs(text, last, i, isRtl, ffi, view);

@@ -6,6 +6,7 @@ import com.intellij.codeWithMe.ClientId
 import com.intellij.concurrency.installTemporaryThreadContext
 import com.intellij.configurationStore.statistic.eventLog.FeatureUsageSettingsEvents
 import com.intellij.diagnostic.PluginException
+import com.intellij.diagnostic.rethrowControlFlowException
 import com.intellij.ide.impl.runUnderModalProgressIfIsEdt
 import com.intellij.ide.plugins.PluginManager
 import com.intellij.ide.plugins.PluginManagerCore
@@ -36,7 +37,6 @@ import com.intellij.openapi.diagnostic.debug
 import com.intellij.openapi.diagnostic.getOrHandleException
 import com.intellij.openapi.diagnostic.getOrLogException
 import com.intellij.openapi.diagnostic.logger
-import com.intellij.diagnostic.rethrowControlFlowException
 import com.intellij.openapi.extensions.PluginId
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.impl.shared.ConfigFolderChangedListener
@@ -243,9 +243,33 @@ abstract class ComponentStoreImpl : IComponentStore {
     }
   }
 
+  override fun prefetchComponentState(componentClass: Class<out PersistentStateComponent<*>>) {
+    if (!isStoreInitialized ||
+        // `getResolution` needs the component instance
+        StateStorageChooserEx::class.java.isAssignableFrom(componentClass)) {
+      return
+    }
+
+    val stateSpec = getStateSpec(componentClass) ?: return
+    if (loadPolicy != StateLoadPolicy.LOAD && !stateSpec.allowLoadInTests) {
+      return
+    }
+
+    val storageSpecs = getStorageSpecs(
+      componentClass = componentClass,
+      component = null,
+      stateSpec = stateSpec,
+      operation = StateStorageOperation.READ,
+    )
+    // as a heuristic, we are trying to load only the content of the first storage spec
+    // in reality, it can contain no state and be skipped in favor of the latter storages
+    // but in the majority of cases this heuristic should work
+    val storageSpec = storageSpecs.firstOrNull() ?: return
+    (storageManager.getStateStorage(storageSpec) as? StateStorageBase<*>)?.getStorageData()
+  }
+
   private fun initializeComponent(component: PersistentStateComponent<*>, stateSpec: State?) {
     component.initializeComponent()
-
     componentInitializationListeners.forEach {
       runCatching {
         it.onComponentInitialized(stateSpec)
@@ -290,6 +314,14 @@ abstract class ComponentStoreImpl : IComponentStore {
       else -> return
     }
     removeComponent(name)
+  }
+
+  override fun reregisterComponent(component: Any, pluginId: PluginId) {
+    if (component !is PersistentStateComponent<*>) {
+      return
+    }
+    val stateSpec = getStateSpec(component.javaClass) ?: return
+    registerComponent(stateSpec.name, createComponentInfo(component, stateSpec, serviceDescriptor = null, pluginId))
   }
 
   final override fun initPersistencePlainComponent(component: Any, key: String, pluginId: PluginId) {
@@ -349,11 +381,14 @@ abstract class ComponentStoreImpl : IComponentStore {
       val start = System.currentTimeMillis()
       try {
         val info = getClientAwareComponentInfo(name) ?: continue
+        val updateLocalSaveBaseline = ClientId.isCurrentlyUnderLocalId || info.stateSpec?.perClient == true
         var currentModificationCount = -1L
 
         if (info.lastSaved != -1) {
           if (isForce || (nowInSeconds - info.lastSaved) > NOT_ROAMABLE_COMPONENT_SAVE_THRESHOLD) {
-            info.lastSaved = nowInSeconds
+            if (updateLocalSaveBaseline) {
+              info.lastSaved = nowInSeconds
+            }
           }
           else {
             if (isSaveModLogEnabled) {
@@ -383,7 +418,9 @@ abstract class ComponentStoreImpl : IComponentStore {
           }
         }
         commitComponent(sessionManager, info, name, modificationCountChanged, isExternalSystemStorageEnabled)
-        info.updateModificationCount(currentModificationCount)
+        if (updateLocalSaveBaseline) {
+          info.updateModificationCount(currentModificationCount)
+        }
       }
       catch (e: Throwable) {
         saveResult.addError(Exception("Cannot get $name component state", e))
@@ -412,7 +449,7 @@ abstract class ComponentStoreImpl : IComponentStore {
     val stateSpec = getStateSpec(component)
     LOG.debug { "saveComponent is called for ${stateSpec.name}" }
     val saveManager = createSaveSessionProducerManager()
-    val storages = getStorageSpecs(component, stateSpec, StateStorageOperation.WRITE)
+    val storages = getStorageSpecs(component.javaClass, component, stateSpec, StateStorageOperation.WRITE)
     val storage = storages.firstOrNull { !it.deprecated } ?: throw AssertionError("All storages are deprecated")
     val absolutePath = storageManager.expandMacro(storage.path).toString()
     val componentInfo = components[stateSpec.name]
@@ -457,8 +494,8 @@ abstract class ComponentStoreImpl : IComponentStore {
     val effectiveComponentName = componentName ?: stateSpec.name
     val stateStorageChooser = component as? StateStorageChooserEx
 
-    @Suppress("UNCHECKED_CAST")
-    val storageSpecs = getStorageSpecs(component as PersistentStateComponent<Any>, stateSpec, StateStorageOperation.WRITE)
+    component as PersistentStateComponent<*>
+    val storageSpecs = getStorageSpecs(component.javaClass, component, stateSpec, StateStorageOperation.WRITE)
     for (storageSpec in storageSpecs) {
       var resolution = stateStorageChooser?.getResolution(storageSpec, StateStorageOperation.WRITE) ?: Resolution.DO
       if (resolution == Resolution.SKIP) {
@@ -583,9 +620,10 @@ abstract class ComponentStoreImpl : IComponentStore {
     val postLoadStateUpdateModificationCount = name != "PathMacrosImpl"
 
     val defaultState = if (stateSpec.defaultStateAsResource) getDefaultState(component, name, stateClass) else null
+    var isStateChangedByController = false
     if (loadPolicy == StateLoadPolicy.LOAD || info.stateSpec?.allowLoadInTests == true) {
       val storageChooser = component as? StateStorageChooserEx
-      for (storageSpec in getStorageSpecs(component, stateSpec, StateStorageOperation.READ)) {
+      for (storageSpec in getStorageSpecs(component.javaClass, component, stateSpec, StateStorageOperation.READ)) {
         if (storageChooser?.getResolution(storageSpec, StateStorageOperation.READ) == Resolution.SKIP) {
           continue
         }
@@ -602,6 +640,7 @@ abstract class ComponentStoreImpl : IComponentStore {
 
         val stateGetter = doCreateStateGetter(isReloadDataForStorage, storage, info, name, stateClass, stateSpec.useLoadedStateAsExisting)
         var state = stateGetter.getState(defaultState)
+        isStateChangedByController = isStateChangedByController || stateGetter.isStateChangedByController
         if (state == null) {
           if (changedStorages != null && isStorageChanged(changedStorages, storage)) {
             // the state will be `null` if a file is deleted;
@@ -632,6 +671,9 @@ abstract class ComponentStoreImpl : IComponentStore {
         if (postLoadStateUpdateModificationCount) {
           info.updateModificationCount(info.currentModificationCount)
         }
+        if (isStateChangedByController) {
+          markComponentForSave(info)
+        }
         return
       }
     }
@@ -656,6 +698,16 @@ abstract class ComponentStoreImpl : IComponentStore {
         info.updateModificationCount(info.currentModificationCount)
       }
     }
+    if (isStateChangedByController) {
+      markComponentForSave(info)
+    }
+  }
+
+  private fun markComponentForSave(info: ComponentInfo) {
+    info.updateModificationCount(-1)
+    if (info.lastSaved != -1) {
+      info.lastSaved = 0
+    }
   }
 
   protected open fun isReportStatisticAllowed(stateSpec: State, storageSpec: Storage): Boolean {
@@ -673,9 +725,13 @@ abstract class ComponentStoreImpl : IComponentStore {
     @Suppress("UNCHECKED_CAST")
     val component = info.component as PersistentStateComponent<Any>
 
-    // getting state after loading with an active controller can lead to unusual issues - disable write protection
-    if (useLoadedStateAsExisting && storage is XmlElementStorage && (storage.controller == null || project != null) && isUseLoadedStateAsExisting(storage)) {
-      return storage.createGetSession(component, componentName, info.pluginId, stateClass, reloadData)
+    if (storage is XmlElementStorage) {
+      val archiveLoadedState = useLoadedStateAsExisting &&
+                               (storage.controller == null || project != null) &&
+                               isUseLoadedStateAsExisting(storage)
+      if (archiveLoadedState || storage.controller != null) {
+        return storage.createGetSession(component, componentName, info.pluginId, stateClass, reloadData, archiveLoadedState)
+      }
     }
 
     return object : StateGetter<Any> {
@@ -705,11 +761,19 @@ abstract class ComponentStoreImpl : IComponentStore {
     }
   }
 
-  protected open fun <T : Any> getStorageSpecs(
-    component: PersistentStateComponent<T>,
+  /**
+   * Returns the storage specs of a component of [componentClass].
+   * For [StateStorageOperation.READ], the result must depend only on [componentClass].
+   *
+   * [component] is `null` if the specs are requested before the component is created.
+   * It is possible only for [StateStorageOperation.READ].
+   */
+  protected open fun getStorageSpecs(
+    componentClass: Class<out PersistentStateComponent<*>>,
+    component: PersistentStateComponent<*>?,
     stateSpec: State,
     operation: StateStorageOperation,
-  ): List<Storage> = getStorageSpecGenericImpl(stateSpec, component)
+  ): List<Storage> = getStorageSpecGenericImpl(stateSpec, componentClass)
 
   final override fun isReloadPossible(componentNames: Set<String>): Boolean = !componentNames.any { isNotReloadable(it) }
 
@@ -909,7 +973,7 @@ internal suspend fun getStateForComponent(component: PersistentStateComponent<*>
   else -> readAction { component.state }
 }
 
-internal fun <T : Any> getStorageSpecGenericImpl(stateSpec: State, component: PersistentStateComponent<T>): List<Storage> {
+internal fun getStorageSpecGenericImpl(stateSpec: State, componentClass: Class<*>): List<Storage> {
   val storages = mutableListOf<Storage>()
   for (storage in stateSpec.storages) {
     if (storage.roamingType == RoamingType.PER_OS) {
@@ -921,7 +985,7 @@ internal fun <T : Any> getStorageSpecGenericImpl(stateSpec: State, component: Pe
     }
   }
 
-  if (storages.size == 1 || component is StateStorageChooserEx) {
+  if (storages.size == 1 || StateStorageChooserEx::class.java.isAssignableFrom(componentClass)) {
     return storages
   }
 
@@ -929,7 +993,7 @@ internal fun <T : Any> getStorageSpecGenericImpl(stateSpec: State, component: Pe
     if (stateSpec.defaultStateAsResource) {
       return emptyList()
     }
-    throw AssertionError("No storage specified for $component")
+    throw AssertionError("No storage specified for ${componentClass.name}")
   }
 
   return sortStoragesByDeprecated(storages)

@@ -166,6 +166,25 @@ vocabulary! {
     }
 }
 
+vocabulary! {
+    /// Which scenarios keep their video after they end: the `keepVideo` field of the hello.
+    #[derive(Default)]
+    pub enum VideoRetention {
+        /// Every scenario keeps its video. A hello without the field means this.
+        #[default]
+        Always = "always",
+        /// Only a scenario that did not pass keeps its video: a failed, an aborted or a truncated one. The recorder
+        /// records the video of a passed scenario too, and deletes it at the end of the scenario.
+        Failed = "failed",
+    }
+}
+
+impl VideoRetention {
+    const fn is_always(&self) -> bool {
+        matches!(self, Self::Always)
+    }
+}
+
 // --- the commands --------------------------------------------------------------------------------------------
 
 /// Where the recorder reaches the IDE's trace routes: the UI-test bridge's port and token.
@@ -197,13 +216,25 @@ pub struct HelloCommand {
     /// Lets the recorder read the screen itself: the X server's root window, and on a Mac the screen ffmpeg
     /// records. Without it the recorder asks the IDE to paint its own windows and records no video.
     ///
-    /// The lane sets it only where the display belongs to the lane, which is the Linux guest's `Xvfb`. Its descriptor
-    /// carries `-Dair.flow.trace.screen=on`, and a direct lane never sets it. A developer's own screen shows
-    /// everything else they have open, and on macOS reading it needs the Screen Recording permission, whose prompt
-    /// can take the keyboard focus from the IDE under test in the middle of a scenario. Evidence must not decide a
-    /// verdict, so neither happens unasked.
+    /// The lane sets it only where the display belongs to the lane or to a build. The descriptor of the Linux guest,
+    /// whose `Xvfb` is the lane's own, carries `-Dair.flow.trace.screen=on`. `lane-run` sets it on a TeamCity build on
+    /// Linux, because no person works on the display of a TeamCity agent. A direct lane on a developer's machine never
+    /// sets it. A developer's own screen shows everything else they have open, and on macOS reading it needs the Screen
+    /// Recording permission, whose prompt can take the keyboard focus from the IDE under test in the middle of a
+    /// scenario. Evidence must not decide a verdict, so neither happens unasked.
     #[serde(default, skip_serializing_if = "is_false")]
     pub screen: bool,
+    /// Lets the recorder write the Allure result of each scenario into `<root>/<runId>/allure-results/`. Without it
+    /// the recorder writes no Allure result. A zip has no hard links, so the results carry each video and picture of
+    /// the bundles a second time, and no CI step uploads them to Allure TestOps yet. The lane sets it only when a
+    /// person asks for it with `-Dair.flow.trace.allure=on`.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub allure: bool,
+    /// Which scenarios keep their video. `lane-run` takes it from `AIR_LANE_VIDEO`, which a TeamCity build sets to
+    /// `failed` on a branch other than `master` and in a personal build. A passed scenario of `master` is the baseline
+    /// that a failed scenario is compared with. Every other lane keeps every video.
+    #[serde(default, skip_serializing_if = "VideoRetention::is_always")]
+    pub keep_video: VideoRetention,
     /// Absent when the lane has no published endpoint yet. The recorder then captures pixels only, and says so in
     /// the hello ack's reason. Every scenario names the endpoint again; see [ScenarioCommand::bridge].
     #[serde(default, skip_serializing_if = "Option::is_none")]

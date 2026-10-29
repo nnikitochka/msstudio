@@ -16,7 +16,6 @@ import com.intellij.util.asSafely
 import com.jetbrains.python.PyInternalExecApi
 import com.jetbrains.python.PythonLanguage
 import com.jetbrains.python.configuration.findModuleSdkIfReady
-import com.jetbrains.python.extensions.getSdk
 import com.jetbrains.python.hatch.sdk.isHatch
 import com.jetbrains.python.isCondaVirtualEnv
 import com.jetbrains.python.isNonToolVirtualEnv
@@ -65,9 +64,6 @@ import org.jetbrains.annotations.ApiStatus
 @get:ApiStatus.Internal
 @Deprecated(message = "Use com.jetbrains.python.project.PyProject.Companion.getPyProjects")
 val Project.modules: Array<Module> get() = ModuleManager.getInstance(this).modules
-
-@Deprecated(message = "Use com.intellij.python.sdk.backend.PythonInterpreterKt.getInterpreter (internal only), or get SDK directly using a platfrom API (third party)")
-val Project.sdks: List<Sdk> get() = modules.mapNotNull(Module::getSdk)
 
 /**
  * Adds python language and interpreter version if the module has sdk

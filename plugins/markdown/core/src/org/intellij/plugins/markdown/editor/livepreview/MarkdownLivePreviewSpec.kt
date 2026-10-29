@@ -162,14 +162,23 @@ sealed interface MarkdownLivePreviewSpec {
   )
 
   /**
-   * Replaces the source of a local image with [placeholderText] and paints the image below its line.
+   * Replaces the source of a image with [placeholderText] and paints the image below its line.
    */
   @Serializable
   data class Image(
     override val range: MarkdownLivePreviewRange,
     val destination: String,
     val placeholderText: String,
+    val isBrowserOwned: Boolean,
     val source: ImageSource? = null,
+  ) : MarkdownLivePreviewSpec
+
+  /** Renders an object under the code fence, if the [language] is supported */
+  @Serializable
+  data class CodeFence(
+    override val range: MarkdownLivePreviewRange,
+    val language: String,
+    val source: String,
   ) : MarkdownLivePreviewSpec
 
   /** Replaces a list marker with a depth-aware bullet placeholder until a caret touches the marker. */

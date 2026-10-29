@@ -1,0 +1,277 @@
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+package com.intellij.execution.lineMarker;
+
+import com.intellij.codeInsight.daemon.LineMarkerInfo;
+import com.intellij.codeInsight.daemon.LineMarkerProviderDescriptor;
+import com.intellij.codeInsight.daemon.MergeableLineMarkerInfo;
+import com.intellij.execution.lineMarker.RunLineMarkerContributorBase.InfoBase;
+import com.intellij.icons.AllIcons;
+import com.intellij.ide.TrustedFiles;
+import com.intellij.lang.LangBundle;
+import com.intellij.lang.LanguageExtension;
+import com.intellij.lang.injection.InjectedLanguageManager;
+import com.intellij.openapi.actionSystem.ActionGroup;
+import com.intellij.openapi.actionSystem.AnAction;
+import com.intellij.openapi.actionSystem.DefaultActionGroup;
+import com.intellij.openapi.actionSystem.Separator;
+import com.intellij.openapi.editor.markup.GutterIconRenderer;
+import com.intellij.openapi.editor.markup.MarkupEditorFilter;
+import com.intellij.openapi.editor.markup.MarkupEditorFilterFactory;
+import com.intellij.openapi.progress.ProgressManager;
+import com.intellij.openapi.project.DumbAware;
+import com.intellij.openapi.project.DumbService;
+import com.intellij.openapi.util.Key;
+import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.SmartPointerManager;
+import com.intellij.psi.SmartPsiElementPointer;
+import com.intellij.psi.util.PsiUtilCore;
+import com.intellij.util.Function;
+import com.intellij.util.SmartList;
+import com.intellij.util.ThreeState;
+import kotlin.jvm.functions.Function1;
+import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.Nls;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+
+import javax.swing.Icon;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Comparator;
+import java.util.List;
+import java.util.function.Supplier;
+
+/**
+ * @author Dmitry Avdeev
+ */
+public class RunLineMarkerProvider extends LineMarkerProviderDescriptor implements DumbAware {
+  @ApiStatus.Internal
+  public static final LanguageExtension<RunLineMarkerContributorBase> EXTENSION_POINT = new LanguageExtension<>("com.intellij.runLineMarkerContributor");
+
+  private static final Comparator<InfoBase> COMPARATOR = (a, b) -> {
+    if (b.shouldReplace(a)) {
+      return 1;
+    }
+    if (a.shouldReplace(b)) {
+      return -1;
+    }
+    return 0;
+  };
+
+  @Override
+  public LineMarkerInfo<?> getLineMarkerInfo(@NotNull PsiElement element) {
+    InjectedLanguageManager injectedLanguageManager = InjectedLanguageManager.getInstance(element.getProject());
+    if (injectedLanguageManager.isInjectedFragment(element.getContainingFile())) return null;
+
+    List<RunLineMarkerContributorBase> contributors =
+      DumbService.getInstance(element.getProject()).filterByDumbAwareness(EXTENSION_POINT.allForLanguageOrAny(element.getLanguage()));
+    Icon icon = null;
+    List<InfoBase> infos = null;
+    for (RunLineMarkerContributorBase contributor : contributors) {
+      ProgressManager.checkCanceled();
+      InfoBase info = contributor.getInfo(element);
+      if (info == null) {
+        continue;
+      }
+      if (icon == null) {
+        icon = info.getIcon();
+      }
+
+      if (infos == null) {
+        infos = new SmartList<>();
+      }
+      infos.add(info);
+    }
+    if (icon == null) return null;
+    if (isUntrustedFile(element)) return null;
+
+    return doCreateLineMarker(element, icon, infos);
+  }
+
+  @Override
+  public void collectSlowLineMarkers(@NotNull List<? extends PsiElement> elements,
+                                     @NotNull Collection<? super LineMarkerInfo<?>> result) {
+    Boolean untrusted = null;
+    for (PsiElement element : elements) {
+      List<RunLineMarkerContributorBase> contributors = DumbService.getInstance(element.getProject())
+        .filterByDumbAwareness(EXTENSION_POINT.allForLanguageOrAny(element.getLanguage()));
+      Icon icon = null;
+      List<InfoBase> infos = null;
+      for (RunLineMarkerContributorBase contributor : contributors) {
+        InfoBase info = contributor.getSlowInfo(element);
+        if (info == null) {
+          continue;
+        }
+        if (icon == null) {
+          icon = info.getIcon();
+        }
+
+        if (infos == null) {
+          infos = new SmartList<>();
+        }
+        infos.add(info);
+      }
+      if (icon == null) continue;
+      if (untrusted == null) {
+        untrusted = isUntrustedFile(element);
+      }
+      if (untrusted) return;
+      result.add(doCreateLineMarker(element, icon, infos));
+    }
+
+  }
+
+  /** Run actions execute code from the file, so their gutter markers must not appear in the safe mode. */
+  private static boolean isUntrustedFile(@NotNull PsiElement element) {
+    VirtualFile virtualFile = PsiUtilCore.getVirtualFile(element);
+    return virtualFile != null && !TrustedFiles.isTrusted(virtualFile, element.getProject());
+  }
+
+  public static @Nullable LineMarkerInfo<PsiElement> createLineMarker(@NotNull PsiElement element,
+                                                                      @NotNull Icon icon,
+                                                                      @NotNull List<? extends InfoBase> infos) {
+    if (isUntrustedFile(element)) return null;
+    return doCreateLineMarker(element, icon, infos);
+  }
+
+  private static @NotNull LineMarkerInfo<PsiElement> doCreateLineMarker(@NotNull PsiElement element,
+                                                                        @NotNull Icon icon,
+                                                                        @NotNull List<? extends InfoBase> infos) {
+    if (infos.size() > 1) {
+      infos = new ArrayList<>(infos);
+      infos.sort(COMPARATOR);
+      final InfoBase first = infos.getFirst();
+      infos.removeIf(info -> info != first && first.shouldReplace(info));
+    }
+
+    final DefaultActionGroup actionGroup = new DefaultActionGroup();
+    for (InfoBase info : infos) {
+      for (AnAction action : info.getActions()) {
+        actionGroup.add(action instanceof Separator ? action : new LineMarkerActionWrapper(element, action));
+      }
+
+      if (info != infos.getLast()) {
+        actionGroup.add(new Separator());
+      }
+    }
+
+    Function<PsiElement, String> tooltipProvider = new EquatableTooltipProvider(infos);
+    return new RunLineMarkerInfo(element, icon, tooltipProvider, actionGroup);
+  }
+
+  // must provide sensible equals() to be able to reuse LineMarker on change
+  private static final class EquatableTooltipProvider implements Function<PsiElement, String> {
+    private final @NotNull List<? extends InfoBase> myInfos;
+
+    EquatableTooltipProvider(@NotNull List<? extends InfoBase> infos) { myInfos = infos; }
+
+    @Override
+    public int hashCode() {
+      return myInfos.hashCode();
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+      return obj instanceof EquatableTooltipProvider other && myInfos.equals(other.myInfos);
+    }
+
+    @Override
+    public String fun(PsiElement element1) {
+      StringBuilder tooltip = new StringBuilder();
+      for (InfoBase info : myInfos) {
+        Function1<@NotNull PsiElement, @Nullable String> tooltipProvider = info.getTooltipProvider();
+        if (tooltipProvider != null) {
+          String string = tooltipProvider.invoke(element1);
+          if (string == null) continue;
+          if (!tooltip.isEmpty()) {
+            tooltip.append("\n");
+          }
+          tooltip.append(string);
+        }
+      }
+      return tooltip.isEmpty() ? null : RunLineMarkerActionCustomizer.appendShortcutToTooltip(tooltip.toString());
+    }
+  }
+
+  @ApiStatus.Internal
+  public static final class RunLineMarkerInfo extends MergeableLineMarkerInfo<PsiElement> {
+    private final DefaultActionGroup myActionGroup;
+
+    RunLineMarkerInfo(PsiElement element, Icon icon, Function<? super PsiElement, @Nls String> tooltipProvider, DefaultActionGroup actionGroup) {
+      super(element, element.getTextRange(), icon, tooltipProvider, null, GutterIconRenderer.Alignment.CENTER,
+            createSupplier(element, tooltipProvider));
+      myActionGroup = actionGroup;
+    }
+
+    private static @NotNull Supplier<@Nls String> createSupplier(PsiElement element, Function<? super PsiElement, @Nls String> tooltipProvider) {
+      SmartPsiElementPointer<PsiElement> pointer = SmartPointerManager.createPointer(element);
+      return () -> {
+        PsiElement pointerElement = pointer.getElement();
+        return pointerElement != null ? tooltipProvider.fun(pointerElement) : "";
+      };
+    }
+
+    @Override
+    public GutterIconRenderer createGutterRenderer() {
+      return new LineMarkerGutterIconRenderer<>(this) {
+        @Override
+        public AnAction getClickAction() {
+          return myActionGroup.getChildrenCount() == 1 ? myActionGroup.getChildActionsOrStubs()[0] : null;
+        }
+
+        @Override
+        public boolean isNavigateAction() {
+          return true;
+        }
+
+        @Override
+        public ActionGroup getPopupMenuActions() {
+          return myActionGroup;
+        }
+
+        @Override
+        public boolean isDumbAware() {
+          return myActionGroup.isDumbAware();
+        }
+      };
+    }
+
+    @Override
+    public @NotNull MarkupEditorFilter getEditorFilter() {
+      return MarkupEditorFilterFactory.createIsNotDiffFilter();
+    }
+
+    @Override
+    public boolean canMergeWith(@NotNull MergeableLineMarkerInfo<?> info) {
+      return info instanceof RunLineMarkerInfo && info.getIcon() == getIcon();
+    }
+
+    @Override
+    public Icon getCommonIcon(@NotNull List<? extends MergeableLineMarkerInfo<?>> infos) {
+      return getIcon();
+    }
+  }
+
+  @Override
+  public @NotNull String getName() {
+    return LangBundle.message("run.line.marker.name");
+  }
+
+  @Override
+  public @Nullable Icon getIcon() {
+    return AllIcons.RunConfigurations.TestState.Run;
+  }
+
+  private static final Key<Boolean> HAS_ANYTHING_RUNNABLE = Key.create("HAS_ANYTHING_RUNNABLE");
+
+  public static @NotNull ThreeState hadAnythingRunnable(@NotNull VirtualFile file) {
+    Boolean data = file.getUserData(HAS_ANYTHING_RUNNABLE);
+    return data == null ? ThreeState.UNSURE : ThreeState.fromBoolean(data);
+  }
+
+  public static void markRunnable(@NotNull VirtualFile file, boolean isRunnable) {
+    file.putUserData(HAS_ANYTHING_RUNNABLE, isRunnable);
+  }
+
+}

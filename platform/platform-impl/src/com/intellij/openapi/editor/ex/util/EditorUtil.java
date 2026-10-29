@@ -54,6 +54,8 @@ import com.intellij.openapi.editor.colors.TextAttributesKey;
 import com.intellij.openapi.editor.event.DocumentListener;
 import com.intellij.openapi.editor.event.SelectionEvent;
 import com.intellij.openapi.editor.event.SelectionListener;
+import com.intellij.openapi.editor.ex.DocumentText;
+import com.intellij.openapi.editor.ex.DocumentTextUtil;
 import com.intellij.openapi.editor.ex.EditorEx;
 import com.intellij.openapi.editor.impl.ComplementaryFontsRegistry;
 import com.intellij.openapi.editor.impl.EditorImpl;
@@ -67,6 +69,7 @@ import com.intellij.openapi.editor.impl.ScrollingModelImpl;
 import com.intellij.openapi.editor.impl.TextRangeInterval;
 import com.intellij.openapi.editor.impl.view.VisualLinesIterator;
 import com.intellij.openapi.editor.markup.TextAttributes;
+import com.intellij.openapi.editor.registry.EditorRegistry;
 import com.intellij.openapi.editor.textarea.TextComponentEditor;
 import com.intellij.openapi.fileEditor.FileEditor;
 import com.intellij.openapi.fileEditor.TextEditor;
@@ -80,7 +83,6 @@ import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.ScalableIcon;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.TextRange;
-import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.impl.source.tree.injected.InjectedLanguageEditorUtil;
 import com.intellij.ui.ExperimentalUI;
@@ -389,7 +391,7 @@ public final class EditorUtil {
   }
 
   public static Icon scaleIconAccordingEditorFont(Icon icon, Editor editor) {
-    if (Registry.is("editor.scale.gutter.icons") && editor instanceof EditorImpl impl && icon instanceof ScalableIcon scalable) {
+    if (EditorRegistry.current().isGutterIconScaled() && editor instanceof EditorImpl impl && icon instanceof ScalableIcon scalable) {
       float scale = impl.getScale();
       if (Math.abs(1f - scale) > 0.1f) {
         return scalable.scale(scale);
@@ -715,6 +717,22 @@ public final class EditorUtil {
     return offset;
   }
 
+  @ApiStatus.Internal
+  public static int getNotFoldedLineStartOffset(@NotNull DocumentText document, @NotNull FoldingModel foldingModel, int startOffset, boolean stopAtInvisibleFoldRegions) {
+    int offset = startOffset;
+    while (true) {
+      offset = DocumentTextUtil.getLineStartOffsetAt(document, offset);
+      FoldRegion foldRegion = foldingModel.getCollapsedRegionAtOffset(offset - 1);
+      if (foldRegion == null ||
+          stopAtInvisibleFoldRegions && foldRegion.getPlaceholderText().isEmpty() ||
+          foldRegion.getStartOffset() >= offset) {
+        break;
+      }
+      offset = foldRegion.getStartOffset();
+    }
+    return offset;
+  }
+
   /**
    * Finds the end offset of visual line at which given offset is located, not taking soft wraps into account.
    */
@@ -731,6 +749,22 @@ public final class EditorUtil {
     int offset = startOffset;
     while (true) {
       offset = getLineEndOffset(offset, document);
+      FoldRegion foldRegion = foldingModel.getCollapsedRegionAtOffset(offset);
+      if (foldRegion == null ||
+          stopAtInvisibleFoldRegions && foldRegion.getPlaceholderText().isEmpty() ||
+          foldRegion.getEndOffset() <= offset) {
+        break;
+      }
+      offset = foldRegion.getEndOffset();
+    }
+    return offset;
+  }
+
+  @ApiStatus.Internal
+  public static int getNotFoldedLineEndOffset(@NotNull DocumentText document, @NotNull FoldingModel foldingModel, int startOffset, boolean stopAtInvisibleFoldRegions) {
+    int offset = startOffset;
+    while (true) {
+      offset = DocumentTextUtil.getLineEndOffsetAt(document, offset);
       FoldRegion foldRegion = foldingModel.getCollapsedRegionAtOffset(offset);
       if (foldRegion == null ||
           stopAtInvisibleFoldRegions && foldRegion.getPlaceholderText().isEmpty() ||
@@ -1073,7 +1107,7 @@ public final class EditorUtil {
   }
 
   public static int getDefaultCaretWidth() {
-    return Registry.intValue("editor.caret.width", 2);
+    return EditorRegistry.current().caretWidth();
   }
 
   /**

@@ -40,6 +40,8 @@ jvm_library(
         "//plugins/properties:properties-backend",
         "//platform/core-ui",
         "//plugins/properties/properties-psi-impl:backend-psi",
+        "//platform/main/intellij.platform.monolith.main:monolith-main",
+        "//community-resources:customization",
     ],
 )
 
@@ -76,6 +78,8 @@ jvm_library(
         "//platform/platform-impl/hprof:hprof_test_lib",
         "//plugins/devkit:devkit_test_lib",
         "//platform/platform-util-io:ide-util-io_test_lib",
+        "//platform/main/intellij.platform.monolith.main:monolith-main_test_lib",
+        "//community-resources:customization_test_lib",
     ],
     deps = [
         # do not sort,
@@ -118,6 +122,8 @@ jvm_library(
         "//plugins/devkit/intellij.devkit.scaffolding:scaffolding_test_lib",
         "//java/execution/openapi:java-execution",
         "//java/execution/openapi:java-execution_test_lib",
+        "//java/execution/impl",
+        "//java/execution/impl:impl_test_lib",
         "//platform/execution",
         "//platform/execution:execution_test_lib",
         "//platform/consoleView",

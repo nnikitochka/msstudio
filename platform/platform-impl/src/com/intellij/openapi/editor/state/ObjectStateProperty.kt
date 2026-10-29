@@ -1,62 +1,80 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.editor.state
 
 import com.intellij.openapi.util.Ref
 
-open class ObjectStateProperty<T>(initialValue: T,
-                                  private val defaultValueCalculator: SyncDefaultValueCalculator<T>,
-                                  private val customOutValueModifier: CustomOutValueModifier<T>? = null) : StateProperty<T>() {
+/**
+ * A [StateProperty] that holds its value in memory.
+ *
+ * The value is the override, or else the result of [defaultValueCalculator]. Then [customOutValueModifier] can change
+ * it. A change of the value notifies the [ObservableState], and so does a change of the override, also without a change
+ * of the value.
+ */
+open class ObjectStateProperty<T>(
+  initialValue: T,
+  private val defaultValueCalculator: SyncDefaultValueCalculator<T>,
+  private val customOutValueModifier: CustomOutValueModifier<T>?,
+) : StateProperty<T>() {
   private var overriddenValue: T? = null
-
-  var isValueOverridden: Boolean = false  // this is need for supporting possible `null` values
-    private set
-  
   private var outValue: T = initialValue
 
-  protected val value get() = outValue
+  /**
+   * Whether the property has an override. This is a separate flag, because `null` can be an override.
+   */
+  var isValueOverridden: Boolean = false
+    private set
 
-  override fun getValue(thisRef: ObservableState): T = this.outValue
+  /**
+   * The current value, after [customOutValueModifier].
+   */
+  protected val value: T
+    get() = outValue
+
+  override fun getValue(thisRef: ObservableState): T {
+    return outValue
+  }
 
   override fun setValue(thisRef: ObservableState, value: T) {
-    if (isValueOverridden && overriddenValue == value) return
-
+    if (isValueOverridden && overriddenValue == value) {
+      return
+    }
+    val wasOverridden = isValueOverridden
     overriddenValue = value
     isValueOverridden = true
     recalculate(thisRef)
+    if (!wasOverridden) {
+      thisRef.overridingChanged(name)
+    }
   }
 
   override fun clearOverriding(thisRef: ObservableState) {
-    if (!isValueOverridden) return
-
-    isValueOverridden = false
-    overriddenValue = null  // avoid memory leak
-    recalculate(thisRef)
+    if (isValueOverridden) {
+      isValueOverridden = false
+      // Drop the reference, so that the old value can be collected.
+      overriddenValue = null
+      recalculate(thisRef)
+      thisRef.overridingChanged(name)
+    }
   }
 
   override fun recalculate(thisRef: ObservableState) {
     if (isValueOverridden) {
       @Suppress("UNCHECKED_CAST")
-      updateOutValueAndFireEventIfNeed(thisRef, overriddenValue as T)
-      return
+      updateOutValue(thisRef, overriddenValue as T)
+    } else {
+      updateOutValue(thisRef, defaultValueCalculator.calculate())
     }
-
-    if (defaultValueCalculator is SyncDefaultValueCalculator) {
-      val newVal = defaultValueCalculator.calculate()
-      updateOutValueAndFireEventIfNeed(thisRef, newVal)
-      return
-    }
-
-    // fixme log error illegal state
-    throw IllegalStateException(defaultValueCalculator.toString())
   }
 
-  private fun updateOutValueAndFireEventIfNeed(thisRef: ObservableState, calculatedOutValue: T) {
-    val newOutValue = customOutValueModifier?.modifyOutValue(calculatedOutValue) ?: calculatedOutValue
-
-    if (newOutValue != this.outValue) {
-      val oldOut = this.outValue
-      this.outValue = newOutValue
-      thisRef.propertyChanged(name, Ref(oldOut), newOutValue)
+  /**
+   * Stores [calculated] after [customOutValueModifier], and notifies [thisRef] when the stored value changes.
+   */
+  private fun updateOutValue(thisRef: ObservableState, calculated: T) {
+    val newOutValue = customOutValueModifier?.modifyOutValue(calculated) ?: calculated
+    if (newOutValue != outValue) {
+      val oldOutValue = outValue
+      outValue = newOutValue
+      thisRef.propertyChanged(name, Ref(oldOutValue), newOutValue)
     }
   }
 }

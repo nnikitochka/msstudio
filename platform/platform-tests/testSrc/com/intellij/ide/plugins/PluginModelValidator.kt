@@ -93,15 +93,31 @@ data class PluginValidationOptions(
   val moduleLevelServicesToIgnore: Set<String> = emptySet(),
 
   /**
-   * Set of implementation classes of existing `com.intellij.additionalLibraryRootsProvider` extensions that shouldn't be reported as errors.
+   * Maps the name of a forbidden extension point to the implementation classes of its existing extensions that shouldn't be reported as
+   * errors. The names must be keys of [forbiddenWorkspaceFileIndexExtensionPoints].
    */
-  val additionalLibraryRootsProvidersToIgnore: Set<String> = emptySet(),
+  val extensionsToIgnore: Map<String, Set<String>> = emptyMap(),
+
+  /**
+   * Existing descriptors with a `package` attribute, grouped by JPS module name.
+   * The paths are relative to the project home. Remove an entry when you remove its attribute.
+   */
+  val existingPackageAttributes: Map<String, Set<String>> = emptyMap(),
 
   /**
    * Names of service interfaces that are overridden by plugins which sources are located outside the current project, and therefore need
    * to be registered as `open`.
    */
   val externallyOverriddenServices: Set<String> = emptySet(),
+)
+
+/**
+ * The FQN of an extension point that is forbidden in intellij monorepo to the simple name of its interface. Each one is not incremental,
+ * and a workspace entity with a WorkspaceFileIndexContributor replaces it.
+ */
+private val forbiddenWorkspaceFileIndexExtensionPoints: Map<String, String> = java.util.Map.of(
+  "com.intellij.additionalLibraryRootsProvider", "AdditionalLibraryRootsProvider",
+  "com.intellij.directoryIndexExcludePolicy", "DirectoryIndexExcludePolicy",
 )
 
 /** The extension point FQN to the attribute that carries the id the RPC registry routes by. */
@@ -172,7 +188,7 @@ class PluginValidationResult internal constructor(
 }
 
 /**
- * Performs checks of plugin and module descriptors in the source code of [project].
+ * Checks plugin and module descriptors in [sourceCodeBasedPluginModel].
  * The checks don't depend on the layout of plugins and don't require all modules to be compiled.
  * There is [com.intellij.platform.buildScripts.testFramework.pluginModel.PluginDependenciesValidator] which checks dependencies of plugin
  * modules.
@@ -193,6 +209,7 @@ internal class PluginModelValidator(
   }
 
   suspend fun validate(): PluginValidationResult {
+    checkPackageAttributes()
     val descriptorFileInfos = sourceCodeBasedPluginModel.descriptorFileInfos
     val moduleNameToInfo = sourceCodeBasedPluginModel.moduleNameToInfo
     val allMainModulesOfPlugins = sourceCodeBasedPluginModel.allMainModulesOfPlugins
@@ -220,9 +237,11 @@ internal class PluginModelValidator(
       checkServicesOverrides(descriptorFileInfos, RawPluginDescriptor::appElementsContainer)
     }
 
+    val unknownExtensionPoints = validationOptions.extensionsToIgnore.keys - forbiddenWorkspaceFileIndexExtensionPoints.keys
+    check(unknownExtensionPoints.isEmpty()) { "extensionsToIgnore has extension points that are not forbidden: $unknownExtensionPoints" }
     for (descriptorFileInfo in descriptorFileInfos) {
       checkLazyRpcExtensionAttributes(descriptorFileInfo)
-      checkAdditionalLibraryRootsProviders(descriptorFileInfo)
+      checkForbiddenWorkspaceFileIndexExtensions(descriptorFileInfo)
     }
 
     // 3. check dependencies - we are aware about all modules now
@@ -345,6 +364,32 @@ internal class PluginModelValidator(
     return PluginValidationResult(_errors, pluginIdToInfo)
   }
 
+  private suspend fun checkPackageAttributes() {
+    val descriptorsWithPackageAttribute = HashMap<String, MutableSet<String>>()
+    for (descriptorFileInfo in sourceCodeBasedPluginModel.descriptorFileInfos) {
+      currentCoroutineContext().ensureActive()
+      if (descriptorFileInfo.inTests || descriptorFileInfo.descriptor.`package` == null) continue
+      val module = descriptorFileInfo.sourceModule
+      val path = projectHomePath.relativize(descriptorFileInfo.descriptorFile).invariantSeparatorsPathString
+      descriptorsWithPackageAttribute.getOrPut(module.name) { HashSet() }.add(path)
+      val existing = validationOptions.existingPackageAttributes[module.name].orEmpty()
+      if (path !in existing) {
+        reportError(
+          "New 'package' attribute usages are forbidden in plugin and module descriptors. " +
+          "Remove the 'package' attribute so the module gets packed into a separate jar and its classes are loaded only by this module " +
+          "(additional changes may be required if the plugin has custom build logic, ask in #ij-plugin-model if you need help).",
+          module,
+          mapOf("descriptorFile" to descriptorFileInfo.descriptorFile),
+        )
+      }
+    }
+    for ((moduleName, existing) in validationOptions.existingPackageAttributes) {
+      for (path in existing - descriptorsWithPackageAttribute[moduleName].orEmpty()) {
+        println("Obsolete entry for module $moduleName in existingPackageAttributes: $path")
+      }
+    }
+  }
+
   /**
    * The RPC registries route by the id in these attributes, so they construct an extension without the attribute at startup.
    * See IJPL-254356.
@@ -367,19 +412,22 @@ internal class PluginModelValidator(
     }
   }
 
-  private fun checkAdditionalLibraryRootsProviders(descriptorFileInfo: DescriptorFileInfo) {
-    val extensions = descriptorFileInfo.descriptor.extensions.get("com.intellij.additionalLibraryRootsProvider") ?: return
-    for (extension in extensions) {
-      if (extension.implementation in validationOptions.additionalLibraryRootsProvidersToIgnore) continue
-      reportError(
-        """
-        |Additional library roots provider '${extension.implementation}' is defined in '${descriptorFileInfo.sourceModule.name}'.
-        |AdditionalLibraryRootsProvider is not incremental, so it is forbidden to add new ones in intellij monorepo.
-        |Describe the files with a workspace entity and a WorkspaceFileIndexContributor instead.
-        """.trimMargin(),
-        descriptorFileInfo.sourceModule,
-        mapOf("descriptorFile" to descriptorFileInfo.descriptorFile),
-      )
+  private fun checkForbiddenWorkspaceFileIndexExtensions(descriptorFileInfo: DescriptorFileInfo) {
+    for ((extensionPointName, interfaceName) in forbiddenWorkspaceFileIndexExtensionPoints) {
+      val extensions = descriptorFileInfo.descriptor.extensions.get(extensionPointName) ?: continue
+      val ignored = validationOptions.extensionsToIgnore[extensionPointName].orEmpty()
+      for (extension in extensions) {
+        if (extension.implementation in ignored) continue
+        reportError(
+          """
+          |$interfaceName '${extension.implementation}' is defined in '${descriptorFileInfo.sourceModule.name}'.
+          |$interfaceName is not incremental, so it is forbidden to add new ones in intellij monorepo.
+          |Describe the files with a workspace entity and a WorkspaceFileIndexContributor instead.
+          """.trimMargin(),
+          descriptorFileInfo.sourceModule,
+          mapOf("descriptorFile" to descriptorFileInfo.descriptorFile),
+        )
+      }
     }
   }
 

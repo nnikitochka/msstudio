@@ -104,6 +104,11 @@ jvm_library(
     ),
     module_name = "intellij.gradle.properties.tests",
     visibility = ["//visibility:public"],
+    runtime_deps = [
+        # do not sort,
+        "//platform/main/intellij.platform.monolith.main:monolith-main",
+        "//community-resources:customization",
+    ],
 )
 
 jvm_library(
@@ -117,21 +122,22 @@ jvm_library(
         ],
         allow_empty = True,
     ),
-    associates = [
-        "//plugins/gradle/properties",
-        "//plugins/gradle/properties:properties_test_lib",
-    ],
+    module_name = "intellij.gradle.properties.tests",
     visibility = ["//visibility:public"],
     runtime_deps = [
         # do not sort,
         ":properties-tests",
         "//platform/ide-core:ide-core_test_lib",
+        "//platform/main/intellij.platform.monolith.main:monolith-main_test_lib",
+        "//community-resources:customization_test_lib",
     ],
     deps = [
         # do not sort,
         "@lib//:kotlin-stdlib",
         "//libraries/gradle",
         "//libraries/gradle:gradle_test_lib",
+        "//plugins/gradle/properties",
+        "//plugins/gradle/properties:properties_test_lib",
         "//plugins/gradle",
         "//plugins/gradle:gradle_test_lib",
         "//plugins/gradle/settings",

@@ -122,10 +122,7 @@ jvm_library(
         ],
         allow_empty = True,
     ),
-    associates = [
-        "//plugins/kotlin/jvm-debugger/eval4j",
-        "//plugins/kotlin/jvm-debugger/eval4j:eval4j_test_lib",
-    ],
+    module_name = "intellij.kotlin.jvm.debugger.eval4j.tests",
     visibility = ["//visibility:public"],
     runtime_deps = [
         # do not sort,
@@ -134,19 +131,15 @@ jvm_library(
     ],
     deps = [
         # do not sort,
-        "//java/debugger/openapi:java-debugger",
-        "//java/debugger/openapi:java-debugger_test_lib",
         "@lib//:kotlin-stdlib",
         "//libraries/asm",
         "//libraries/asm:asm_test_lib",
         "//libraries/junit4",
         "//libraries/junit4:junit4_test_lib",
-        "//libraries/kotlinc/kotlin-compiler-common:libraries-kotlinc-kotlin-compiler-common",
-        "//libraries/kotlinc/kotlin-compiler-common:libraries-kotlinc-kotlin-compiler-common_test_lib",
-        "//platform/util",
-        "//platform/util:util_test_lib",
         "//java/debugger/impl",
         "//java/debugger/impl:impl_test_lib",
+        "//plugins/kotlin/jvm-debugger/eval4j",
+        "//plugins/kotlin/jvm-debugger/eval4j:eval4j_test_lib",
     ],
 )
 ### auto-generated section `build intellij.kotlin.jvm.debugger.eval4j.tests` end

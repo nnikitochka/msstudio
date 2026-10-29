@@ -1,6 +1,8 @@
 // Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.jetbrains.python.sdk
 
+import com.jetbrains.python.sdk.internal.PYTHON_MODULE_ID
+import com.jetbrains.python.fixtures.awaitPythonInterpreters
 import com.jetbrains.python.sdk.setPythonSdkForTests
 import com.jetbrains.python.allure.Layers
 import com.jetbrains.python.allure.Subsystems
@@ -21,6 +23,8 @@ import com.intellij.openapi.util.registry.Registry
 import com.intellij.openapi.vfs.StandardFileSystems
 import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.platform.eel.isWindows
+import com.intellij.platform.eel.provider.localEel
 import com.intellij.python.venv.sdk.flavors.VirtualEnvSdkFlavor
 import com.intellij.testFramework.ApplicationRule
 import com.intellij.testFramework.IndexingTestUtil
@@ -45,7 +49,7 @@ import org.junit.Test
 
 @Subsystems.Interpreters
 @Layers.Functional
-class PySdkPathsTest {
+internal class PySdkPathsTest {
 
   companion object {
     @JvmField
@@ -346,6 +350,40 @@ class PySdkPathsTest {
   }
 
   /**
+   * PY-93451: an SDK on an eel has a UNC home path. [PythonSdkType.loadAdditionalData] must keep its data
+   * when `python.eel.native` is off, because the IDE saves [PyInvalidSdk] as empty data.
+   */
+  @Test
+  fun eelSdkIsNotInvalidWhenEelNativeModeIsOff() {
+    mockPythonPluginDisposable()
+    Registry.get("python.eel.native").setValue(false, projectModel.project)
+    val sdkType = PythonSdkType.getInstance()
+
+    for (eelPath in listOf(
+      "\\\\wsl$\\Ubuntu\\home\\user\\venv\\bin\\python",
+      "//wsl.localhost/Ubuntu/home/user/venv/bin/python",
+    )) {
+      val sdk = ProjectJdkTable.getInstance().createSdk("WSL SDK", sdkType) as ProjectJdkImpl
+      runWriteActionAndWait {
+        sdk.sdkModificator.apply {
+          homePath = eelPath
+          sdkAdditionalData = PythonSdkAdditionalData(
+            PyFlavorAndData(PyFlavorData.Empty, VirtualEnvSdkFlavor.getInstance()),
+            projectModel.projectRootDir
+          )
+          commitChanges()
+        }
+      }
+      val element = Element("jdk")
+      sdk.writeExternal(element)
+      sdk.readExternal(element)
+
+      assertThat(sdk.sdkAdditionalData).describedAs(eelPath).isNotInstanceOf(PyInvalidSdk::class.java)
+      assertThat((sdk.sdkAdditionalData as PythonSdkAdditionalData).flavor).describedAs(eelPath).isEqualTo(VirtualEnvSdkFlavor.getInstance())
+    }
+  }
+
+  /**
    * PY-90400: the SDK's own binary skeletons (and bundled typeshed) live under `~/.cache`. When the
    * project's content root is an ancestor of that cache — e.g. in remote dev, where the whole home
    * directory is opened as the project — those SDK-owned roots sit under a module content root but
@@ -404,6 +442,7 @@ class PySdkPathsTest {
     mockPythonPluginDisposable()
     sdk.associateWith(moduleRoot)
 
+    awaitPythonInterpreters(projectModel.project)
     PythonSdkUpdater.updateVersionAndPathsSynchronouslyAndScheduleRemaining(sdk, null)
     ApplicationManager.getApplication().invokeAndWait { PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue() }
 
@@ -431,7 +470,12 @@ class PySdkPathsTest {
       FileUtil.createTempDirectory("my", "project", false).absolutePath
     )!!.also { deleteOnTearDown(it) }
 
-    val module = projectModel.createModule(name)
+    // A Python module, so the snapshot holds a Python project for it: the updater transfers roots only to a module whose
+    // Python project uses the SDK.
+    val module = runWriteActionAndWait {
+      projectModel.moduleManager.newModule(projectModel.projectRootDir.resolve("$name/$name.iml"), PYTHON_MODULE_ID)
+    }
+    IndexingTestUtil.waitUntilIndexesAreReady(projectModel.project)
     assertThat(PyUtil.getSourceRoots(module)).isEmpty()
 
     ModuleRootManager.getInstance(module).modifiableModel.apply {
@@ -450,9 +494,11 @@ class PySdkPathsTest {
 
       venv.createChildData(this, "pyvenv.cfg")  // the marker the venv environment provider looks for
 
-      val bin = venv.createChildDirectory(this, "bin")
+      // The layout of a real venv: the venv detection does not accept `bin` on Windows.
       // PythonEnvironment.detectPythonEnvironment requires an executable binary.
-      bin.createChildData(this, "python").toNioPath().toFile().setExecutable(true)
+      val (binDir, binary) = if (localEel.platform.isWindows) "Scripts" to "python.exe" else "bin" to "python"
+      val bin = venv.createChildDirectory(this, binDir)
+      bin.createChildData(this, binary).toNioPath().toFile().setExecutable(true)
 
       venv.createChildDirectory(this, "lib")
 
@@ -470,6 +516,7 @@ class PySdkPathsTest {
   }
 
   private fun updateSdkPaths(sdk: @NotNull Sdk) {
+    awaitPythonInterpreters(projectModel.project)
     PythonSdkUpdater.updateVersionAndPathsSynchronouslyAndScheduleRemaining(sdk, projectModel.project)
     ApplicationManager.getApplication().invokeAndWait { PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue() }
   }

@@ -93,7 +93,14 @@ class GpgSignConfigurableRow(val project: Project, val disposable: Disposable) {
   private fun updatePresentation() {
     statusLabel.text = getStatusLabelText()
 
-    val error = repoConfigs.values.mapNotNull { it.error }.firstOrNull()?.message
+    val configValues = repoConfigs.values
+    val loadingError = configValues.firstNotNullOfOrNull { it.error }
+    val error = when {
+      loadingError != null -> loadingError.message
+      configValues.any { it.value?.isEnabled == true } && secretKeys.value?.keys?.isEmpty() == true ->
+        message("settings.label.sign.gpg.commits.no.private.keys.text")
+      else -> null
+    }
     errorLabel.isVisible = error != null
     errorLabel.text = error
   }
@@ -130,6 +137,9 @@ class GpgSignConfigurableRow(val project: Project, val disposable: Disposable) {
       for (config in repoConfigs) {
         config.tryReload()
       }
+      if (repoConfigs.isNotEmpty()) {
+        secretKeys.tryReload()
+      }
     }
   }
 
@@ -154,18 +164,21 @@ class GpgSignConfigurableRow(val project: Project, val disposable: Disposable) {
     if (loadedKeys.size != keys.size) return ""
 
     val totalRepos = loadedKeys.count()
-    val configuredRepos = loadedKeys.filter { it.key != null }
-    val configuredKeys = configuredRepos.map { it.key!! }.toSet()
-    val hasNotConfigured = loadedKeys.any { it.key == null }
+    val configuredRepos = loadedKeys.filter { it.isEnabled }
+    val configuredKeys = configuredRepos.mapNotNull { it.key }.toSet()
+    val hasNullKeyRepos = configuredRepos.any { it.key == null }
 
     when {
-      configuredKeys.isEmpty() -> {
+      configuredRepos.isEmpty() -> {
         return message("settings.label.sign.gpg.commits.not.configured.text")
       }
-      hasNotConfigured -> {
+      totalRepos > configuredRepos.size -> {
         return message("settings.label.sign.gpg.commits.enabled.n.roots.of.m.text", configuredRepos.size, totalRepos)
       }
-      configuredKeys.size > 1 -> {
+      configuredKeys.isEmpty() -> {
+        return message("settings.label.sign.gpg.commits.enabled.no.key.selected.text")
+      }
+      configuredKeys.size > 1 || hasNullKeyRepos -> {
         return message("settings.label.sign.gpg.commits.enabled.different.keys.text")
       }
       else -> {

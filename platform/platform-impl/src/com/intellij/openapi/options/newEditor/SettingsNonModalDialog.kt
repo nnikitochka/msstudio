@@ -200,7 +200,7 @@ open class SettingsNonModalDialog @ApiStatus.Internal constructor(
     editor = SettingsEditor(
       frameDisposable, project, groups, configurable, filter,
       true,  // useLeaveState: auto-reset unmodified configurables when navigating back
-      ISettingsTreeViewFactory { f, g -> SettingsTreeView(f, g) },
+      ISettingsTreeViewFactory { f, g -> treeViewFactory(f, g) },
       spotlightPainterFactory,
       createModeAction(),
     )
@@ -289,6 +289,80 @@ open class SettingsNonModalDialog @ApiStatus.Internal constructor(
   protected open fun afterCancel() {
     exitActionType = ExitActionType.CANCEL
   }
+
+  /**
+   * Runs the same validation-aware cancel as the Cancel button — asks [editor] to discard
+   * changes and, if it agrees, marks the exit as canceled and closes the window. Exposed so
+   * subclasses can reuse it before navigating away from Settings entirely (e.g. Rider's
+   * "Manage Layers" button, added via [createAdditionalLeftSideActions]).
+   *
+   * @return `true` if the window was actually canceled and closed.
+   */
+  protected fun performCancel(e: AWTEvent?): Boolean {
+    if (!editor.cancel(e)) return false
+    afterCancel()
+    close()
+    return true
+  }
+
+  /**
+   * Extra [Action]s shown as buttons on the left side of the button panel, after Help. Override
+   * to add product-specific navigation the platform doesn't know about — e.g. Rider's
+   * "Manage Layers" button, which lived in the button row of the old modal dialog.
+   */
+  @ApiStatus.Internal
+  protected open fun createAdditionalLeftSideActions(): List<Action> = emptyList()
+
+  /**
+   * Creates the [SettingsTreeView] used by [editor]. Mirrors [SettingsDialog.treeViewFactory] —
+   * override to supply a custom tree view (e.g. Rider's `RiderSettingsTreeView`, which paints a
+   * per-configurable scope icon in the tree: a layers icon for ReSharper settings layers, a
+   * project icon otherwise).
+   */
+  @ApiStatus.Internal
+  protected open fun treeViewFactory(filter: SettingsFilter, groups: MutableList<out ConfigurableGroup>): SettingsTreeView {
+    return SettingsTreeView(filter, groups)
+  }
+
+  /**
+   * Creates the OK button from [action]. Mirrors [SettingsDialog.createJButtonForAction]'s
+   * ability to return a different button for a specific action — override to wrap [action] in an
+   * [com.intellij.openapi.ui.OptionAction] before delegating to
+   * [DialogWrapper.createJButtonForAction], which then builds a
+   * [com.intellij.ui.components.JBOptionButton] automatically (e.g. Rider's "Save to layer"
+   * dropdown, shown only for ReSharper settings pages).
+   */
+  @ApiStatus.Internal
+  protected open fun createOkButton(action: Action, rootPane: JRootPane?): JButton {
+    return DialogWrapper.createJButtonForAction(action, rootPane)
+  }
+
+  /**
+   * Mirrors [SettingsDialog.tryAddOptionsListener]: subscribes [colleague] to configurable
+   * selection changes in [editor], e.g. to keep a per-page dropdown (see [createOkButton]) in
+   * sync with the currently selected page.
+   */
+  @ApiStatus.Internal
+  protected fun tryAddOptionsListener(colleague: OptionsEditorColleague) {
+    editor.addOptionsListener(colleague)
+  }
+
+  /**
+   * The Configurable currently selected in the tree, if any. [tryAddOptionsListener] only
+   * notifies of selection *changes* from here on, so a colleague built (like the button in
+   * [createOkButton]) after the tree already made its first selection needs this to
+   * synchronize with that initial page instead of waiting for the next navigation.
+   */
+  @ApiStatus.Internal
+  protected fun getCurrentConfigurable(): Configurable? = editor.selectedConfigurable
+
+  /**
+   * Whether to show the Apply button. Override to suppress it for a product where a separate
+   * mid-session-commit action doesn't make sense — e.g. Rider, which instead commits via its
+   * OK/Save button (see [createOkButton]).
+   */
+  @ApiStatus.Internal
+  protected open fun isApplyButtonVisible(): Boolean = true
 
   // ── Lifecycle subscriptions ───────────────────────────────────────────────────
 
@@ -481,21 +555,17 @@ open class SettingsNonModalDialog @ApiStatus.Internal constructor(
     }
     okAction.putValue(DialogWrapper.DEFAULT_ACTION, true)
 
-    val okButton = DialogWrapper.createJButtonForAction(okAction,
-                                                        (activeWindow as? RootPaneContainer)?.rootPane)
+    val okButton = createOkButton(okAction, (activeWindow as? RootPaneContainer)?.rootPane)
 
     val cancelButton = DialogWrapper.createJButtonForAction(
       object : AbstractAction(CommonBundle.getCancelButtonText()) {
         override fun actionPerformed(e: ActionEvent) {
-          if (editor.cancel(e)) {
-            afterCancel()
-            close()
-          }
+          performCancel(e)
         }
       }, null)
 
     val rawApplyAction = editor.getApplyAction()
-    val applyButton = if (rawApplyAction != null) {
+    val applyButton = if (isApplyButtonVisible() && rawApplyAction != null) {
       val wrappedApply = object : AbstractAction() {
         init {
           putValue(Action.NAME, rawApplyAction.getValue(Action.NAME))
@@ -534,7 +604,10 @@ open class SettingsNonModalDialog @ApiStatus.Internal constructor(
       applyButton?.let { rightButtons.add(it) }
     }
 
-    val leftButtons = listOf(createHelpButton())
+    val leftButtons = listOf(createHelpButton()) +
+                      createAdditionalLeftSideActions().map { action ->
+                        DialogWrapper.createJButtonForAction(action, null)
+                      }
 
     val lrPanel = NonOpaquePanel(GridBagLayout())
     val bag = GridBag().setDefaultInsets(JBInsets.emptyInsets())

@@ -41,7 +41,7 @@ public class MockFontLayoutService extends FontLayoutService {
                                                 int start,
                                                 int end,
                                                 boolean isRtl) {
-    return new MockGlyphVector(Arrays.copyOfRange(chars, start, end), isRtl);
+    return new MockGlyphVector(font, Arrays.copyOfRange(chars, start, end), isRtl);
   }
 
   private double getCharWidth(int codePoint) {
@@ -89,12 +89,27 @@ public class MockFontLayoutService extends FontLayoutService {
 
   // doesn't handle surrogate pairs currently
   private final class MockGlyphVector extends AbstractMockGlyphVector {
+    private final Font myFont;
     private final char[] myChars;
     private final boolean myIsRtl;
+    private final Point2D.Double[] myGlyphPositions;
 
-    private MockGlyphVector(char[] chars, boolean isRtl) {
+    private MockGlyphVector(Font font, char[] chars, boolean isRtl) {
+      myFont = font;
       myChars = chars;
       myIsRtl = isRtl;
+      myGlyphPositions = new Point2D.Double[chars.length + 1];
+      myGlyphPositions[0] = new Point2D.Double();
+      double x = 0;
+      for (int i = 0; i < chars.length; i++) {
+        x += myCharWidthFunction == null ? myCharWidth : myCharWidthFunction.applyAsDouble(chars[getGlyphCharIndex(i)]);
+        myGlyphPositions[i + 1] = new Point2D.Double(x, 0);
+      }
+    }
+
+    @Override
+    public @NotNull Font getFont() {
+      return myFont;
     }
 
     @Override
@@ -109,16 +124,13 @@ public class MockFontLayoutService extends FontLayoutService {
 
     @Override
     public Point2D getGlyphPosition(int glyphIndex) {
-      double x = 0;
-      if (myCharWidthFunction == null) {
-        x = glyphIndex * myCharWidth;
-      }
-      else {
-        for (int i = 0; i < glyphIndex; i++) {
-          x += myCharWidthFunction.applyAsDouble(myChars[getGlyphCharIndex(i)]);
-        }
-      }
-      return new Point2D.Double(x, 0);
+      var position = myGlyphPositions[glyphIndex];
+      return new Point2D.Double(position.x, position.y);
+    }
+
+    @Override
+    public void setGlyphPosition(int glyphIndex, Point2D newPos) {
+      myGlyphPositions[glyphIndex].setLocation(newPos);
     }
 
     @Override

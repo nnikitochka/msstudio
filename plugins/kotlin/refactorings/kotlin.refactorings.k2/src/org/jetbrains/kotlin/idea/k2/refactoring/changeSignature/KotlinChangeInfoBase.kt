@@ -17,6 +17,11 @@ interface KotlinChangeInfoBase: ChangeInfo {
 
     fun getOldParameterIndex(oldParameterName: String): Int?
 
+    fun isValueParameterRemoved(): Boolean
+
+    /** Returns true when a retained value parameter gets a new type. Receivers and context parameters are not checked. */
+    fun isValueParameterRetyped(): Boolean
+
     val aNewReturnType: String?
 
     val aNewVisibility: KaSymbolVisibility

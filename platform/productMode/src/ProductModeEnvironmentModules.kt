@@ -26,24 +26,19 @@ object ProductModeEnvironmentModules {
       this["intellij.platform.frontend.split.baseline"] = mode.isFrontendProcess
       if (mode.isLight) {
         for (moduleName in listOf("intellij.platform.frontend.split", "intellij.platform.split", "intellij.platform.rpc",
-                                  "intellij.rd.client", "intellij.cwm.plugin.common")) {
+                                  "intellij.rd.client")) {
           this[moduleName] = false
         }
+        this["intellij.platform.debugger"] = false
         // the property is temporary
-        this["intellij.platform.debugger"] = getBooleanProperty("intellij.platform.light.mode.enable.debugger", false)
-        // the property is temporary
-        // execution is enabled in LIGHT_WITH_RD_CONNECTION, because `intellij.platform.frontend.split.connection` depends on it via `intellij.remoteDev.frontendProcessLauncher`
-        this["intellij.platform.execution"] = getBooleanProperty("intellij.platform.light.mode.enable.execution", true) || mode == ProductMode.LIGHT_WITH_RD_CONNECTION
+        this["intellij.platform.execution"] = getBooleanProperty("intellij.platform.light.mode.enable.execution", false)
         this["intellij.platform.split.connection"] = mode == ProductMode.LIGHT_WITH_RD_CONNECTION
       }
       else {
         this["intellij.platform.split"] = mode == ProductMode.FRONTEND || mode == ProductMode.BACKEND
         this["intellij.platform.frontend.split"] = mode == ProductMode.FRONTEND
       }
-      // this condition is a workaround for LSP-1549
-      if (mode != ProductMode.LANGUAGE_SERVER) {
-        this["intellij.platform.jps.build.dependencyGraph"] = providesBackend
-      }
+      this["intellij.platform.jps.build.dependencyGraph"] = providesBackend && mode != ProductMode.LANGUAGE_SERVER
     }
   }
 

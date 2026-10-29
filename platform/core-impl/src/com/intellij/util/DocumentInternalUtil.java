@@ -76,21 +76,9 @@ public final class DocumentInternalUtil {
       return ((DocumentImpl)document).getCore().snapshot();
     }
     if (document instanceof DocumentEx) {
-      return new DocumentSnapshotImpl(((DocumentEx)document).getDocText());
+      return new DocumentSnapshotImpl(((DocumentEx)document).getDocumentText());
     }
     return new DocumentSnapshotImpl(DocumentText.createText(document.getImmutableCharSequence()));
-  }
-
-  public static boolean isInsideSurrogatePair(@NotNull DocumentText documentText, int offset) {
-    return isSurrogatePair(documentText, offset - 1);
-  }
-
-  public static boolean isSurrogatePair(@NotNull DocumentText documentText, int offset) {
-    CharSequence text = documentText.cachedChars();
-    return offset >= 0 &&
-           offset + 1 < text.length() &&
-           Character.isHighSurrogate(text.charAt(offset)) &&
-           Character.isLowSurrogate(text.charAt(offset + 1));
   }
 
   private DocumentInternalUtil() {

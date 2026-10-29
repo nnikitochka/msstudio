@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use crate::merge::{is_rule_manifest, main_attribute_values, trim_entity_list};
 use crate::tests::golden::*;
 use crate::tests::testjar::{
-    AGENT_MANIFEST, RawEntry, Scratch, SourceEntry, agent_sources, digest, entry, entry_names, index_pointer, module_source,
-    module_source_with_manifest, module_source_with_manifest_text, pack, raw, read_entry, rule_manifest, write_raw_jar,
+    AGENT_MANIFEST, Scratch, SourceEntry, agent_sources, asymmetric, digest, entry, entry_names, index_pointer, module_source,
+    module_source_with_manifest, module_source_with_manifest_text, pack, pack_error, raw, read_entry, rule_manifest, write_raw_jar,
     write_zip_jar,
 };
 use crate::{EntryFilter, MANIFEST_ENTRY_NAME, ManifestMode, MergeOptions, MergeSpec, Source, duplicate_line};
@@ -16,13 +16,6 @@ fn spec(output: &str, sources: Vec<Source>) -> MergeSpec {
         output: output.into(),
         sources,
         ..MergeSpec::default()
-    }
-}
-
-fn pack_error(spec: &MergeSpec) -> String {
-    match spec.pack(&MergeOptions::default()) {
-        Ok(_) => panic!("the recipe for {} was accepted", spec.output.display()),
-        Err(error) => format!("{error:#}"),
     }
 }
 
@@ -390,10 +383,14 @@ fn a_rule_manifest_is_no_module_manifest() {
 #[test]
 fn a_rule_manifest_needs_a_build_graph_attribute_and_nothing_else() {
     assert!(is_rule_manifest(rule_manifest("@@community+//platform/a:a").as_bytes()));
-    assert!(is_rule_manifest(b"manifest-version: 1.0\r\ntarget-label: //a:a\r\n\r\nName: entry\r\nSHA-256-Digest: x\r\n"));
+    assert!(is_rule_manifest(
+        b"manifest-version: 1.0\r\ntarget-label: //a:a\r\n\r\nName: entry\r\nSHA-256-Digest: x\r\n"
+    ));
     assert!(!is_rule_manifest(b"Manifest-Version: 1.0\r\n\r\n"));
     assert!(!is_rule_manifest(b"Manifest-Version: 1.0\r\nCreated-By: singlejar\r\n\r\n"));
-    assert!(!is_rule_manifest(b"Manifest-Version: 1.0\r\nTarget-Label: //a:a\r\nMain-Class: com.example.Main\r\n\r\n"));
+    assert!(!is_rule_manifest(
+        b"Manifest-Version: 1.0\r\nTarget-Label: //a:a\r\nMain-Class: com.example.Main\r\n\r\n"
+    ));
     assert!(!is_rule_manifest(b"\xff\xfe"));
 }
 
@@ -512,11 +509,7 @@ fn pack_reads_the_local_extra_field_rather_than_the_central_one() {
         &scratch,
         "asymmetric.jar",
         &[
-            RawEntry {
-                local_extra: &[0x55, 0x54, 5, 0, 1, 1, 2, 3, 4],
-                central_extra: &[0x55, 0x54, 1, 0, 1],
-                ..raw("org/example/Wide.class", "the real bytes")
-            },
+            asymmetric("org/example/Wide.class", "the real bytes"),
             raw("org/example/Plain.class", "plain bytes"),
         ],
     );
@@ -544,25 +537,27 @@ fn residual_packing_rejects_native_entries() {
         "bin/pty4j-unix-spawn-helper",
         "lib/icudtl.dat",
     ] {
-        let source = write_zip_jar(&scratch, "native.jar", &[entry(name, "native")]);
-        let output = scratch.dir().join("result.jar");
-        let recipe = MergeSpec {
-            reject_native_entries: true,
-            ..spec(output.to_str().unwrap(), vec![Source::module(&source)])
-        };
+        let (recipe, output) = residual_recipe(&scratch, "native.jar", name);
         let error = pack_error(&recipe);
         assert!(error.contains("Kotlin packer"), "{name}: expected a native holdout, got {error}");
         // The writer drops its buffer on a failure, so the output holds no plausible part of a jar.
         assert_eq!(std::fs::metadata(&output).unwrap().len(), 0, "{name}: a failed pack wrote bytes");
     }
     // `.tbd` is a native only for natives mode, not for the residual check.
-    let source = write_zip_jar(&scratch, "stub.jar", &[entry("lib/native.tbd", "stub")]);
+    let (recipe, _) = residual_recipe(&scratch, "stub.jar", "lib/native.tbd");
+    recipe.pack(&MergeOptions::default()).unwrap();
+}
+
+/// The residual recipe of `result.jar` from the module jar `jar` with the one entry `name`. It returns the recipe and the
+/// path of its output.
+fn residual_recipe(scratch: &Scratch, jar: &str, name: &str) -> (MergeSpec, PathBuf) {
+    let source = write_zip_jar(scratch, jar, &[entry(name, "native")]);
     let output = scratch.dir().join("result.jar");
     let recipe = MergeSpec {
         reject_native_entries: true,
         ..spec(output.to_str().unwrap(), vec![Source::module(&source)])
     };
-    recipe.pack(&MergeOptions::default()).unwrap();
+    (recipe, output)
 }
 
 #[test]
@@ -573,7 +568,7 @@ fn pack_writes_no_index_pointer_for_an_empty_result() {
     let source = write_zip_jar(&scratch, "empty.jar", &[entry(".unmodified", "dropped")]);
     let (data, _) = pack(&scratch, spec("intellij.example.jar", vec![Source::module(&source)]));
     assert_eq!(index_pointer(&data), -1);
-    assert!(entry_names(&data).is_empty());
+    assert_eq!(entry_names(&data), Vec::<String>::new());
 }
 
 #[test]
@@ -704,23 +699,9 @@ fn a_merge_spec_can_move_between_threads() {
 #[cfg(unix)]
 #[test]
 fn a_failed_write_names_the_jar() {
-    const CHILD: &str = "JARPACK_TEST_FILE_SIZE_CHILD";
-    if std::env::var_os(CHILD).is_none() {
-        // The ignored SIGXFSZ stays ignored after `exec`. So a write past the limit fails with EFBIG and does not stop
-        // the child.
-        let output = std::process::Command::new("/bin/sh")
-            .args(["-c", r#"trap '' XFSZ && ulimit -f 2 && exec "$0" --exact "$1" --nocapture"#])
-            .arg(std::env::current_exe().unwrap())
-            .arg("merge::tests::a_failed_write_names_the_jar")
-            .env(CHILD, "1")
-            .output()
-            .unwrap();
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        assert!(
-            output.status.success() && stdout.contains(" 1 passed;"),
-            "the run under the file size limit failed:\n{stdout}\n{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
+    // The ignored SIGXFSZ stays ignored after `exec`. So a write past the limit fails with EFBIG and does not stop the
+    // child.
+    if testkit::rerun_under_shell("merge::tests::a_failed_write_names_the_jar", &["trap '' XFSZ && ulimit -f 2"]).is_none() {
         return;
     }
     let scratch = Scratch::new();

@@ -19,7 +19,7 @@ import com.intellij.openapi.editor.impl.caret.model.CaretRepaintMetrics
 import com.intellij.openapi.editor.impl.caret.model.CaretTick
 import com.intellij.openapi.editor.impl.view.animation.AnimationClock
 import com.intellij.openapi.editor.impl.view.animation.AnimationTimeMark
-import com.intellij.openapi.util.registry.Registry
+import com.intellij.openapi.editor.registry.EditorRegistry
 import com.intellij.ui.DrawUtil.isSimplifiedUI
 import com.intellij.util.concurrency.annotations.RequiresEdt
 import kotlinx.coroutines.CoroutineScope
@@ -72,7 +72,7 @@ internal class EditorCaretMutator internal constructor(
    * Adopts the settings and the caret measurements of the editor. The view has to reinit its own settings first,
    * because it measures the caret from a font cache that only its own reinit drops.
    */
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   fun reinitSettings() {
     settings.set(editor.caretAnimationSettings())
     val repaintMetrics = editor.view.caretRepaintMetrics
@@ -154,7 +154,7 @@ internal class EditorCaretMutator internal constructor(
     }
   }
 
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   fun caretMoved() {
     if (!editor.isPurePaintingMode && updateCursor.getAndSet(false)) {
       val placements = editor.caretPlacements()
@@ -192,7 +192,7 @@ internal class EditorCaretMutator internal constructor(
   /**
    * Produces one step on the calling thread, so that a settled move appears without waiting for the loop.
    */
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   private fun advanceNow(tick: CaretTick) {
     val step = advanceStep(prefetching = false, stopWhenIdle = false) {
       tick
@@ -344,7 +344,7 @@ internal class EditorCaretMutator internal constructor(
     val configuredBlinkPeriod = settings.caretBlinkPeriod.milliseconds
     val blinkPeriod = configuredBlinkPeriod.coerceAtLeast(MIN_BLINK_PERIOD)
     val blinksSmoothly = !shouldDisableAnimations() && settings.isSmoothCaretBlinking
-    val configuredMoveDuration = Registry.intValue("editor.smooth.caret.duration", 120)
+    val configuredMoveDuration = EditorRegistry.current().smoothCaretDurationMs()
     val moveDurationMs = configuredMoveDuration.coerceAtLeast(1)
     return CaretSettings(
       blinkPeriod = blinkPeriod,

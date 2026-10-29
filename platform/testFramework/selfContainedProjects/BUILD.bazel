@@ -109,13 +109,8 @@ jvm_library(
     deps = [
         # do not sort,
         "@lib//:kotlin-stdlib",
-        "//libraries/jetbrains/annotations",
-        "//libraries/jetbrains/annotations:annotations_test_lib",
         "//libraries/kotlinx/coroutines/core",
         "//libraries/kotlinx/coroutines/core:core_test_lib",
-        "@lib//:slf4j-api",
-        "//libraries/guava",
-        "//libraries/guava:guava_test_lib",
         "//libraries/junit6",
         "//libraries/junit6:junit6_test_lib",
         "//platform/build-scripts/downloader",
@@ -127,8 +122,6 @@ jvm_library(
         "//platform/testFramework:testFramework_test_lib",
         "//java/java-runtime:rt",
         "//java/java-runtime:rt_test_lib",
-        "//libraries/junit4",
-        "//libraries/junit4:junit4_test_lib",
     ],
 )
 ### auto-generated section `build intellij.platform.testFramework.selfContainedProjects.tests` end

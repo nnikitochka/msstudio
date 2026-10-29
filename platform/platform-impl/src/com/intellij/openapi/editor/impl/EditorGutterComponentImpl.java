@@ -77,7 +77,6 @@ import com.intellij.openapi.editor.ex.EditorEx;
 import com.intellij.openapi.editor.ex.EditorGutterComponentEx;
 import com.intellij.openapi.editor.ex.EditorGutterFreePainterAreaState;
 import com.intellij.openapi.editor.ex.EditorMarkupModel;
-import com.intellij.openapi.editor.ex.EditorSettingsExternalizable;
 import com.intellij.openapi.editor.ex.MarkupIterator;
 import com.intellij.openapi.editor.ex.RangeHighlighterEx;
 import com.intellij.openapi.editor.ex.util.EditorUIUtil;
@@ -94,6 +93,7 @@ import com.intellij.openapi.editor.markup.LineMarkerRenderer;
 import com.intellij.openapi.editor.markup.LineMarkerRendererEx;
 import com.intellij.openapi.editor.markup.RangeHighlighter;
 import com.intellij.openapi.editor.markup.TextAttributes;
+import com.intellij.openapi.editor.registry.EditorRegistry;
 import com.intellij.openapi.fileEditor.impl.EditorCompositeKt;
 import com.intellij.openapi.options.advanced.AdvancedSettings;
 import com.intellij.openapi.progress.EmptyProgressIndicator;
@@ -114,7 +114,6 @@ import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.Segment;
 import com.intellij.openapi.util.SystemInfo;
-import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.wm.impl.IdeGlassPaneImpl;
 import com.intellij.psi.PsiFile;
@@ -486,8 +485,7 @@ final class EditorGutterComponentImpl extends EditorGutterComponentEx
   }
 
   private void updateFoldingOutlineVisibility() {
-    var service = EditorSettingsExternalizable.getInstance();
-    var isFoldingOutlineShownOnlyOnHover = service != null && service.isFoldingOutlineShownOnlyOnHover();
+    var isFoldingOutlineShownOnlyOnHover = myEditor.getSettings().isFoldingOutlineShownOnlyOnHover();
 
     myAlphaContext.setVisible(
       !ExperimentalUI.isNewUI() ||
@@ -816,7 +814,7 @@ final class EditorGutterComponentImpl extends EditorGutterComponentEx
     if (!myEditor.getSettings().isCaretRowShown()) {
       return null;
     }
-    if (!Registry.is("highlight.caret.line.at.custom.fold") && isCaretAtCustomFolding()) {
+    if (!EditorRegistry.current().isCaretLineHighlightedAtCustomFold() && isCaretAtCustomFolding()) {
       return null;
     }
     if (myEditor.isStickyLinePainting()) {
@@ -1217,9 +1215,11 @@ final class EditorGutterComponentImpl extends EditorGutterComponentEx
     myLineToGutterRenderersCacheForLogicalLines = logicalLinesMatchVisualOnes();
     Int2ObjectMap<List<GutterMark>> lineToGutterRenderers = new Int2ObjectOpenHashMap<>();
     processGutterRangeHighlighters(0, myDocument.getTextLength(), highlighter -> {
-      GutterMark renderer = highlighter.getGutterIconRenderer();
+      GutterIconRenderer renderer = highlighter.getGutterIconRenderer();
       if (shouldBeShown(renderer) && isHighlighterVisible(highlighter)) {
-        int line = myEditor.offsetToVisualLine(highlighter.getStartOffset());
+        var offset = renderer.getVerticalAlignment() == GutterIconRenderer.VerticalAlignment.BETWEEN_LINES
+                     ? highlighter.getEndOffset() : highlighter.getStartOffset();
+        int line = myEditor.offsetToVisualLine(offset);
         List<GutterMark> renderers = lineToGutterRenderers.get(line);
         if (renderers == null) {
           renderers = new SmartList<>();
@@ -1777,7 +1777,8 @@ final class EditorGutterComponentImpl extends EditorGutterComponentEx
     boolean shown = isFoldingOutlineShown();
     double x = getFoldingMarkerCenterOffset2D();
 
-    if ((shown || myEditor.isInDistractionFreeMode() && Registry.is("editor.distraction.gutter.separator")) && myPaintBackground) {
+    if ((shown || myEditor.isInDistractionFreeMode() && EditorRegistry.current().isDistractionFreeGutterSeparatorShown()) &&
+        myPaintBackground) {
       g.setColor(getOutlineColor(false));
       LinePainter2D.paint(g, x, clip.y, x, clip.y + clip.height, StrokeType.CENTERED, getStrokeWidth());
     }
@@ -1890,7 +1891,7 @@ final class EditorGutterComponentImpl extends EditorGutterComponentEx
     double[] dyPoints = {y + baseHeight, y, y, y + baseHeight, y + height + (height < 0 ? 1 : 0)};
 
     if (ExperimentalUI.isNewUI()) {
-      if (height <= 0 && !EditorSettingsExternalizable.getInstance().isFoldingEndingsShown()) {
+      if (height <= 0 && !myEditor.getSettings().isFoldingEndingsShown()) {
         //do not paint folding endings in the new UI by default
         return;
       }
@@ -2292,7 +2293,7 @@ final class EditorGutterComponentImpl extends EditorGutterComponentEx
   private void updateFreePainters(@NotNull MouseEvent e) {
     if (!isLineMarkersShown() ||
         !ExperimentalUI.isNewUI() ||
-        !Registry.is("ide.gutter.update.free.markers.on.hover")) {
+        !EditorRegistry.current().isGutterFreeMarkersUpdatedOnHover()) {
       return;
     }
 
@@ -2319,7 +2320,16 @@ final class EditorGutterComponentImpl extends EditorGutterComponentEx
   }
 
   private static boolean debug() {
-    return Registry.is("ide.debug.gutter.area", false);
+    return EditorRegistry.current().isGutterAreaDebugEnabled();
+  }
+
+  /**
+   * Returns {@code true} when a registry value that the gutter paints differs between the two snapshots.
+   */
+  static boolean needsRepaint(@NotNull EditorRegistry oldRegistry, @NotNull EditorRegistry newRegistry) {
+    return oldRegistry.isCaretLineHighlightedAtCustomFold() != newRegistry.isCaretLineHighlightedAtCustomFold() ||
+           oldRegistry.isDistractionFreeGutterSeparatorShown() != newRegistry.isDistractionFreeGutterSeparatorShown() ||
+           oldRegistry.isGutterAreaDebugEnabled() != newRegistry.isGutterAreaDebugEnabled();
   }
 
   private GutterIconRenderer myCalculatingInBackground;
@@ -2940,7 +2950,7 @@ final class EditorGutterComponentImpl extends EditorGutterComponentEx
     ClickInfo clickInfo = myLastActionableClick;
     if (clickInfo == null) return;
     boolean[] removed = {false};
-    EdtScheduler.getInstance().schedule(Registry.intValue("actionSystem.popup.progress.icon.delay", 500), () -> {
+    EdtScheduler.getInstance().schedule(EditorRegistry.current().popupProgressIconDelayMs(), () -> {
       if (myLastActionableClick != clickInfo || removed[0]) return;
       clickInfo.myProgressVisualLine = info.visualLine;
       clickInfo.myProgressGutterMark = info.renderer;

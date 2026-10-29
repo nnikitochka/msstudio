@@ -146,7 +146,7 @@ class WebServerPageConnectionService {
     if (myState.isRequestedFileWithoutReferrerModified(modifiedFiles)) {
       return object : AsyncFileListener.ChangeApplier {
         override fun afterVfsChange() {
-          showGotItTooltip(modifiedFiles)
+          showGotItTooltipLater(modifiedFiles)
           myState.clear()
           val server = myServer
           server?.send<Any>(-1, RELOAD_PAGE_MESSAGE.retainedDuplicate(), null)
@@ -158,7 +158,7 @@ class WebServerPageConnectionService {
     return if (affectedClients.isEmpty()) null
     else object : AsyncFileListener.ChangeApplier {
       override fun afterVfsChange() {
-        showGotItTooltip(modifiedFiles)
+        showGotItTooltipLater(modifiedFiles)
         for ((requestedPage, affectedFiles) in affectedClients) {
           if (affectedFiles.isEmpty()) {
             LOGGER.debug("Reloading page for $requestedPage")
@@ -197,17 +197,34 @@ class WebServerPageConnectionService {
     myState.clientDisconnected(client)
   }
 
-  private fun showGotItTooltip(modifiedFiles: List<VirtualFile>) {
+  private fun showGotItTooltipLater(modifiedFiles: List<VirtualFile>) {
     val gotItTooltip = GotItTooltip(SERVER_RELOAD_TOOLTIP_ID, BuiltInServerBundle.message("reload.on.save.got.it.content"), myServer!!)
-    if (!gotItTooltip.canShow() || WebPreviewState.isPreviewOpened) return
+    if (!checkCanShowGotItTooltip(gotItTooltip)) return
+    ApplicationManager.getApplication().invokeLater {
+      showGotItTooltip(modifiedFiles, gotItTooltip)
+    }
+  }
+
+  /**
+   * Disposes [gotItTooltip] and returns `false` if the tooltip must not be shown.
+   */
+  private fun checkCanShowGotItTooltip(gotItTooltip: GotItTooltip): Boolean {
+    if (gotItTooltip.canShow() && !WebPreviewState.isPreviewOpened &&
+        WebBrowserManager.getInstance().webServerReloadMode === ReloadMode.RELOAD_ON_SAVE) {
+      return true
+    }
+    Disposer.dispose(gotItTooltip)
+    return false
+  }
+
+  private fun showGotItTooltip(modifiedFiles: List<VirtualFile>, gotItTooltip: GotItTooltip) {
+    // the state can change while the tooltip waits for EDT
+    if (!checkCanShowGotItTooltip(gotItTooltip)) return
 
     if (WebBrowserManager.BROWSER_RELOAD_MODE_DEFAULT !== ReloadMode.RELOAD_ON_SAVE) {
       Logger.getInstance(WebServerPageConnectionService::class.java).error(
         "Default value for " + BuiltInServerBundle.message("reload.on.save.got.it.title") + " has changed, tooltip is outdated.")
-      return
-    }
-    if (WebBrowserManager.getInstance().webServerReloadMode !== ReloadMode.RELOAD_ON_SAVE) {
-      // changed before gotIt was shown
+      Disposer.dispose(gotItTooltip)
       return
     }
 
@@ -325,7 +342,7 @@ class WebServerPageConnectionService {
 
       if (myFileListenerDisposable == null) {
         val disposable = Disposer.newDisposable(ApplicationManager.getApplication(), "RequestedPagesState.myFileListenerDisposable")
-        VirtualFileManager.getInstance().addAsyncFileListener(WebServerFileContentListener(), disposable)
+        VirtualFileManager.getInstance().addAsyncFileListenerBackgroundable(WebServerFileContentListener(), disposable)
         myFileListenerDisposable = disposable
       }
       if (reloadMode == ReloadMode.RELOAD_ON_CHANGE && myDocumentListenerDisposable == null) {

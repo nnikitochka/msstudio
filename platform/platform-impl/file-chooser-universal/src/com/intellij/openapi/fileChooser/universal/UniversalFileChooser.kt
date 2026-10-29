@@ -48,6 +48,7 @@ import com.intellij.openapi.util.Key
 import com.intellij.openapi.util.registry.Registry
 import com.intellij.openapi.util.text.HtmlBuilder
 import com.intellij.openapi.util.text.HtmlChunk
+import com.intellij.openapi.util.text.Strings
 import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.vfs.toNioPathOrNull
@@ -165,7 +166,7 @@ object UniversalFileChooser {
    */
   class Dialog(
     val project: Project,
-    parent: Component? = null,
+    private val parent: Component? = null,
     private val descriptor: FileChooserDescriptor,
     private val contributors: Collection<UniversalFileChooserContributor> = UniversalFileChooserContributor.EP_NAME.extensionList,
     private val persistLocation: Boolean = true,
@@ -182,20 +183,33 @@ object UniversalFileChooser {
 
     override fun choose(project: Project?, vararg toSelect: VirtualFile?): Array<out VirtualFile?> {
       val explicit = toSelect.firstOrNull()?.let { runCatching { it.toNioPath() }.getOrNull() }
-      mainPanel.preselect(explicit?.let { path -> suspend { path } })
-      if (this.showAndGet()) {
-        return toVirtualFiles(descriptor, this.project, mainPanel.getSelectedFiles()).toArray(VirtualFile.EMPTY_ARRAY)
-      }
-      return emptyArray()
+      val chosen = chooseWithValidation(explicit) ?: return emptyArray()
+      return chosen.toArray(VirtualFile.EMPTY_ARRAY)
     }
 
     override fun choose(toSelect: VirtualFile?, callback: Consumer<in MutableList<VirtualFile>>) {
       val explicit = toSelect?.let { runCatching { it.toNioPath() }.getOrNull() }
-      mainPanel.preselect(explicit?.let { path -> suspend { path } })
-      if (showAndGet()) {
-        val mutableList = mutableListOf<VirtualFile>()
-        mutableList.addAll(toVirtualFiles(descriptor, project, mainPanel.getSelectedFiles()))
-        callback.consume(mutableList)
+      val chosen = chooseWithValidation(explicit) ?: return
+      callback.consume(chosen.toMutableList())
+    }
+
+    /**
+     * Shows the dialog and converts the selection to virtual files.
+     * Validates the result with [validateChosenFiles] before it returns the files.
+     * When the validation fails, reopens the dialog and preselects the first selected file.
+     * Returns null when the user cancels the dialog.
+     */
+    private fun chooseWithValidation(toPreselect: Path?): List<VirtualFile>? {
+      var dialog = this
+      var preselect = toPreselect
+      while (true) {
+        dialog.mainPanel.preselect(preselect?.let { path -> suspend { path } })
+        if (!dialog.showAndGet()) return null
+        val selection = dialog.getSelectedFiles()
+        val chosen = toVirtualFiles(descriptor, project, selection)
+        if (validateChosenFiles(descriptor, project, chosen)) return chosen
+        preselect = selection.firstOrNull()
+        dialog = Dialog(project, parent, descriptor, contributors, persistLocation)
       }
     }
 
@@ -250,6 +264,38 @@ object UniversalFileChooser {
   private suspend fun toVirtualFile(path: Path): VirtualFile? {
     return withContext(Dispatchers.IO) {
       VfsUtil.findFile(path, true)
+    }
+  }
+
+  /**
+   * Checks [files] with [FileChooserDescriptor.validateSelectedFiles]. The validation can do I/O,
+   * so it runs on [Dispatchers.IO]. Callable from the EDT: there it shows a modal progress when the
+   * validation takes long, and no progress otherwise.
+   * When the validation fails, shows an error dialog and returns false.
+   */
+  private fun validateChosenFiles(descriptor: FileChooserDescriptor, project: Project, files: List<VirtualFile>): Boolean {
+    if (files.isEmpty()) return true
+    val array = files.toArray(VirtualFile.EMPTY_ARRAY)
+    val title = IdeBundle.message("universal.file.chooser.progress.validating.files")
+    try {
+      if (ApplicationManager.getApplication().isDispatchThread) {
+        val owner = if (project.isDefault) ModalTaskOwner.guess() else ModalTaskOwner.project(project)
+        runWithModalProgressBlocking(owner, title) {
+          withContext(Dispatchers.IO) { descriptor.validateSelectedFiles(array) }
+        }
+      }
+      else {
+        runBlockingMaybeCancellable {
+          withContext(Dispatchers.IO) { descriptor.validateSelectedFiles(array) }
+        }
+      }
+      return true
+    }
+    catch (e: Exception) {
+      rethrowControlFlowException(e)
+      val dialogTitle = descriptor.title ?: UIBundle.message("file.chooser.default.title")
+      Messages.showErrorDialog(project, e.message, dialogTitle)
+      return false
     }
   }
 
@@ -730,9 +776,19 @@ object UniversalFileChooser {
       return component.getUserData(FILE_VIEW_KEY)
     }
 
+    /** The running [updateOkEnabled] computation. Only the last one updates the OK button. */
+    private var okEnabledJob: Job? = null
+
     private fun updateOkEnabled() {
+      okEnabledJob?.cancel()
       val activeView = getActiveFileView()
-      okEnabledUpdater(activeView?.isOkEnabled() ?: false)
+      if (activeView == null) {
+        okEnabledUpdater(false)
+        return
+      }
+      okEnabledJob = scope.launch(Dispatchers.EDT + ModalityState.any().asContextElement()) {
+        okEnabledUpdater(activeView.computeOkEnabled())
+      }
     }
 
     private data class LocationData(
@@ -878,7 +934,7 @@ object UniversalFileChooser {
       val fileTree: NioFileSystemTree
       val roots: MutableList<String> = mutableListOf()
       private val environmentRestricted: Boolean = restrictRootsToProjectEnvironment
-      private val hasExtensionFilter: Boolean = descriptor.extensionFilter != null
+      private val extensionFilter: List<String>? = descriptor.extensionFilter?.second
       private val chooseFiles: Boolean = descriptor.isChooseFiles || descriptor.isChooseJarContents
       private val chooseFolders: Boolean = descriptor.isChooseFolders
 
@@ -1255,23 +1311,34 @@ object UniversalFileChooser {
         }
       }
 
-      fun isOkEnabled(): Boolean {
+      /**
+       * Computes whether the OK button can be enabled for the current selection. Call it on the
+       * EDT: the tree selection is read there, and the file checks then run with pure NIO on
+       * [Dispatchers.IO], so the EDT does not block.
+       */
+      suspend fun computeOkEnabled(): Boolean {
         // The path typed in the text field failed validation on the last OK attempt: keep OK
         // disabled until the user edits the field (see IJPL-253095 and setPathTextFieldError).
         if (pathTextFieldInvalid) return false
         val selected = getSelectedFiles()
-        return selected.isNotEmpty() && selected.all { file ->
-          if (file.parent == null) return@all false
-          val isDir = Files.isDirectory(file)
-          if (isDir) {
-            if (!chooseFolders) return@all false
-            if (hasExtensionFilter) return@all false
-          }
-          else {
-            if (!chooseFiles) return@all false
-          }
-          true
+        if (selected.isEmpty()) return false
+        return withContext(Dispatchers.IO) {
+          selected.all { file -> isSelectable(file, Files.isDirectory(file)) }
         }
+      }
+
+      /**
+       * Whether the user can choose [file]. A directory is selectable when the descriptor allows
+       * folders. The extension filter applies to files only, like the legacy
+       * [FileChooserDescriptor.isFileSelectable] (see IJPL-255793).
+       */
+      private fun isSelectable(file: Path, isDirectory: Boolean): Boolean {
+        if (file.parent == null) return false
+        if (isDirectory) return chooseFolders
+        if (!chooseFiles) return false
+        val extensions = extensionFilter ?: return true
+        val name = file.fileName?.toString() ?: return false
+        return extensions.any { Strings.endsWithIgnoreCase(name, ".$it") }
       }
 
       fun canDeleteSelectedFile(): Boolean {
@@ -1400,8 +1467,12 @@ object UniversalFileChooser {
                 return@withContext
               }
             }
+            // The typed path must satisfy the descriptor, like the tree selection does: a directory
+            // passes when folders are allowed, and the extension filter applies to files only.
+            val selectable = path != null && exists &&
+                             isSelectable(path, runCatching { Files.isDirectory(path) }.getOrDefault(false))
             runOnEdt {
-              if (path == null || !exists) {
+              if (path == null || !selectable) {
                 setPathTextFieldError(true)
                 if (pathTextField.isShowing) {
                   pathTextField.requestFocusInWindow()

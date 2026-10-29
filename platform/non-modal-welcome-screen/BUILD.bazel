@@ -120,6 +120,11 @@ jvm_library(
     ),
     module_name = "intellij.platform.ide.nonModalWelcomeScreen.tests",
     visibility = ["//visibility:public"],
+    runtime_deps = [
+        # do not sort,
+        "//platform/main/intellij.platform.monolith.main:monolith-main",
+        "//community-resources:customization",
+    ],
 )
 
 jvm_library(
@@ -145,6 +150,8 @@ jvm_library(
         "//platform/ide-core:ide-core_test_lib",
         "//platform/non-modal-welcome-screen/frontend:frontend_test_lib",
         "//platform/non-modal-welcome-screen/backend:backend_test_lib",
+        "//platform/main/intellij.platform.monolith.main:monolith-main_test_lib",
+        "//community-resources:customization_test_lib",
     ],
     deps = [
         # do not sort,
@@ -157,8 +164,6 @@ jvm_library(
         "//platform/project-frame:project-frame_test_lib",
         "//platform/core-api:core",
         "//platform/core-api:core_test_lib",
-        "//jps/model-api:model",
-        "//jps/model-api:model_test_lib",
         "//platform/lang-core",
         "//platform/lang-core:lang-core_test_lib",
         "//platform/projectModel-api:projectModel",
@@ -183,10 +188,6 @@ jvm_library(
         "//platform/welcome-screen-impl:welcomeScreen-impl_test_lib",
         "//libraries/junit6",
         "//libraries/junit6:junit6_test_lib",
-        "//platform/statistics",
-        "//platform/statistics:statistics_test_lib",
-        "//libraries/kotlinx/serialization/core",
-        "//libraries/kotlinx/serialization/core:core_test_lib",
         "//platform/platform-impl/rpc",
         "//fleet/rpc",
         "//fleet/rpc:rpc_test_lib",

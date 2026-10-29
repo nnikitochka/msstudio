@@ -88,7 +88,7 @@ jvm_library(
     ),
     module_name = "intellij.javaFX.community.tests",
     visibility = ["//visibility:public"],
-    exports = ["//plugins/javaFX"],
+    runtime_deps = ["//platform/main/intellij.platform.monolith.main:monolith-main"],
 )
 
 jvm_library(
@@ -102,25 +102,16 @@ jvm_library(
         ],
         allow_empty = True,
     ),
-    associates = [
-        "//plugins/javaFX/community",
-        "//plugins/javaFX/community:community_test_lib",
-    ],
+    module_name = "intellij.javaFX.community.tests",
     visibility = ["//visibility:public"],
-    exports = [
-        # do not sort,
-        "//plugins/javaFX",
-        "//plugins/javaFX:javaFX_test_lib",
-    ],
     runtime_deps = [
         # do not sort,
         ":community-tests",
         "//platform/platform-impl:ide-impl_test_lib",
+        "//platform/main/intellij.platform.monolith.main:monolith-main_test_lib",
     ],
     deps = [
         # do not sort,
-        "//plugins/javaFX",
-        "//plugins/javaFX:javaFX_test_lib",
         "//platform/analysis-api:analysis",
         "//platform/analysis-api:analysis_test_lib",
         "//platform/code-style-api:codeStyle",
@@ -176,6 +167,8 @@ jvm_library(
         "//java/java-impl-refactorings:impl-refactorings_test_lib",
         "//libraries/fastutil",
         "//libraries/fastutil:fastutil_test_lib",
+        "//plugins/javaFX/community",
+        "//plugins/javaFX/community:community_test_lib",
         "//plugins/javaFX:javaFX-tests",
         "//plugins/javaFX:javaFX-tests_test_lib",
         "//java/java-syntax:syntax",

@@ -39,8 +39,6 @@ import com.jetbrains.python.psi.types.PyCallableType;
 import com.jetbrains.python.psi.types.PyStructuralType;
 import com.jetbrains.python.psi.types.PyTypeRendererFeature;
 import com.jetbrains.python.psi.types.TypeEvalContext;
-
-import static com.jetbrains.python.psi.types.PyTypeUtilKt.isAnyOrUnknown;
 import one.util.streamex.StreamEx;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
@@ -57,6 +55,8 @@ import java.util.Set;
 import java.util.function.Function;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+
+import static com.jetbrains.python.psi.types.PyTypeUtilKt.isAnyOrUnknown;
 
 @ApiStatus.Internal
 public final class PyParameterInfoUtils {
@@ -453,7 +453,8 @@ public final class PyParameterInfoUtils {
     PyPsiUtils.assertValid(callExpression);
 
     final TypeEvalContext typeEvalContext = TypeEvalContext.codeAnalysis(callExpression.getProject(), callExpression.getContainingFile());
-    final PyCallableType callableType = callAndCallee.getSecond();
+    final PyCallableType callableType =
+      PyCallExpressionHelper.expandParamSpecArgsKwargs(callExpression, callAndCallee.getSecond(), typeEvalContext);
 
     List<PyCallableParameter> parameters = callableType.getUnpackedParameters(typeEvalContext);
     if (parameters == null) return null;

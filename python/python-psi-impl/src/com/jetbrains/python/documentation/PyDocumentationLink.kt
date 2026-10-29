@@ -8,7 +8,6 @@ import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFileSystemItem
 import com.intellij.psi.util.PsiTreeUtil
 import com.intellij.psi.util.QualifiedName
-import com.jetbrains.python.documentation.PyDocumentationLink.toPossibleClass
 import com.jetbrains.python.PyNames
 import com.jetbrains.python.highlighting.PyHighlighter
 import com.jetbrains.python.psi.PyClass
@@ -21,8 +20,8 @@ import com.jetbrains.python.psi.PyTypeAliasStatement
 import com.jetbrains.python.psi.PyUtil
 import com.jetbrains.python.psi.types.PyClassLikeType
 import com.jetbrains.python.psi.types.PyClassType
-import com.jetbrains.python.psi.types.PyType
 import com.jetbrains.python.psi.types.PyLegacyDocstringTypeParser
+import com.jetbrains.python.psi.types.PyType
 import com.jetbrains.python.psi.types.PyUnionType
 import com.jetbrains.python.psi.types.TypeEvalContext
 import com.jetbrains.python.psi.types.isNoneType
@@ -100,6 +99,26 @@ object PyDocumentationLink {
     val text = pyClass?.qualifiedName?.takeUnless { it.isEmpty() }
                  ?.let { HtmlChunk.link("$TOOLTIP_ELEMENT_LINK_PREFIX$it", displayName) }
                ?: HtmlChunk.text(displayName)
+    return styledTypeName(type, text)
+  }
+
+  /** Renders [typeName] with the same highlighting as [toPossibleClassTooltipLink], but without a link. */
+  @JvmStatic
+  fun toPossibleClassText(typeName: @Nls String, anchor: PsiElement, context: TypeEvalContext): HtmlChunk {
+    val type = resolveNamedClassType(typeName, anchor, context)
+    return styledTypeName(type, HtmlChunk.text(typeName))
+  }
+
+  /** Renders [typeName] with the same highlighting as [toPossibleClassTooltipLink] for [type], but without a link. */
+  @JvmStatic
+  fun toPossibleClassText(type: PyClassLikeType, typeName: @Nls String, anchor: PsiElement, context: TypeEvalContext): HtmlChunk {
+    val pyClass = (type as? PyClassType)?.pyClass?.takeUnless { type.isNoneType }
+    return if (pyClass != null) styledReference(HtmlChunk.text(typeName), pyClass)
+    else toPossibleClassText(typeName, anchor, context)
+  }
+
+  private fun styledTypeName(type: PyType?, text: HtmlChunk): HtmlChunk {
+    val pyClass = (type as? PyClassType)?.pyClass
     return when {
       type.isNoneType -> styledSpan(text, PyHighlighter.PY_KEYWORD)
       pyClass != null -> styledReference(text, pyClass)

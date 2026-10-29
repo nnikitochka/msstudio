@@ -21,11 +21,19 @@ jps_test(
 
 ### auto-generated section `dev intellij.configurationScript` start
 dev_dist_plugin(
+    content_modules = [
+        # do not sort,
+        "intellij.configurationScript.backend",
+        "intellij.configurationScript.execution",
+    ],
     descriptor = "resources/META-INF/plugin.xml",
     jars = {
         "lib/configurationScript.jar": ["intellij.configurationScript"],
     },
     main_module = "intellij.configurationScript",
+    mode_refused_content_modules = {
+        "frontend": ["intellij.configurationScript.backend"],
+    },
 )
 ### auto-generated section `dev intellij.configurationScript` end
 
@@ -57,18 +65,15 @@ jvm_library(
         "//platform/util-ex",
         "//platform/analysis-impl",
         "//platform/core-impl",
-        "//json/backend",
         "//platform/lang-api:lang",
         "//platform/platform-impl:ide-impl",
         "//platform/ide-core",
         "//platform/workspace/jps",
-        "//platform/execution-impl",
         "//platform/configuration-store-impl:configurationStore-impl",
         "//platform/object-serializer",
         "//platform/service-container",
         "//libraries/snakeyaml-engine",
         "//platform/util/jdom",
-        "//platform/execution",
     ],
 )
 
@@ -92,27 +97,31 @@ jvm_library(
         "//platform/util-ex:util-ex_test_lib",
         "//platform/analysis-impl:analysis-impl_test_lib",
         "//platform/core-impl:core-impl_test_lib",
-        "//json/backend:backend_test_lib",
         "//platform/lang-api:lang_test_lib",
         "//platform/platform-impl:ide-impl_test_lib",
         "//platform/ide-core:ide-core_test_lib",
         "//platform/workspace/jps:jps_test_lib",
-        "//platform/execution-impl:execution-impl_test_lib",
         "//platform/configuration-store-impl:configurationStore-impl_test_lib",
         "//platform/object-serializer:object-serializer_test_lib",
         "//platform/service-container:service-container_test_lib",
         "//libraries/snakeyaml-engine:snakeyaml-engine_test_lib",
         "//platform/util/jdom:jdom_test_lib",
-        "//platform/execution:execution_test_lib",
     ],
 )
+### auto-generated section `build intellij.configurationScript` end
 
+### auto-generated section `plugin intellij.configurationScript` start
 ij_plugin(
     name = "configuration-script_plugin",
     descriptor_module = ":configuration-script",
+    content_modules = [
+        # do not sort,
+        "//plugins/configuration-script/backend",
+        "//plugins/configuration-script/execution",
+    ],
     visibility = ["//visibility:public"],
 )
-### auto-generated section `build intellij.configurationScript` end
+### auto-generated section `plugin intellij.configurationScript` end
 
 ### auto-generated section `iml intellij.configurationScript` start
 exports_files(
@@ -204,7 +213,12 @@ jvm_library(
     ),
     module_name = "intellij.configurationScript.tests",
     visibility = ["//visibility:public"],
-    runtime_deps = ["//xml/plugin"],
+    runtime_deps = [
+        # do not sort,
+        "//platform/main/intellij.platform.monolith.main:monolith-main",
+        "//community-resources:customization",
+        "//xml/plugin",
+    ],
 )
 
 jvm_library(
@@ -227,13 +241,13 @@ jvm_library(
         # do not sort,
         ":configurationScript-tests",
         "//platform/platform-impl:ide-impl_test_lib",
+        "//platform/main/intellij.platform.monolith.main:monolith-main_test_lib",
+        "//community-resources:customization_test_lib",
         "//xml/plugin:plugin_test_lib",
     ],
     deps = [
         # do not sort,
         "@lib//:kotlin-stdlib",
-        "//libraries/kotlin/reflect",
-        "//libraries/kotlin/reflect:reflect_test_lib",
         "//platform/analysis-api:analysis",
         "//platform/analysis-api:analysis_test_lib",
         "//platform/core-api:core",
@@ -244,8 +258,6 @@ jvm_library(
         "//platform/projectModel-api:projectModel_test_lib",
         "//platform/util",
         "//platform/util:util_test_lib",
-        "//platform/util-ex",
-        "//platform/util-ex:util-ex_test_lib",
         "//platform/analysis-impl",
         "//platform/analysis-impl:analysis-impl_test_lib",
         "//libraries/assertj-core",
@@ -257,30 +269,20 @@ jvm_library(
         "//platform/lang-api:lang",
         "//platform/lang-api:lang_test_lib",
         "//platform/platform-impl:ide-impl",
-        "//platform/workspace/jps",
-        "//platform/workspace/jps:jps_test_lib",
-        "//platform/execution-impl",
-        "//platform/execution-impl:execution-impl_test_lib",
         "//platform/testFramework",
         "//platform/testFramework:testFramework_test_lib",
         "//platform/testFramework/extensions:testExtensions",
         "//platform/testFramework/extensions:testExtensions_test_lib",
         "//plugins/yaml/backend",
         "//plugins/yaml/backend:backend_test_lib",
-        "//platform/configuration-store-impl:configurationStore-impl",
-        "//platform/configuration-store-impl:configurationStore-impl_test_lib",
-        "//platform/object-serializer",
-        "//platform/object-serializer:object-serializer_test_lib",
         "//libraries/jackson3/jackson:libraries-jackson3",
         "//libraries/jackson3/jackson:libraries-jackson3_test_lib",
-        "//platform/service-container",
-        "//platform/service-container:service-container_test_lib",
         "//libraries/snakeyaml-engine",
         "//libraries/snakeyaml-engine:snakeyaml-engine_test_lib",
-        "//platform/util/jdom",
-        "//platform/util/jdom:jdom_test_lib",
         "//platform/execution",
         "//platform/execution:execution_test_lib",
+        "//plugins/configuration-script/execution",
+        "//plugins/configuration-script/execution:execution_test_lib",
         "//libraries/junit4",
         "//libraries/junit4:junit4_test_lib",
         "//java/plugin",

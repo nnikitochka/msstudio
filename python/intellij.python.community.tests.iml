@@ -9,8 +9,8 @@
         <compilerArguments>
           <stringArguments>
             <stringArg name="jvmTarget" arg="25" />
-            <stringArg name="apiVersion" arg="2.4" />
-            <stringArg name="languageVersion" arg="2.4" />
+            <stringArg name="apiVersion" arg="2.5" />
+            <stringArg name="languageVersion" arg="2.5" />
           </stringArguments>
         </compilerArguments>
       </configuration>
@@ -44,6 +44,12 @@
     <orderEntry type="module" module-name="intellij.platform.workspace.storage" scope="TEST" />
     <orderEntry type="module" module-name="intellij.python.psi" scope="TEST" />
     <orderEntry type="module" module-name="intellij.python.community.impl" scope="TEST" />
+    <orderEntry type="module" module-name="intellij.python.refactoring" scope="TEST" />
+    <orderEntry type="module" module-name="intellij.python.codeInsight" scope="TEST" />
+    <orderEntry type="module" module-name="intellij.python.sourceRoots" scope="TEST" />
+    <orderEntry type="module" module-name="intellij.python.navigation" scope="TEST" />
+    <orderEntry type="module" module-name="intellij.python.spellchecker" scope="TEST" />
+    <orderEntry type="module" module-name="intellij.python.testing.codeInsight" scope="TEST" />
     <orderEntry type="module" module-name="intellij.platform.structureView.plugin" scope="RUNTIME" />
     <orderEntry type="module" module-name="intellij.platform.todo.plugin" scope="RUNTIME" />
     <orderEntry type="module" module-name="intellij.platform.testRunner.plugin" scope="RUNTIME" />
@@ -151,6 +157,7 @@
     <orderEntry type="module" module-name="intellij.platform.todo.backend" scope="TEST" />
     <orderEntry type="module" module-name="intellij.platform.statistics" scope="TEST" />
     <orderEntry type="module" module-name="intellij.platform.statistics.testFramework" scope="TEST" />
+    <orderEntry type="module" module-name="intellij.python.pyrefly" scope="TEST" />
     <orderEntry type="module" module-name="intellij.python.community.communityOnly" scope="RUNTIME" />
     <orderEntry type="module" module-name="intellij.json.backend" scope="TEST" />
     <orderEntry type="module" module-name="intellij.python.community.aliasProvider" scope="RUNTIME" />
@@ -170,10 +177,14 @@
     <orderEntry type="module" module-name="intellij.python.pyright" scope="TEST" />
     <orderEntry type="module" module-name="intellij.python.zuban" scope="TEST" />
     <orderEntry type="module" module-name="intellij.python.zuban.common" scope="TEST" />
+    <orderEntry type="module" module-name="intellij.python.zuban.frontend" scope="RUNTIME" />
+    <orderEntry type="module" module-name="intellij.python.zuban.plugin" scope="RUNTIME" />
     <orderEntry type="module" module-name="intellij.python.lsp.core.common" scope="TEST" />
     <orderEntry type="module" module-name="intellij.toml.core" scope="TEST" />
     <orderEntry type="module" module-name="intellij.python.community.impl.poetry.backend" scope="TEST" />
+    <orderEntry type="module" module-name="intellij.platform.monolith.main" scope="RUNTIME" />
     <orderEntry type="module" module-name="intellij.python.requirements.backend" scope="TEST" />
+    <orderEntry type="module" module-name="intellij.platform.scratch.plugin" scope="TEST" />
   </component>
   <component name="TestModuleProperties" production-module="intellij.python.community.impl" />
 </module>

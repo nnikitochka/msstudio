@@ -102,6 +102,7 @@ import static com.intellij.openapi.vcs.changes.ui.ChangesGroupingSupport.MODULE_
 import static com.intellij.openapi.vcs.changes.ui.ChangesGroupingSupport.REPOSITORY_GROUPING;
 import static com.intellij.openapi.vcs.changes.ui.VcsTreeModelData.all;
 import static com.intellij.openapi.vcs.changes.ui.VcsTreeModelData.allUnder;
+import static com.intellij.openapi.vcs.changes.ui.VcsTreeModelData.exactlySelected;
 import static com.intellij.openapi.vcs.changes.ui.VcsTreeModelData.selected;
 import static com.intellij.ui.tree.TreePathUtil.toTreePathArray;
 import static com.intellij.util.ui.ThreeStateCheckBox.State;
@@ -120,6 +121,13 @@ public abstract class ChangesTree extends Tree implements UiCompatibleDataProvid
   public static final @NotNull TreeStateStrategy<?> ALWAYS_RESET = new AlwaysResetTreeStateStrategy();
   public static final @NotNull TreeStateStrategy<?> ALWAYS_KEEP = new AlwaysKeepTreeStateStrategy();
   public static final @NotNull TreeStateStrategy<?> KEEP_NON_EMPTY = new KeepNonEmptyTreeStateStrategy();
+  /**
+   * Resets the tree state when the tree had no nodes before the update, and keeps the tree state in other cases.
+   * <p>
+   * Unlike {@link #KEEP_NON_EMPTY}, it keeps a tree with all nodes collapsed and no selection.
+   * The saved state of such a tree is empty.
+   */
+  public static final @NotNull TreeStateStrategy<?> RESET_ONLY_EMPTY_TREE = new ResetOnlyEmptyTreeStrategy();
   public static final @NotNull TreeStateStrategy<?> KEEP_SELECTED_OBJECTS = new KeepSelectedObjectsStrategy();
 
   protected final @NotNull Project myProject;
@@ -176,6 +184,7 @@ public abstract class ChangesTree extends Tree implements UiCompatibleDataProvid
   private @NotNull TreeExpander myTreeExpander = new MyTreeExpander();
 
   private boolean myModelUpdateInProgress;
+  private boolean myTreeStateRestoreInProgress;
   private AWTEvent myEventProcessingInProgress;
 
   private final UpdateScaleHelper scaleHelper = new UpdateScaleHelper();
@@ -215,7 +224,7 @@ public abstract class ChangesTree extends Tree implements UiCompatibleDataProvid
     installCheckBoxClickHandler();
 
     installTreeLinkHandler(nodeRenderer);
-    SmartExpander.installOn(this);
+    SmartExpander.installOn(this, () -> !myTreeStateRestoreInProgress);
 
     myGroupingSupport = installGroupingSupport();
 
@@ -276,6 +285,10 @@ public abstract class ChangesTree extends Tree implements UiCompatibleDataProvid
         if (path == null) return false;
 
         setSelectionPath(path);
+        if (path.getLastPathComponent() instanceof ChangesBrowserStructuralNode<?> node && node.getHasInclusion()) {
+          toggleStructuralNodes(List.of(node));
+          return true;
+        }
         List<Object> selected = getIncludableUserObjects(selected(ChangesTree.this));
         boolean exclude = toggleChanges(selected);
         logInclusionToggleEvents(exclude, event);
@@ -543,6 +556,21 @@ public abstract class ChangesTree extends Tree implements UiCompatibleDataProvid
     return myModelUpdateInProgress;
   }
 
+  /**
+   * The saved state already holds the paths that {@link SmartExpander} expanded.
+   * Without the guard, it expands the only child of a restored path, even if the user collapsed that child.
+   */
+  private void applyTreeState(@NotNull TreeState state, boolean scrollToSelection) {
+    myTreeStateRestoreInProgress = true;
+    try {
+      state.setScrollToSelection(scrollToSelection);
+      state.applyTo(this);
+    }
+    finally {
+      myTreeStateRestoreInProgress = false;
+    }
+  }
+
   public void resetTreeState() {
     // expanding lots of nodes is a slow operation (and result is not very useful)
     if (TreeUtil.hasManyNodes(this, EXPAND_NODES_THRESHOLD)) {
@@ -767,7 +795,24 @@ public abstract class ChangesTree extends Tree implements UiCompatibleDataProvid
   }
 
   protected @NotNull State getNodeStatus(@NotNull ChangesBrowserNode<?> node) {
+    if (node instanceof ChangesBrowserStructuralNode<?> structuralNode && structuralNode.getHasInclusion()) {
+      ChangesBrowserNode<?> changeNode = structuralNode.getChangeNode();
+      return structuralNode.getInclusionState(changeNode != null ? getNodeStatus(changeNode) : State.NOT_SELECTED);
+    }
     return myNodeStatusCache.computeIfAbsent(node, this::computeNodeStatus);
+  }
+
+  /**
+   * Includes all nodes when one of them is not included, and excludes them otherwise. The enclosing files update their state when the
+   * inclusion model reports the change.
+   */
+  private void toggleStructuralNodes(@NotNull List<? extends ChangesBrowserStructuralNode<?>> nodes) {
+    boolean include = ContainerUtil.exists(nodes, node -> getNodeStatus(node) != State.SELECTED);
+    for (ChangesBrowserStructuralNode<?> node : nodes) {
+      node.setIncluded(include);
+    }
+    myNodeStatusCache.clear();
+    repaint();
   }
 
   private @NotNull State computeNodeStatus(@NotNull ChangesBrowserNode<?> node) {
@@ -812,6 +857,7 @@ public abstract class ChangesTree extends Tree implements UiCompatibleDataProvid
   }
 
   protected boolean isIncludable(@NotNull ChangesBrowserNode<?> node) {
+    if (node instanceof ChangesBrowserStructuralNode<?> structuralNode && !structuralNode.getHasInclusion()) return false;
     return isInclusionVisible(node) && isInclusionEnabled(node);
   }
 
@@ -840,6 +886,12 @@ public abstract class ChangesTree extends Tree implements UiCompatibleDataProvid
 
     @Override
     public void actionPerformed(@NotNull AnActionEvent e) {
+      List<ChangesBrowserNode<?>> exactSelection = exactlySelected(ChangesTree.this).iterateRawNodes().toList();
+      if (!exactSelection.isEmpty() && ContainerUtil.all(exactSelection, node -> node instanceof ChangesBrowserStructuralNode<?> structuralNode &&
+                                                                                structuralNode.getHasInclusion())) {
+        toggleStructuralNodes(ContainerUtil.map(exactSelection, node -> (ChangesBrowserStructuralNode<?>)node));
+        return;
+      }
       List<Object> changes = getIncludableUserObjects(!isSelectionEmpty() ? selected(ChangesTree.this) : all(ChangesTree.this));
       if (changes.isEmpty()) return;
       boolean exclude = toggleChanges(changes);
@@ -1010,8 +1062,7 @@ public abstract class ChangesTree extends Tree implements UiCompatibleDataProvid
     @Override
     public void restoreState(@NotNull ChangesTree tree, TreeState state, boolean scrollToSelection) {
       if (state != null) {
-        state.setScrollToSelection(scrollToSelection);
-        state.applyTo(tree);
+        tree.applyTreeState(state, scrollToSelection);
       }
     }
   }
@@ -1025,8 +1076,24 @@ public abstract class ChangesTree extends Tree implements UiCompatibleDataProvid
     @Override
     public void restoreState(@NotNull ChangesTree tree, TreeState state, boolean scrollToSelection) {
       if (state != null && !state.isEmpty()) {
-        state.setScrollToSelection(scrollToSelection);
-        state.applyTo(tree);
+        tree.applyTreeState(state, scrollToSelection);
+      }
+      else {
+        tree.resetTreeState();
+      }
+    }
+  }
+
+  private static class ResetOnlyEmptyTreeStrategy implements TreeStateStrategy<TreeState> {
+    @Override
+    public TreeState saveState(@NotNull ChangesTree tree) {
+      return tree.isEmpty() ? null : TreeState.createOn(tree, true, true);
+    }
+
+    @Override
+    public void restoreState(@NotNull ChangesTree tree, TreeState state, boolean scrollToSelection) {
+      if (state != null) {
+        tree.applyTreeState(state, scrollToSelection);
       }
       else {
         tree.resetTreeState();

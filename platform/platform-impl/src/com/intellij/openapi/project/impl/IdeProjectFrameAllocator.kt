@@ -91,10 +91,12 @@ import com.intellij.psi.PsiManager
 import com.intellij.toolWindow.computeToolWindowBeans
 import com.intellij.ui.ScreenUtil
 import com.intellij.util.PlatformUtils
+import com.intellij.util.StartupUiGate
 import com.intellij.util.TimeoutUtil
 import com.intellij.util.concurrency.annotations.RequiresEdt
 import com.intellij.util.messages.SimpleMessageBusConnection
 import com.intellij.util.ui.accessibility.ScreenReader
+import com.intellij.openapi.wm.impl.EarlyProjectFrame
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CompletableJob
@@ -365,6 +367,7 @@ internal class IdeProjectFrameAllocator(
           (project as ComponentManagerEx).getCoroutineScope().launch(startUpContextElementToPass + rootTask()) {
             val frameHelper = deferredProjectFrameHelper.await()
             launch {
+              StartupUiGate.awaitEditorsShown()
               installStatusBarWidgetsAndUpdateTitle(frameHelper = frameHelper, project = project, frameLoadingJob = job)
             }
 
@@ -400,16 +403,22 @@ internal class IdeProjectFrameAllocator(
         if (!frame.isVisible) {
           throw CancellationException("Pre-allocated frame was already closed")
         }
+        val shownEarlyAt = EarlyProjectFrame.shownAtOf(frame)
         val frameHelper =
           IdeProjectFrameHelper(frame = frame, loadingState = loadingState, projectFrameTypeId = frameSettings.projectFrameTypeId)
         completeFrameAndCloseOnCancel(frameHelper) {
-          if (options.forceOpenInNewFrame) {
+          if (options.forceOpenInNewFrame || shownEarlyAt != 0L) {
             frameHelper.updateFullScreenState(frameSettings.frameInfo.fullScreen)
           }
           span("ProjectFrameHelper.init") {
             frameHelper.init()
           }
           frameHelper.setInitBounds(frameSettings.frameInfo.bounds)
+          // the frame is visible already, so the new root pane gets its bounds here and not with the first menu fill
+          frame.validate()
+        }
+        if (shownEarlyAt != 0L) {
+          FUSProjectHotStartUpMeasurer.frameBecameVisible(shownEarlyAt)
         }
       }
       else {
@@ -456,6 +465,7 @@ internal class IdeProjectFrameAllocator(
   private fun getFrame(): IdeFrameImpl? {
     return options.frame
            ?: (serviceIfCreated<WindowManager>() as? WindowManagerImpl)?.removeAndGetRootFrame()
+           ?: EarlyProjectFrame.take()
   }
 
   private suspend fun getRecentProjectMetaInfo(): RecentProjectMetaInfo? {
@@ -783,16 +793,24 @@ private suspend fun restoreEditors(
       }
     }
     if (editorState == null) {
+      StartUpMeasurer.addInstantEvent("no editors to restore")
+      StartupUiGate.markEditorsShown()
       serviceAsync<StartUpPerformanceService>().editorRestoringTillHighlighted()
       return@coroutineScope
     }
 
-    span("editor restoring") {
-      editorComponent.createEditors(state = editorState)
-    }
+    try {
+      span("editor restoring") {
+        editorComponent.createEditors(state = editorState)
+      }
 
-    span("editor reopening post-processing", Dispatchers.UI) {
-      focusSelectedEditor(editorComponent)
+      span("editor reopening post-processing", Dispatchers.UI) {
+        focusSelectedEditor(editorComponent)
+      }
+    }
+    finally {
+      // the rest of the frame UI waits for the restored editor, its focus included
+      StartupUiGate.markEditorsShown()
     }
   }
 }
@@ -1149,7 +1167,7 @@ private suspend fun openProjectViewIfNeeded(project: Project, toolWindowInitJob:
   }
 }
 
-@RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+@RequiresEdt
 private fun restoreStartupEditorFocus(project: Project, restore: ProjectViewStartupFocusRestore) {
   val focusOwner = restore.focusOwner
   val currentFocusOwner = KeyboardFocusManager.getCurrentKeyboardFocusManager().focusOwner
@@ -1186,7 +1204,7 @@ private val PROJECT_VIEW_STARTUP_READY_TIMEOUT = 5.seconds
  * nothing here to focus. Where that is only because it has not been opened *yet*, the claim is already known to be given up by the time
  * it is, and it is opened focused instead.
  */
-@RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+@RequiresEdt
 private fun focusProjectViewIfOpened(project: Project) {
   if (project.isDisposed) {
     return

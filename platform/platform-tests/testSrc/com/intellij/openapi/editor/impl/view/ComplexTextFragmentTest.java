@@ -1,9 +1,11 @@
 // Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.openapi.editor.impl.view;
 
+import com.intellij.openapi.editor.NullGraphics2D;
 import com.intellij.openapi.editor.impl.FontInfo;
 import com.intellij.testFramework.AbstractMockGlyphVector;
 import com.intellij.testFramework.MockFontLayoutService;
+import com.intellij.ui.Graphics2DDelegate;
 import com.intellij.util.ArrayUtil;
 import org.jetbrains.annotations.NotNull;
 import org.junit.Test;
@@ -15,7 +17,9 @@ import java.awt.Shape;
 import java.awt.font.FontRenderContext;
 import java.awt.font.GlyphVector;
 import java.awt.geom.Point2D;
+import java.awt.image.BufferedImage;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Stream;
 
 import static com.intellij.openapi.editor.impl.EditorModelFixture.TEST_CHAR_WIDTH;
@@ -23,6 +27,7 @@ import static com.intellij.openapi.editor.impl.EditorModelFixture.TEST_DESCENT;
 import static com.intellij.openapi.editor.impl.EditorModelFixture.TEST_LINE_HEIGHT;
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertThrows;
 
 public class ComplexTextFragmentTest {
   @Test
@@ -94,6 +99,31 @@ public class ComplexTextFragmentTest {
     assertSubFragmentOffsetMapping(rtl().glyph(0, 10).noGlyph().glyph(10, 20).glyph(20, 30));
   }
 
+  @Test
+  public void testDrawingCacheClearedAfterFailure() {
+    var fontLayoutService = FontLayoutService.getInstance();
+    FontLayoutService.setInstance(new MockFontLayoutService(TEST_CHAR_WIDTH, TEST_LINE_HEIGHT, TEST_DESCENT));
+    var graphics = new BufferedImage(20, 20, BufferedImage.TYPE_INT_RGB).createGraphics();
+    try {
+      var fontInfo = createFontInfo();
+      var fragment = new ComplexTextFragment(new char[]{'a'}, 0, 1, false, fontInfo, null);
+      var failingGraphics = new Graphics2DDelegate(graphics) {
+        @Override
+        public void drawGlyphVector(GlyphVector glyphVector, float x, float y) {
+          throw new IllegalStateException("Cannot draw the glyph vector");
+        }
+      };
+      fragment.draw(0, 0, 0, 1).accept(failingGraphics);
+      assertThrows(IllegalStateException.class, () -> ComplexTextFragment.flushDrawingCache(failingGraphics));
+      ComplexTextFragment.flushDrawingCache(graphics);
+    }
+    finally {
+      ComplexTextFragment.flushDrawingCache(new NullGraphics2D(new Rectangle(20, 20)));
+      graphics.dispose();
+      FontLayoutService.setInstance(fontLayoutService);
+    }
+  }
+
   private static void assertCaretPositionsForGlyphVector(MyGlyphVector gv, int... expectedPositions) {
     FontLayoutService.setInstance(new MockFontLayoutService(TEST_CHAR_WIDTH, TEST_LINE_HEIGHT, TEST_DESCENT) {
       @NotNull
@@ -106,7 +136,7 @@ public class ComplexTextFragmentTest {
     try {
       int length = gv.getNumChars();
       char[] text = new char[length];
-      FontInfo fontInfo = new FontInfo(Font.MONOSPACED, 1, Font.PLAIN, false, new FontRenderContext(null, false, false));
+      FontInfo fontInfo = createFontInfo();
       ComplexTextFragment fragment = new ComplexTextFragment(text, 0, length, (gv.getLayoutFlags() & GlyphVector.FLAG_RUN_RTL) != 0,
                                                              fontInfo, null);
       int[] charPositions = new int[length];
@@ -118,6 +148,12 @@ public class ComplexTextFragmentTest {
     finally {
       FontLayoutService.setInstance(null);
     }
+  }
+
+  private static @NotNull FontInfo createFontInfo() {
+    Font font = new Font(Font.MONOSPACED, Font.PLAIN, 1);
+    FontRenderContext context = new FontRenderContext(null, false, false);
+    return new FontInfo(font, 1, false, Set.of(), context);
   }
 
   private static void assertEndVisualColumnForGlyphVector(MyGlyphVector gv, float x, boolean expectedLeansRight) {
@@ -132,7 +168,7 @@ public class ComplexTextFragmentTest {
     try {
       int length = gv.getNumChars();
       char[] text = new char[length];
-      FontInfo fontInfo = new FontInfo(Font.MONOSPACED, 1, Font.PLAIN, false, new FontRenderContext(null, false, false));
+      FontInfo fontInfo = createFontInfo();
       ComplexTextFragment fragment = new ComplexTextFragment(text, 0, length, (gv.getLayoutFlags() & GlyphVector.FLAG_RUN_RTL) != 0,
                                                              fontInfo, null);
       VisualColumn column = fragment.xToVisualColumn(0, x);
@@ -156,7 +192,7 @@ public class ComplexTextFragmentTest {
     try {
       // logical text "a<surrogate pair>b", one glyph per code point
       char[] text = {'a', '\uD83D', '\uDE00', 'b'};
-      FontInfo fontInfo = new FontInfo(Font.MONOSPACED, 1, Font.PLAIN, false, new FontRenderContext(null, false, false));
+      FontInfo fontInfo = createFontInfo();
       ComplexTextFragment fragment = new ComplexTextFragment(text, 0, text.length, (gv.getLayoutFlags() & GlyphVector.FLAG_RUN_RTL) != 0,
                                                              fontInfo, null);
       LineFragment window = fragment.subFragment(3, 4); // the trailing 'b'
@@ -174,6 +210,7 @@ public class ComplexTextFragmentTest {
     return new MyGlyphVector(true, new Integer[0], new Integer[0]);
   }
 
+  /// @noinspection SameParameterValue
   private static MyGlyphVector glyph(int xStart, int xEnd) {
     return new MyGlyphVector(false, new Integer[]{xStart}, new Integer[]{xEnd - xStart});
   }

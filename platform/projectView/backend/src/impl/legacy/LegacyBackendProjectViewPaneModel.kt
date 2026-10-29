@@ -280,7 +280,7 @@ private class LegacyBackendProjectViewPaneModel(
    * gives all the keys the copy/paste/delete handlers need, including the pane's own
    * [com.intellij.openapi.actionSystem.PlatformDataKeys.DELETE_ELEMENT_PROVIDER] choice.
    */
-  @RequiresEdt(generateAssertion = false /* IJPL-115548 */)
+  @RequiresEdt
   private fun selectionDataContext(nodeIds: List<Long>): DataContext {
     return CustomizedDataContext.withSnapshot(DataContext.EMPTY_CONTEXT) { sink ->
       sink[CommonDataKeys.PROJECT] = project
@@ -562,8 +562,9 @@ private class AbstractProjectViewPaneStateManager(
     val isLeaf = withContext(Dispatchers.UI) {
       treeModel.isLeaf(node)
     }
+    val modelNode = requireNotNull(TreeUtil.getUserObject(node)) { "The node has a null user object: $node" }
     return readAction {
-      buildProjectViewNodeModel(id, LegacyProjectViewNodeUserObject(nodeByModelNode)) { nodeBuilder ->
+      buildProjectViewNodeModel(id, LegacyProjectViewNodeUserObject(modelNode)) { nodeBuilder ->
         nodeBuilder.buildPresentation { presentationBuilder ->
           buildNodePresentation(node, presentationBuilder, isLeaf)
         }
@@ -984,6 +985,8 @@ private data class LegacyProjectViewNode(
 private data class LegacyProjectViewNodeUserObject(
   val modelNode: Any,
 ) : ProjectViewNodeUserObject, PathElementIdProvider {
+  override val name: String = (modelNode as? PresentableNodeDescriptor<*>)?.name ?: ""
+
   override fun getVirtualFile(): VirtualFile? {
     return (modelNode as? AbstractTreeNode<*>)?.getVirtualFileForNodeOrItsPSI()
   }

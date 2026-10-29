@@ -1,13 +1,13 @@
 package com.intellij.database.datagrid;
 
 import com.intellij.database.extractors.DisplayType;
+import com.intellij.database.run.ui.ResultViewFactory;
 import com.intellij.database.run.ui.grid.GridSearchSession;
 import com.intellij.database.run.ui.table.LocalFilterState;
 import com.intellij.find.FindModel;
 import com.intellij.find.SearchSession;
 import com.intellij.lang.Language;
 import com.intellij.openapi.Disposable;
-import com.intellij.util.concurrency.annotations.RequiresEdt;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -23,6 +23,10 @@ import java.util.function.Consumer;
 
 public interface ResultView extends CoreResultView, GridModel.Listener<GridRow, GridColumn>, GridSearchSession.Listener, Disposable,
                                     LocalFilterState.Listener, ColumnHierarchyListener {
+  /**
+   * The component that shows the view's main cells and receives its focus and input.
+   * {@link ResultViewFactory#wrap} returns the component that goes into the grid layout.
+   */
   @NotNull
   JComponent getComponent();
 
@@ -54,30 +58,12 @@ public interface ResultView extends CoreResultView, GridModel.Listener<GridRow, 
 
   void restoreColumnsOrder(Map<Integer, ModelIndex<GridColumn>> expectedToModel);
 
+  /** Whether the view has an active editor in any component that renders its cells. */
   boolean isEditing();
 
-  /**
-   * Whether the view has an active editor anywhere, including a region it renders as a separate component.
-   * {@link #isEditing()} answers for one component only, because Swing requires it to match that component's editor.
-   */
-  default boolean isEditingAnywhere() {
-    return isEditing();
-  }
-
-  /** Returns the components this view renders cells in, such as a table and its pinned-column strip. */
-  @RequiresEdt
-  default @NotNull List<Component> getCellComponents() {
-    return List.of(getComponent());
-  }
-
-  /** Whether {@code component} is one of the components this view renders cells in. */
-  @RequiresEdt
-  default boolean isCellComponent(@Nullable Component component) {
-    if (component == null) return false;
-    for (var cellComponent : getCellComponents()) {
-      if (component == cellComponent) return true;
-    }
-    return false;
+  /** The row under the mouse pointer, as a row of the view (a grid column while transposed), or -1 when there is none. */
+  default int getHoveredRow() {
+    return -1;
   }
 
   boolean isMultiEditingAllowed();
@@ -150,6 +136,10 @@ public interface ResultView extends CoreResultView, GridModel.Listener<GridRow, 
   void reinitSettings();
 
   default void setVisibleRowCount(int v) {
+  }
+
+  /** Whether the columns share the width of the view instead of keeping their own widths. */
+  default void setFitColumnsToWidth(boolean v) {
   }
 
   default void showRowNumbers(boolean v) {

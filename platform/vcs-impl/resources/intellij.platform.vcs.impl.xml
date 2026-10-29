@@ -4,7 +4,6 @@
 
   <!-- region Generated dependencies - run `Generate Product Layouts` to regenerate -->
   <dependencies>
-    <module name="intellij.platform.backend"/>
     <module name="fleet.rpc"/>
     <module name="intellij.libraries.caffeine"/>
     <module name="intellij.libraries.fastutil"/>
@@ -53,8 +52,6 @@
     <module name="intellij.platform.lang.core"/>
     <module name="intellij.platform.lang.impl"/>
     <module name="intellij.platform.lvcs"/>
-    <module name="intellij.platform.polySymbols"/>
-    <module name="intellij.platform.polySymbols.backend"/>
     <module name="intellij.platform.project"/>
     <module name="intellij.platform.projectModel"/>
     <module name="intellij.platform.projectModel.impl"/>
@@ -116,8 +113,8 @@
 
     <vcsStartupActivity implementation="com.intellij.vcs.commit.CommitModeManager$MyStartupActivity"/>
 
-    <projectService serviceInterface="com.intellij.diff.tools.combined.CombinedDiffManager"
-                    serviceImplementation="com.intellij.openapi.vcs.changes.actions.diff.CombinedDiffManagerImpl"/>
+    <diff.combinedGoToChangePopupProvider implementation="com.intellij.openapi.vcs.changes.actions.diff.VcsCombinedDiffGoToChangePopupProvider"/>
+
     <intentionAction>
       <language/>
       <className>com.intellij.openapi.vcs.intentions.SelectedBlockHistoryIntention</className>

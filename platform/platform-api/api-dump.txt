@@ -896,7 +896,6 @@ e:com.intellij.ide.browsers.BrowserFamily
 - java.lang.Enum
 - com.intellij.openapi.util.Iconable
 - sf:CHROME:com.intellij.ide.browsers.BrowserFamily
-- sf:EXPLORER:com.intellij.ide.browsers.BrowserFamily
 - sf:FIREFOX:com.intellij.ide.browsers.BrowserFamily
 - sf:SAFARI:com.intellij.ide.browsers.BrowserFamily
 - createBrowserSpecificSettings():com.intellij.ide.browsers.BrowserSpecificSettings
@@ -3327,6 +3326,8 @@ c:com.intellij.openapi.ui.ComponentWithBrowseButton
 - addBrowseFolderListener(java.lang.String,java.lang.String,com.intellij.openapi.project.Project,com.intellij.openapi.fileChooser.FileChooserDescriptor,com.intellij.openapi.ui.TextComponentAccessor,Z):V
 - addFileSaverDialog(com.intellij.openapi.project.Project,com.intellij.openapi.fileChooser.FileSaverDescriptor,com.intellij.openapi.ui.TextComponentAccessor):V
 - dispose():V
+- getBaseline(I,I):I
+- getBaselineResizeBehavior():java.awt.Component$BaselineResizeBehavior
 - getButton():com.intellij.openapi.ui.FixedSizeButton
 - f:getChildComponent():javax.swing.JComponent
 - p:getDefaultIcon():javax.swing.Icon
@@ -6328,24 +6329,14 @@ a:com.intellij.ui.GroupedElementsRenderer$Tree
 f:com.intellij.ui.GuiUtils
 - <init>():V
 - s:colorToHex(java.awt.Color):java.lang.String
-- s:constructFieldWithBrowseButton(com.intellij.ui.TextFieldWithHistory,java.awt.event.ActionListener):javax.swing.JPanel
-- s:constructFieldWithBrowseButton(javax.swing.JComponent,java.awt.event.ActionListener):javax.swing.JPanel
 - s:createUndoableTextField():javax.swing.JTextField
 - s:createVerticalStrut():java.awt.Component
 - s:enableChildren(java.awt.Component,Z,javax.swing.JComponent[]):V
-- s:enableChildren(Z,java.awt.Component[]):V
-- s:getDisplayedMnemonic(java.lang.String):C
-- s:getDisplayedMnemonicIndex(java.lang.String):I
 - s:getSizeByChars(I,javax.swing.JComponent):java.awt.Dimension
-- s:getTextWithoutMnemonicEscaping(java.lang.String):java.lang.String
 - s:installVisibilityReferent(javax.swing.JComponent,javax.swing.JComponent):V
-- s:installVisibilityReferents(javax.swing.JComponent,javax.swing.JComponent[]):V
 - s:invokeLaterIfNeeded(java.lang.Runnable,com.intellij.openapi.application.ModalityState):V
-- s:iterateChildren(java.awt.Component,java.util.function.Consumer,javax.swing.JComponent[]):V
-- s:removePotentiallyLeakingReferences(java.awt.Container):V
 - s:replaceJSplitPaneWithIDEASplitter(javax.swing.JComponent):V
 - s:replaceJSplitPaneWithIDEASplitter(javax.swing.JComponent,Z):V
-- s:showComponents(Z,java.awt.Component[]):V
 c:com.intellij.ui.HighlightableCellRenderer
 - com.intellij.ui.HighlightableComponent
 - javax.swing.ListCellRenderer
@@ -9953,41 +9944,13 @@ a:com.intellij.ui.table.AdditionalTableHeader
 - pa:setTable(javax.swing.JTable):V
 - setVisible(Z):V
 a:com.intellij.ui.table.AdditionalTableHeader$ColumnsControllerPanel
-- javax.swing.JPanel
-- javax.swing.event.TableColumnModelListener
-- p:autoRun:I
-- p:myPreferredSize:java.awt.Dimension
+- com.intellij.ui.table.ColumnHeaderController
 - <init>(javax.swing.JTable):V
-- columnAdded(javax.swing.event.TableColumnModelEvent):V
-- columnMarginChanged(javax.swing.event.ChangeEvent):V
-- columnMoved(javax.swing.event.TableColumnModelEvent):V
-- columnRemoved(javax.swing.event.TableColumnModelEvent):V
-- columnSelectionChanged(javax.swing.event.ListSelectionEvent):V
-- a:computeMyPreferredSize():java.awt.Dimension
 - a:createColumn(I):com.intellij.ui.table.AdditionalTableHeader$ColumnsControllerPanel$AdditionalPanel
-- f:detach():V
-- f:getColumns():java.util.LinkedList
-- pf:getMyPreferredSize():java.awt.Dimension
 - f:getTable():javax.swing.JTable
-- pf:getTableColumnModel():javax.swing.table.TableColumnModel
-- pf:getTableModel():javax.swing.table.TableModel
-- pf:isCorrectModel():Z
-- pf:placeComponents():V
-- pf:setMyPreferredSize(java.awt.Dimension):V
-- pf:update():V
-- a:updateColumns():V
 a:com.intellij.ui.table.AdditionalTableHeader$ColumnsControllerPanel$AdditionalPanel
-- javax.swing.JPanel
-- java.beans.PropertyChangeListener
+- com.intellij.ui.table.ColumnHeaderController$ColumnPanel
 - <init>(com.intellij.ui.table.AdditionalTableHeader$ColumnsControllerPanel,javax.swing.table.TableColumn):V
-- a:detach():V
-- f:getMyHeight():I
-- f:getMyWidth():I
-- f:getTableColumn():javax.swing.table.TableColumn
-- propertyChange(java.beans.PropertyChangeEvent):V
-- f:setMyHeight(I):V
-- f:setMyWidth(I):V
-- a:updateHeight():V
 e:com.intellij.ui.table.AdditionalTableHeader$Position
 - java.lang.Enum
 - sf:INLINE:com.intellij.ui.table.AdditionalTableHeader$Position
@@ -10019,6 +9982,39 @@ c:com.intellij.ui.table.BaseTableView
 - s:store(com.intellij.ide.util.PropertiesComponent,java.lang.String,javax.swing.JTable):V
 - s:storeWidth(com.intellij.ide.util.PropertiesComponent,java.lang.String,javax.swing.table.TableColumnModel):V
 - s:storeWidth(java.util.function.BiConsumer,javax.swing.table.TableColumnModel):V
+a:com.intellij.ui.table.ColumnHeaderController
+- javax.swing.JPanel
+- javax.swing.event.TableColumnModelListener
+- p:autoRun:I
+- p:myPreferredSize:java.awt.Dimension
+- columnAdded(javax.swing.event.TableColumnModelEvent):V
+- columnMarginChanged(javax.swing.event.ChangeEvent):V
+- columnMoved(javax.swing.event.TableColumnModelEvent):V
+- columnRemoved(javax.swing.event.TableColumnModelEvent):V
+- columnSelectionChanged(javax.swing.event.ListSelectionEvent):V
+- a:computeMyPreferredSize():java.awt.Dimension
+- a:createColumn(I):com.intellij.ui.table.ColumnHeaderController$ColumnPanel
+- f:detach():V
+- f:getColumns():java.util.LinkedList
+- pf:getMyPreferredSize():java.awt.Dimension
+- pf:getTableColumnModel():javax.swing.table.TableColumnModel
+- pf:getTableModel():javax.swing.table.TableModel
+- pf:isCorrectModel():Z
+- pf:placeComponents():V
+- pf:setMyPreferredSize(java.awt.Dimension):V
+- pf:update():V
+- a:updateColumns():V
+a:com.intellij.ui.table.ColumnHeaderController$ColumnPanel
+- javax.swing.JPanel
+- java.beans.PropertyChangeListener
+- a:detach():V
+- f:getMyHeight():I
+- f:getMyWidth():I
+- f:getTableColumn():javax.swing.table.TableColumn
+- propertyChange(java.beans.PropertyChangeEvent):V
+- f:setMyHeight(I):V
+- f:setMyWidth(I):V
+- a:updateHeight():V
 c:com.intellij.ui.table.JBTable
 - javax.swing.JTable
 - com.intellij.ui.ComponentWithExpandableItems

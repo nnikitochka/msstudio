@@ -144,11 +144,13 @@ private fun createPlatformLayout(
   for (customizer in productLayout.platformLayoutSpec) {
     customizer(layout)
   }
+
   val contentModuleFilter = createContentModuleFilter(
     project = outputProvider.findRequiredModule(productProperties.applicationInfoModule).project,
     productProperties = productProperties,
     outputProvider = outputProvider,
     bundledPluginModules = { bundledPluginModules },
+    bypassFilter = productProperties.loadAllBundledPluginsWithModularLoader,
   )
 
   addModule(UTIL_RT_JAR, productLayout = productLayout, layout = layout)

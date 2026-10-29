@@ -30,7 +30,7 @@ import com.intellij.platform.util.coroutines.flow.mapStateIn
 import com.intellij.psi.PsiDocumentManager
 import com.intellij.terminal.JBTerminalSystemSettingsProviderBase
 import com.intellij.terminal.TerminalTitle
-import com.intellij.terminal.actions.TerminalActionUtil
+import com.intellij.terminal.actions.TerminalPlatformDataKeys
 import com.intellij.terminal.frontend.fus.TerminalCommandCompletionStatistics
 import com.intellij.terminal.frontend.fus.TerminalFusCursorPainterListener
 import com.intellij.terminal.frontend.fus.TerminalFusFirstOutputListener
@@ -486,7 +486,8 @@ class TerminalViewImpl(
   }
 
   private fun listenPanelSizeChanges() {
-    component.addComponentListener(object : ComponentAdapter() {
+    // Top components shrink the editor without resizing the whole panel, so listen to the editor's container.
+    terminalPanel.layeredPane.addComponentListener(object : ComponentAdapter() {
       override fun componentResized(e: ComponentEvent) {
         sendResizeEvent()
       }
@@ -768,7 +769,7 @@ class TerminalViewImpl(
   }
 
   private inner class TerminalPanel(initialContent: Editor) : BorderLayoutPanel(), UiDataProvider, TerminalPanelMarker {
-    private val layeredPane = TerminalLayeredPane(initialContent)
+    val layeredPane = TerminalLayeredPane(initialContent)
     private var curEditor: Editor = initialContent
     private var topComponentsPanel: JPanel? = null
 
@@ -799,7 +800,7 @@ class TerminalViewImpl(
 
     override fun uiDataSnapshot(sink: DataSink) {
       sink[TerminalView.DATA_KEY] = this@TerminalViewImpl
-      sink[TerminalActionUtil.EDITOR_KEY] = curEditor
+      sink[TerminalPlatformDataKeys.EDITOR_KEY] = curEditor
       sink[TerminalInput.DATA_KEY] = terminalInput
       sink[TerminalOutputModel.DATA_KEY] = outputModels.active.value
       sink[TerminalSearchController.KEY] = terminalSearchController

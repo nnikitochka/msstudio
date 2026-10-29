@@ -30,8 +30,9 @@ import kotlin.io.path.inputStream
 
 // we cannot use the same approach as we generate JSON scheme because we should load option classes only in a lazy manner
 // that's why we don't use snakeyaml TypeDescription approach to load
+@ApiStatus.Internal
 @Service(Service.Level.PROJECT)
-internal class ConfigurationFileManager(project: Project): Disposable {
+class ConfigurationFileManager(project: Project): Disposable {
   private val clearableLazyValues = ContainerUtil.createConcurrentList<() -> Unit>()
 
   private val yamlData = SynchronizedClearableLazy {
@@ -125,7 +126,8 @@ internal fun doRead(reader: Reader): MappingNode? {
 }
 
 // todo check parent?
-internal fun isConfigurationFile(file: VirtualFile) = isConfigurationFile(file.nameSequence)
+@ApiStatus.Internal
+fun isConfigurationFile(file: VirtualFile): Boolean = isConfigurationFile(file.nameSequence)
 
 private const val filePrefix = "intellij."
 private val fileExtensions = listOf("yaml", "yml", "json")
