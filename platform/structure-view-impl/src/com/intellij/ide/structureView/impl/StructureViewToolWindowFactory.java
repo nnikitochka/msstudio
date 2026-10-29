@@ -6,9 +6,15 @@ import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.wm.ToolWindow;
 import com.intellij.openapi.wm.ToolWindowFactory;
+import com.intellij.util.PlatformUtils;
 import org.jetbrains.annotations.NotNull;
 
 final class StructureViewToolWindowFactory implements ToolWindowFactory, DumbAware {
+  @Override
+  public boolean isApplicable(@NotNull Project project) {
+    return !"MSStudio".equals(PlatformUtils.getPlatformPrefix());
+  }
+
   @Override
   public void createToolWindowContent(@NotNull Project project, @NotNull ToolWindow toolWindow) {
     ((StructureViewFactoryImpl)StructureViewFactory.getInstance(project)).initToolWindow(toolWindow);

@@ -70,6 +70,7 @@ import com.intellij.ui.content.ContentManager;
 import com.intellij.ui.content.ContentManagerEvent;
 import com.intellij.ui.content.ContentManagerListener;
 import com.intellij.util.ObjectUtils;
+import com.intellij.util.PlatformUtils;
 import com.intellij.util.SmartList;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.FactoryMap;
@@ -205,9 +206,13 @@ public final class ServiceViewManagerImpl implements ServiceViewManager, Persist
       return;
     }
 
+    String toolWindowId = descriptor.getToolWindowId();
+    if (ToolWindowId.SERVICES.equals(toolWindowId) && "MSStudio".equals(PlatformUtils.getPlatformPrefix())) {
+      return;
+    }
+
     ToolWindowManager toolWindowManager = ToolWindowManager.getInstance(myProject);
     toolWindowManager.invokeLater(() -> {
-      String toolWindowId = descriptor.getToolWindowId();
       if (toolWindowManager.getToolWindow(toolWindowId) != null) return;
 
       if (!myActivationActionsRegistered && ToolWindowId.SERVICES.equals(toolWindowId)) {

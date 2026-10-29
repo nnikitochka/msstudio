@@ -27,6 +27,7 @@ import com.intellij.psi.PsiFile;
 import com.intellij.ui.content.Content;
 import com.intellij.ui.content.ContentFactory;
 import com.intellij.ui.content.ContentManager;
+import com.intellij.util.PlatformUtils;
 import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -50,6 +51,7 @@ public abstract class BrowseHierarchyActionBase extends AnAction {
 
   @Override
   public final void actionPerformed(@NotNull AnActionEvent e) {
+    if ("MSStudio".equals(PlatformUtils.getPlatformPrefix())) return;
     DataContext dataContext = e.getDataContext();
     Project project = e.getProject();
     if (project == null) return;
@@ -105,7 +107,7 @@ public abstract class BrowseHierarchyActionBase extends AnAction {
 
   @Override
   public void update(@NotNull AnActionEvent e) {
-    if (!myExtension.hasAnyExtensions()) {
+    if ("MSStudio".equals(PlatformUtils.getPlatformPrefix()) || !myExtension.hasAnyExtensions()) {
       e.getPresentation().setEnabledAndVisible(false);
     }
     else {

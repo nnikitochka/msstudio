@@ -16,6 +16,7 @@ import com.intellij.openapi.wm.ToolWindowId;
 import com.intellij.openapi.wm.ToolWindowManager;
 import com.intellij.ui.UIBundle;
 import com.intellij.ui.content.ContentManager;
+import com.intellij.util.PlatformUtils;
 import org.jetbrains.annotations.NotNull;
 
 @State(name = "HierarchyBrowserManager", storages = @Storage(StoragePathMacros.WORKSPACE_FILE))
@@ -37,6 +38,9 @@ public final class HierarchyBrowserManager implements PersistentStateComponent<H
   private ContentManager myContentManager;
 
   public HierarchyBrowserManager(@NotNull Project project) {
+    if ("MSStudio".equals(PlatformUtils.getPlatformPrefix())) {
+      return;
+    }
     AppUIExecutor.onUiThread().expireWith(project).submit(() -> {
       ToolWindow toolWindow = ToolWindowManager.getInstance(project).registerToolWindow(
         RegisterToolWindowTask.closable(ToolWindowId.HIERARCHY, UIBundle.messagePointer("tool.window.name.hierarchy"),
