@@ -122,7 +122,7 @@ dev_dist_product_descriptor(
     content_module_loading = {
         "intellij.java.ide.resources": "required",
         "intellij.idea.community.ide.customization": "embedded",
-        "intellij.msstudio.ide.customization": "embedded",
+        "intellij.msstudio.ide.customization": "required",
     },
     content_modules = [
         # do not sort,

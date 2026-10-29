@@ -711,6 +711,8 @@ mps/build
 mps/build/intellij.mps.resources
 msstudio-customization
 msstudio-customization/ide-customization
+msstudio-customization/language-pack-ru
+msstudio-customization/yaml
 notebooks/notebook-ui
 notebooks/visualization
 notebooks/visualization/testFramework

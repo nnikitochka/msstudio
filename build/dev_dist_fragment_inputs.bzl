@@ -471,6 +471,7 @@ DEV_DIST_FRAGMENT_INPUTS = {
                 "//libraries/log4j-to-slf4j:log4j-to-slf4j_content_module_jar",
                 "//libraries/sqlite:sqlite_content_module_jar",
                 "//libraries/xmlbeans:xmlbeans_content_module_jar",
+                "//msstudio-customization/ide-customization:msstudio-ide-customization_content_module_jar",
                 "//platform/new-ui-onboarding:new-ui-onboarding_content_module_jar",
                 "//platform/new-users-onboarding:new-users-onboarding_content_module_jar",
                 "//platform/remote-servers/impl:impl_content_module_jar",

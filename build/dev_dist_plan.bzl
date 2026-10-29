@@ -63,7 +63,7 @@ _PLATFORM_ASSETS = {
     ],
 }
 
-_LAUNCH = struct(
+_LAUNCH_AndroidStudio = struct(
     idea_properties = "//bin:idea.properties",
     vmoptions = {
         "darwin": "idea.vmoptions",
@@ -77,13 +77,26 @@ _LAUNCH = struct(
 
 _PLAN_AndroidStudio = struct(
     platform_assets = _PLATFORM_ASSETS,
-    launch = _LAUNCH,
+    launch = _LAUNCH_AndroidStudio,
 )
 
 DEV_DIST_PLANS = {
     "AndroidStudio": _PLAN_AndroidStudio,
     "Idea": _PLAN_AndroidStudio,
-    "MSStudio": _PLAN_AndroidStudio,
+    "MSStudio": struct(
+        platform_assets = _PLATFORM_ASSETS,
+        launch = struct(
+            idea_properties = "//bin:idea.properties",
+            vmoptions = {
+                "darwin": "msstudio.vmoptions",
+                "linux": "msstudio64.vmoptions",
+                "windows": "msstudio64.exe.vmoptions",
+            },
+            main_class = "com.intellij.idea.Main",
+            launcher = struct(base_file_name = "msstudio", language_server = False, windows_gui = True, windows_console = True),
+            env_var_base_name = "MSSTUDIO",
+        ),
+    ),
 }
 
 # The launch model of every product, which its `platform_resources` component renders. A model file takes the
