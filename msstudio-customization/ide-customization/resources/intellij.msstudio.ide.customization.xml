@@ -1,30 +1,95 @@
-<idea-plugin>
+<idea-plugin visibility="public">
   <!-- region Generated dependencies - run `Generate Product Layouts` to regenerate -->
   <dependencies>
+    <plugin id="com.intellij.modules.pty4j"/>
+    <module name="intellij.libraries.pty4j"/>
     <module name="intellij.platform.core"/>
     <module name="intellij.platform.editor.ui"/>
     <module name="intellij.platform.ide"/>
+    <module name="intellij.platform.ide.concurrency"/>
     <module name="intellij.platform.ide.core"/>
     <module name="intellij.platform.ide.impl"/>
+    <module name="intellij.platform.lang"/>
+    <module name="intellij.platform.terminal"/>
+    <module name="intellij.platform.ui.tree"/>
     <module name="intellij.platform.util.ui"/>
   </dependencies>
   <!-- endregion -->
   <extensions defaultExtensionNs="com.intellij">
+    <!-- Project folders show a folder glyph instead of the product logo. -->
+    <applicationService serviceInterface="com.intellij.ide.ui.ProductIcons"
+                        serviceImplementation="com.intellij.msstudio.ide.customization.MSStudioProductIcons"
+                        overrides="true"/>
+    <!-- Keeps the plugin dependency graph tab reopenable by URL after a project restart. -->
+    <virtualFileSystem key="msstudio-plugin-deps" physical="false"
+                       implementationClass="com.intellij.msstudio.ide.customization.plugin.dependencies.PluginDependenciesFileSystem"/>
     <toolWindow id="Files" anchor="left" icon="AllIcons.Toolwindows.ToolWindowProject"
-                factoryClass="com.intellij.msstudio.ide.customization.toolWindow.MSStudioServerFilesToolWindowFactory"/>
-    <toolWindow id="Logs" anchor="left" icon="AllIcons.Nodes.LogFolder"
-                 factoryClass="com.intellij.msstudio.ide.customization.toolWindow.MSStudioServerLogsToolWindowFactory"
+                factoryClass="com.intellij.msstudio.ide.customization.server.files.ServerFilesToolWindowFactory"/>
+    <toolWindow id="Logs" anchor="right" icon="AllIcons.Nodes.LogFolder"
+                 factoryClass="com.intellij.msstudio.ide.customization.server.logs.ServerLogsToolWindowFactory"
                  doNotActivateOnStart="true"/>
     <toolWindow id="Plugins" anchor="left" icon="AllIcons.Nodes.Plugin"
-                factoryClass="com.intellij.msstudio.ide.customization.toolWindow.MSStudioServerPluginsToolWindowFactory"
+                  factoryClass="com.intellij.msstudio.ide.customization.server.plugins.ServerPluginsToolWindowFactory"
+                  doNotActivateOnStart="true"/>
+    <toolWindow id="Hex" anchor="bottom" icon="AllIcons.Actions.Colors"
+                factoryClass="com.intellij.msstudio.ide.customization.hexGenerator.HexGeneratorToolWindowFactory"
                 doNotActivateOnStart="true"/>
+    <defaultToolWindowLayout
+      implementation="com.intellij.msstudio.ide.customization.MSStudioToolWindowLayoutExtension"
+      order="last"
+    />
     <projectFrameCapabilitiesProvider
-      implementation="com.intellij.msstudio.ide.customization.toolWindow.MSStudioProjectFrameCapabilitiesProvider"/>
+      implementation="com.intellij.msstudio.ide.customization.server.files.ProjectFrameCapabilitiesProvider"/>
+    <projectService serviceImplementation="com.intellij.msstudio.ide.customization.server.core.ServerCoreService"/>
+    <projectService serviceImplementation="com.intellij.msstudio.ide.customization.server.run.ServerRunService"/>
+    <projectService serviceImplementation="com.intellij.msstudio.ide.customization.server.run.ServerRunFlagService"/>
+    <postStartupActivity implementation="com.intellij.msstudio.ide.customization.server.core.ServerCoreStartupActivity"/>
+    <lang.foldingBuilder language="yaml"
+                          implementationClass="com.intellij.msstudio.ide.customization.minecraftColors.MinecraftMessageFoldingBuilder"/>
+    <lang.foldingBuilder language="Properties"
+                          implementationClass="com.intellij.msstudio.ide.customization.minecraftColors.MinecraftPropertiesMessageFoldingBuilder"/>
+    <editorFactoryListener implementation="com.intellij.msstudio.ide.customization.minecraftColors.MinecraftMessagePreviewEditorListener"/>
+    <fileType name="MSSTUDIO_PLUGIN_DEPENDENCIES"
+              implementationClass="com.intellij.msstudio.ide.customization.plugin.dependencies.PluginDependenciesFileType"/>
+    <fileEditorProvider
+      implementation="com.intellij.msstudio.ide.customization.plugin.dependencies.PluginDependenciesEditorProvider"/>
   </extensions>
-  <actions resource-bundle="messages.MSStudioWelcomeBundle">
+  <actions resource-bundle="messages.MSStudioBundle">
+    <group id="MSStudio.Files.Popup">
+      <reference ref="WeighingNewGroup"/>
+      <reference ref="AssociateWithFileType"/>
+      <separator/>
+      <reference ref="CutCopyPasteGroup"/>
+      <reference ref="EditSource"/>
+      <separator/>
+      <reference ref="FindUsages"/>
+      <reference ref="FindInPath"/>
+      <reference ref="ReplaceInPath"/>
+      <separator/>
+      <reference ref="RenameElement"/>
+      <reference ref="ReformatCode"/>
+      <reference ref="$Delete"/>
+      <separator/>
+      <reference ref="VersionControlsGroup"/>
+      <reference ref="SynchronizeCurrentFile"/>
+      <separator/>
+      <reference ref="CompareTwoFiles"/>
+      <reference ref="CompareFileWithEditor"/>
+    </group>
+    <action id="NewUiRunWidget"
+            class="com.intellij.msstudio.ide.customization.server.run.ServerRunWidgetAction"
+            overrides="true"/>
+    <action id="MSStudio.Plugins.OpenDependencyGraph"
+            class="com.intellij.msstudio.ide.customization.server.plugins.OpenPluginDependencyGraphAction"
+            icon="AllIcons.Actions.DependencyAnalyzer"/>
+    <action id="MSStudio.Hex.OpenGenerator"
+            class="com.intellij.msstudio.ide.customization.hexGenerator.OpenHexGeneratorAction"
+            icon="AllIcons.Actions.Colors">
+      <add-to-group group-id="ToolsMenu" anchor="last"/>
+    </action>
     <group id="NonModalWelcomeScreen.LeftTabActions">
-      <action id="MSStudio.Welcome.Open" class="com.intellij.msstudio.ide.customization.welcomeScreen.MSStudioOpenServerAction"/>
-      <action id="MSStudio.Welcome.New" class="com.intellij.msstudio.ide.customization.welcomeScreen.MSStudioNewServerAction"/>
+      <action id="MSStudio.Welcome.Open" class="com.intellij.msstudio.ide.customization.screen.OpenServerAction"/>
+      <action id="MSStudio.Welcome.New" class="com.intellij.msstudio.ide.customization.screen.NewServerAction"/>
     </group>
   </actions>
 </idea-plugin>
