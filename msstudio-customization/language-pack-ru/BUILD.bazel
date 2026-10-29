@@ -1,0 +1,50 @@
+load("@jps_dynamic_deps_community//:targets.bzl", "dev_dist_plugin")
+load("@rules_jvm//:jvm.bzl", "jvm_library")
+
+### auto-generated section `dev intellij.msstudio.language.pack.ru` start
+dev_dist_plugin(
+    descriptor = "resources/META-INF/plugin.xml",
+    jars = {
+        "lib/msstudio-language-pack-ru.jar": ["intellij.msstudio.language.pack.ru"],
+    },
+    main_module = "intellij.msstudio.language.pack.ru",
+)
+### auto-generated section `dev intellij.msstudio.language.pack.ru` end
+
+### auto-generated section `build intellij.msstudio.language.pack.ru` start
+jvm_library(
+    name = "msstudio-language-pack-ru",
+    srcs = glob(
+        [],
+        allow_empty = True,
+    ),
+    module_name = "intellij.msstudio.language.pack.ru",
+    resource_strip_prefix = "resources",
+    resources = glob(
+        ["resources/**/*"],
+    ),
+    visibility = ["//visibility:public"],
+)
+
+jvm_library(
+    name = "msstudio-language-pack-ru_test_lib",
+    testonly = True,
+    srcs = glob(
+        [],
+        allow_empty = True,
+    ),
+    module_name = "intellij.msstudio.language.pack.ru",
+    visibility = ["//visibility:public"],
+    runtime_deps = [":msstudio-language-pack-ru"],
+)
+### auto-generated section `build intellij.msstudio.language.pack.ru` end
+
+### auto-generated section `iml intellij.msstudio.language.pack.ru` start
+exports_files(
+    [
+        "intellij.msstudio.language.pack.ru.iml",
+        "resources/META-INF/plugin.xml",
+    ],
+    visibility = ["//visibility:public"],
+)
+### auto-generated section `iml intellij.msstudio.language.pack.ru` end

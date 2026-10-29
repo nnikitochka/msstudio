@@ -1,0 +1,17 @@
+<idea-plugin>
+  <id>com.intellij.msstudio.language.pack.ru</id>
+  <name>Language Pack: Russian</name>
+  <vendor>MSStudio</vendor>
+  <description><![CDATA[
+    The Russian language pack for MSStudio. Translated texts come on top of the English texts:
+    a message without a translation stays English. Switch the language at
+    Settings | Appearance &amp; Behavior | System Settings | Language and Region.
+    A change of the language needs a restart of the IDE.
+  ]]></description>
+  <dependencies>
+    <plugin id="com.intellij.modules.platform"/>
+  </dependencies>
+  <extensions defaultExtensionNs="com.intellij">
+    <languageBundle locale="ru" displayName="Русский"/>
+  </extensions>
+</idea-plugin>
