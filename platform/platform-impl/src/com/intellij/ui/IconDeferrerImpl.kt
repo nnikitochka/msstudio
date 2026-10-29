@@ -56,8 +56,7 @@ internal class IconDeferrerImpl(coroutineScope: CoroutineScope) : IconDeferrer()
   // we restrict max cache size for cases when a user reads code only.
   @Volatile
   private var maxCacheSize: Int = preConfiguredCacheSize
-  // Due to a critical bug (https://youtrack.jetbrains.com/issue/IDEA-320644/Improve-Smart-PSI-pointer-equals-implementation),
-  // we are not using "caffeine".
+  // We do not use "caffeine" because of https://youtrack.jetbrains.com/issue/IJPL-1310 (Smart PSI pointer "equals").
   private val iconCache: ConcurrentMap<Any, Icon> = ConcurrentHashMap(min(1000, preConfiguredCacheSize))
   @Volatile
   private var mightBePopulated: Boolean = false // used to avoid multiple calls CHM#clear() which might be expensive, no need to be atomic or something else
@@ -117,10 +116,11 @@ internal class IconDeferrerImpl(coroutineScope: CoroutineScope) : IconDeferrer()
       while (true) {
         delay(deferrerCacheClearingCheckPeriod)
         val currentCacheSize = iconCache.size
-        recomputeMaxCacheSize(currentCacheSize)
         if (currentCacheSize > maxCacheSize) {
           log.trace { "Clearing icon deferrer cache because it's too big: $currentCacheSize > $maxCacheSize" }
           clearCache()
+          // a big VFS batch raised the limit; the clear removed the icons of that batch
+          maxCacheSize = preConfiguredCacheSize
         }
         else {
           log.trace { "icon cache size $currentCacheSize" }
