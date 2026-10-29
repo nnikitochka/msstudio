@@ -335,7 +335,9 @@ object AppUIUtil {
   @RequiresBackgroundThread(generateAssertion = false /* IJPL-115548 */)
   fun loadConsentsForEditing(): List<Consent> {
     val options = ConsentOptions.getInstance()
-    var result = options.consents.first
+    // ConsentOptions returns an immutable list when no bundled consents exist
+    // (e.g. a non-JetBrains product without its own consents file), so copy.
+    var result: MutableList<Consent> = ArrayList(options.consents.first)
     if (options.isEAP) {
       val statConsent = options.defaultUsageStatsConsent
       if (statConsent != null) {
