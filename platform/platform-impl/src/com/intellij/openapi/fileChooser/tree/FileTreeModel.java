@@ -39,6 +39,7 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
 import javax.swing.Icon;
+import javax.swing.event.TreeModelEvent;
 import javax.swing.tree.TreePath;
 import java.lang.reflect.Method;
 import java.nio.file.FileSystems;
@@ -189,11 +190,17 @@ public final class FileTreeModel extends AbstractTreeModel implements InvokerSup
 
     //HashSet<VirtualFile> files = new HashSet<>();
     HashSet<VirtualFile> parents = new HashSet<>();
+    HashSet<VirtualFile> renamedFiles = new HashSet<>();
     for (VFileEvent event : events) {
-      if (event instanceof VFilePropertyChangeEvent) {
-        //if (hasEntry(event.getFile())) {
-        //  files.add(event.getFile());
-        //}
+      if (event instanceof VFilePropertyChangeEvent change) {
+        // a rename changes the node name and the order of the children of its parent
+        if (VirtualFile.PROP_NAME.equals(change.getPropertyName())) {
+          VirtualFile file = change.getFile();
+          if (hasEntry(file)) {
+            renamedFiles.add(file);
+            if (hasEntry(file.getParent())) parents.add(file.getParent());
+          }
+        }
       }
       else if (event instanceof VFileCreateEvent create) {
         if (hasEntry(create.getParent())) parents.add(create.getParent());
@@ -236,7 +243,29 @@ public final class FileTreeModel extends AbstractTreeModel implements InvokerSup
             listeners.treeNodesRemoved(update.getEvent(this, entry, update.getRemoved()));
             continue;
           }
+          if (removed && inserted) {
+            // granular removal and insertion events keep the subtree in place:
+            // a structure change at this path would reload all its children and
+            // make the tree blank in between
+            if (listeners.isEmpty()) continue;
+            listeners.treeNodesRemoved(update.getEvent(this, entry, update.getRemoved()));
+            listeners.treeNodesInserted(update.getEvent(this, entry, update.getInserted()));
+            continue;
+          }
           treeStructureChanged(entry, null, null);
+        }
+      }
+    }
+    for (VirtualFile file : renamedFiles) {
+      // the node keeps the same file, so only its presentation changes
+      for (Root root : roots) {
+        Entry<Node> entry = root.tree.findEntry(file);
+        Node parentNode = entry == null ? null : entry.getParent();
+        Entry<Node> parentEntry = parentNode == null ? null : root.tree.getEntry(parentNode);
+        int index = parentEntry == null ? -1 : parentEntry.getIndexOf(entry.getNode());
+        if (entry != null && index >= 0 && entry.getNode().updateContent(state) && !listeners.isEmpty()) {
+          listeners.treeNodesChanged(new TreeModelEvent(this, parentEntry,
+                                                        new int[]{index}, new Object[]{entry.getNode()}));
         }
       }
     }
