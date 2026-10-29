@@ -52,9 +52,6 @@
     <orderEntry type="module" module-name="intellij.compose.ide.plugin.resources.android" scope="TEST" />
     <orderEntry type="module" module-name="intellij.platform.ide.core" scope="TEST" />
     <orderEntry type="module" module-name="intellij.kotlin.base.plugin" scope="TEST" />
-    <orderEntry type="module" module-name="intellij.android.core" scope="TEST" />
-    <orderEntry type="module" module-name="intellij.android.gradle.dsl.kotlin" scope="TEST" />
-    <orderEntry type="module" module-name="intellij.android.plugin.descriptor" scope="RUNTIME" />
     <orderEntry type="module" module-name="intellij.platform.util.ui" scope="TEST" />
     <orderEntry type="module" module-name="intellij.kotlin.plugin.community.main" scope="RUNTIME" />
     <orderEntry type="module" module-name="intellij.kotlin.codeInsight.api" scope="TEST" />

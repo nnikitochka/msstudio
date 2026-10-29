@@ -32,7 +32,6 @@
     <orderEntry type="module" module-name="intellij.toml" scope="RUNTIME" />
     <orderEntry type="module" module-name="intellij.gradle.codeInsight.toml.backend" scope="RUNTIME" />
     <orderEntry type="module" module-name="intellij.gradle.java.groovy.toml" scope="RUNTIME" />
-    <orderEntry type="module" module-name="intellij.android.gradle.dsl.toml" scope="RUNTIME" />
     <orderEntry type="module" module-name="intellij.gradle.analysis" scope="RUNTIME" />
     <orderEntry type="module" module-name="intellij.platform.monolith.main" scope="RUNTIME" />
     <orderEntry type="module" module-name="intellij.idea.community.customization" scope="RUNTIME" />

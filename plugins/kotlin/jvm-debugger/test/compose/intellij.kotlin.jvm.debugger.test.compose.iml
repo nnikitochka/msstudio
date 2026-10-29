@@ -22,18 +22,13 @@
     <orderEntry type="module" module-name="intellij.kotlin.base.plugin" scope="TEST" />
     <orderEntry type="module" module-name="intellij.java.testFramework" scope="TEST" />
     <orderEntry type="module" module-name="intellij.libraries.kotlinc.kotlin.compiler.common" scope="TEST" />
-    <orderEntry type="module" module-name="intellij.android.compose-ide-plugin" scope="TEST" />
     <orderEntry type="module" module-name="intellij.java.debugger.impl" scope="TEST" />
     <orderEntry type="module" module-name="intellij.platform.execution.serviceView.plugin" scope="RUNTIME" />
     <orderEntry type="module" module-name="intellij.libraries.kotlinc.compose.compiler.plugin" scope="TEST" />
-    <orderEntry type="module" module-name="intellij.android.streaming" scope="TEST" />
     <orderEntry type="module" module-name="kotlin.tests-compose" scope="TEST" />
     <orderEntry type="module" module-name="intellij.kotlin.jvm.debugger.test.compose.testFramework" scope="TEST" />
-    <orderEntry type="module" module-name="intellij.android.logcat.gradle" scope="TEST" />
     <orderEntry type="module" module-name="intellij.libraries.junit4" scope="TEST" />
     <orderEntry type="module" module-name="intellij.groovy.scripting" scope="TEST" />
-    <orderEntry type="module" module-name="intellij.android.plugin.descriptor" scope="RUNTIME" />
-    <orderEntry type="module" module-name="intellij.android.testutils" scope="RUNTIME" />
     <orderEntry type="module" module-name="intellij.platform.monolith.main" scope="RUNTIME" />
     <orderEntry type="module" module-name="intellij.java.impl.testFramework" scope="RUNTIME" />
     <orderEntry type="module" module-name="intellij.groovy.live.templates" scope="RUNTIME" />

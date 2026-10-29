@@ -64,13 +64,15 @@ jvm_library(
         "//plugins/yaml:yaml_test_lib",
     ],
 )
+### auto-generated section `build intellij.msstudio.yaml` end
 
+### auto-generated section `plugin intellij.msstudio.yaml` start
 ij_plugin(
     name = "yaml_plugin",
     descriptor_module = ":yaml",
     visibility = ["//visibility:public"],
 )
-### auto-generated section `build intellij.msstudio.yaml` end
+### auto-generated section `plugin intellij.msstudio.yaml` end
 
 ### auto-generated section `iml intellij.msstudio.yaml` start
 exports_files(

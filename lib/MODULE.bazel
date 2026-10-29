@@ -22,195 +22,6 @@ http_jvm_lib(
 
 ### auto-generated section `maven libs` start
 http_file(
-    name = "com_android_tools_build-aapt2-proto-8_1_0-10154469_http",
-    downloaded_file_path = "aapt2-proto-8.1.0-10154469.jar",
-    sha256 = "6d8d14b91285cc7c1b73460f413bb3f80672dc34dc506ed578fba1f6dde8661e",
-    url = "https://cache-redirector.jetbrains.com/dl.google.com/dl/android/maven2/com/android/tools/build/aapt2-proto/8.1.0-10154469/aapt2-proto-8.1.0-10154469.jar",
-)
-
-http_file(
-    name = "com_ibm_db2-jcc-11_5_7_0_http",
-    downloaded_file_path = "jcc-11.5.7.0.jar",
-    sha256 = "1dbc8dc93441890f242be66983f1d1363fe6a80f8d1f0b7ca0e1063f42054bb0",
-    url = "https://cache-redirector.jetbrains.com/repo1.maven.org/maven2/com/ibm/db2/jcc/11.5.7.0/jcc-11.5.7.0.jar",
-)
-
-http_file(
-    name = "org_jetbrains_intellij_deps_android_tools_base-backgroundtask_inspector_java_proto-232_1_23_0_http",
-    downloaded_file_path = "backgroundtask_inspector_java_proto-232.1.23.0.jar",
-    sha256 = "31a9e3f4330e2f383a940e34e2a3d0ee59197766f42656c39d24e66e49a9b3ab",
-    url = "https://cache-redirector.jetbrains.com/packages.jetbrains.team/maven/p/ij/intellij-dependencies/org/jetbrains/intellij/deps/android/tools/base/backgroundtask_inspector_java_proto/232.1.23.0/backgroundtask_inspector_java_proto-232.1.23.0.jar",
-)
-
-http_file(
-    name = "org_jetbrains_intellij_deps_android_tools_base-workmanager_inspector_proto-232_1_23_0_http",
-    downloaded_file_path = "workmanager_inspector_proto-232.1.23.0.jar",
-    sha256 = "ffbd4b4c8b7d246032a0d2e802594b18bc56a8cda069c0f0099a7d301dceeabb",
-    url = "https://cache-redirector.jetbrains.com/packages.jetbrains.team/maven/p/ij/intellij-dependencies/org/jetbrains/intellij/deps/android/tools/base/workmanager_inspector_proto/232.1.23.0/workmanager_inspector_proto-232.1.23.0.jar",
-)
-
-http_file(
-    name = "org_brotli-dec-0_1_2_http",
-    downloaded_file_path = "dec-0.1.2.jar",
-    sha256 = "615c0c3efef990d77831104475fba6a1f7971388691d4bad1471ad84101f6d52",
-    url = "https://cache-redirector.jetbrains.com/repo1.maven.org/maven2/org/brotli/dec/0.1.2/dec-0.1.2.jar",
-)
-
-http_file(
-    name = "org_jetbrains_kotlin-kotlin-metadata-jvm-2_2_20_http",
-    downloaded_file_path = "kotlin-metadata-jvm-2.2.20.jar",
-    sha256 = "8524eac90f7e8e0f1366883f2c6c820c93bfa61df3d76857c8d3e803cf67315d",
-    url = "https://cache-redirector.jetbrains.com/repo1.maven.org/maven2/org/jetbrains/kotlin/kotlin-metadata-jvm/2.2.20/kotlin-metadata-jvm-2.2.20.jar",
-)
-
-http_file(
-    name = "org_jetbrains_kotlin-kotlin-metadata-jvm-2_2_20-sources_http",
-    downloaded_file_path = "kotlin-metadata-jvm-2.2.20-sources.jar",
-    sha256 = "c55bd0d04e6d796d7d2cf0711281989d5e06b7def07100f80640b98ae1ebb788",
-    url = "https://cache-redirector.jetbrains.com/repo1.maven.org/maven2/org/jetbrains/kotlin/kotlin-metadata-jvm/2.2.20/kotlin-metadata-jvm-2.2.20-sources.jar",
-)
-
-http_file(
-    name = "org_eclipse_elk-org_eclipse_elk_alg_layered-0_3_0_http",
-    downloaded_file_path = "org.eclipse.elk.alg.layered-0.3.0.jar",
-    sha256 = "08267d824581f81af8a196d4551decae1256a454e618409a363e3e1574b06520",
-    url = "https://cache-redirector.jetbrains.com/repo1.maven.org/maven2/org/eclipse/elk/org.eclipse.elk.alg.layered/0.3.0/org.eclipse.elk.alg.layered-0.3.0.jar",
-)
-
-http_file(
-    name = "org_eclipse_elk-org_eclipse_elk_core-0_3_0_http",
-    downloaded_file_path = "org.eclipse.elk.core-0.3.0.jar",
-    sha256 = "7ec333e41fb3924fb85f50c54b6aff0587c3b19935447f1c35c95e10752a7bdc",
-    url = "https://cache-redirector.jetbrains.com/repo1.maven.org/maven2/org/eclipse/elk/org.eclipse.elk.core/0.3.0/org.eclipse.elk.core-0.3.0.jar",
-)
-
-http_file(
-    name = "org_eclipse_elk-org_eclipse_elk_graph-0_3_0_http",
-    downloaded_file_path = "org.eclipse.elk.graph-0.3.0.jar",
-    sha256 = "3d8d9bf2df6e72c8a2dfd42adf79e3b8b417cd76958b3912a7dd62dfef816ca3",
-    url = "https://cache-redirector.jetbrains.com/repo1.maven.org/maven2/org/eclipse/elk/org.eclipse.elk.graph/0.3.0/org.eclipse.elk.graph-0.3.0.jar",
-)
-
-http_file(
-    name = "org_eclipse_emf-org_eclipse_emf_common-2_12_0_http",
-    downloaded_file_path = "org.eclipse.emf.common-2.12.0.jar",
-    sha256 = "80b9ddd0174bbc5623767ed9f4c96b17ae98ffaefb8edbcc780d59b0d7efef83",
-    url = "https://cache-redirector.jetbrains.com/repo1.maven.org/maven2/org/eclipse/emf/org.eclipse.emf.common/2.12.0/org.eclipse.emf.common-2.12.0.jar",
-)
-
-http_file(
-    name = "org_eclipse_emf-org_eclipse_emf_ecore-2_12_0_http",
-    downloaded_file_path = "org.eclipse.emf.ecore-2.12.0.jar",
-    sha256 = "2ac691cc4fa09fdf18beef6bdd457b7bdfe4d301f9707a8c89c6cb209139f4f9",
-    url = "https://cache-redirector.jetbrains.com/repo1.maven.org/maven2/org/eclipse/emf/org.eclipse.emf.ecore/2.12.0/org.eclipse.emf.ecore-2.12.0.jar",
-)
-
-http_file(
-    name = "org_eclipse_elk-org_eclipse_elk_alg_common_compaction-0_3_0_http",
-    downloaded_file_path = "org.eclipse.elk.alg.common.compaction-0.3.0.jar",
-    sha256 = "7b5a2c04f1c942af3d8b891a9a535e74cfa45b4151b7835c3e9f63e96ec0332f",
-    url = "https://cache-redirector.jetbrains.com/repo1.maven.org/maven2/org/eclipse/elk/org.eclipse.elk.alg.common.compaction/0.3.0/org.eclipse.elk.alg.common.compaction-0.3.0.jar",
-)
-
-http_file(
-    name = "io_ktor-ktor-client-mock-jvm-3_6_0_http",
-    downloaded_file_path = "ktor-client-mock-jvm-3.6.0.jar",
-    sha256 = "9a65b4e2f799451b380e87729132768802389d2f1c4ac11d2f3fc6de9925cb41",
-    url = "https://cache-redirector.jetbrains.com/repo1.maven.org/maven2/io/ktor/ktor-client-mock-jvm/3.6.0/ktor-client-mock-jvm-3.6.0.jar",
-)
-
-http_file(
-    name = "org_jetbrains_intellij_deps_android_tools_base-traceprocessor_protos-232_1_23_0_http",
-    downloaded_file_path = "traceprocessor_protos-232.1.23.0.jar",
-    sha256 = "d34f8d993c5ad098050d512e3abfd2e6361b73e41b029f58af20dfc89e4ad62c",
-    url = "https://cache-redirector.jetbrains.com/packages.jetbrains.team/maven/p/ij/intellij-dependencies/org/jetbrains/intellij/deps/android/tools/base/traceprocessor_protos/232.1.23.0/traceprocessor_protos-232.1.23.0.jar",
-)
-
-http_file(
-    name = "org_jetbrains_intellij_deps_android_tools_base-libserver-flag-test-proto-232_1_23_0_http",
-    downloaded_file_path = "libserver-flag-test-proto-232.1.23.0.jar",
-    sha256 = "e7faa7021cfd9042231fbb5e6bbea2616f7c6947905e5db95c196e9a602f88a0",
-    url = "https://cache-redirector.jetbrains.com/packages.jetbrains.team/maven/p/ij/intellij-dependencies/org/jetbrains/intellij/deps/android/tools/base/libserver-flag-test-proto/232.1.23.0/libserver-flag-test-proto-232.1.23.0.jar",
-)
-
-http_file(
-    name = "org_jetbrains_intellij_deps_android_tools_streaming_ffmpeg-bundle-ffmpeg-6_0-1_5_9-189_http",
-    downloaded_file_path = "ffmpeg-6.0-1.5.9-189.jar",
-    sha256 = "38c437218569f861fd43f15aa810b3eb9af4bdb02a7003f54c4d454590378079",
-    url = "https://cache-redirector.jetbrains.com/packages.jetbrains.team/maven/p/ij/intellij-dependencies/org/jetbrains/intellij/deps/android/tools/streaming/ffmpeg-bundle/ffmpeg/6.0-1.5.9-189/ffmpeg-6.0-1.5.9-189.jar",
-)
-
-http_file(
-    name = "org_jetbrains_intellij_deps_android_tools_streaming_ffmpeg-bundle-javacpp-1_5_9-189_http",
-    downloaded_file_path = "javacpp-1.5.9-189.jar",
-    sha256 = "1f85780cda084ba11fe0611558397d02486154777226eedee640d2867ce4231d",
-    url = "https://cache-redirector.jetbrains.com/packages.jetbrains.team/maven/p/ij/intellij-dependencies/org/jetbrains/intellij/deps/android/tools/streaming/ffmpeg-bundle/javacpp/1.5.9-189/javacpp-1.5.9-189.jar",
-)
-
-http_file(
-    name = "org_jetbrains_intellij_deps_android_tools_streaming_ffmpeg-bundle-ffmpeg-linux-x86_64-6_0-1_5_9-189_http",
-    downloaded_file_path = "ffmpeg-linux-x86_64-6.0-1.5.9-189.jar",
-    sha256 = "3b26dc266a24da542c012a08e445b8a212703d152d0f0e4663dd7d253bebe819",
-    url = "https://cache-redirector.jetbrains.com/packages.jetbrains.team/maven/p/ij/intellij-dependencies/org/jetbrains/intellij/deps/android/tools/streaming/ffmpeg-bundle/ffmpeg-linux-x86_64/6.0-1.5.9-189/ffmpeg-linux-x86_64-6.0-1.5.9-189.jar",
-)
-
-http_file(
-    name = "org_jetbrains_intellij_deps_android_tools_streaming_ffmpeg-bundle-ffmpeg-macosx-arm64-6_0-1_5_9-189_http",
-    downloaded_file_path = "ffmpeg-macosx-arm64-6.0-1.5.9-189.jar",
-    sha256 = "9613ae5ae4f418e2cd0a4235bcd2911cb9b56ae9e42cc7e672fbc5031bd35d57",
-    url = "https://cache-redirector.jetbrains.com/packages.jetbrains.team/maven/p/ij/intellij-dependencies/org/jetbrains/intellij/deps/android/tools/streaming/ffmpeg-bundle/ffmpeg-macosx-arm64/6.0-1.5.9-189/ffmpeg-macosx-arm64-6.0-1.5.9-189.jar",
-)
-
-http_file(
-    name = "org_jetbrains_intellij_deps_android_tools_streaming_ffmpeg-bundle-ffmpeg-macosx-x86_64-6_0-1_5_9-189_http",
-    downloaded_file_path = "ffmpeg-macosx-x86_64-6.0-1.5.9-189.jar",
-    sha256 = "949cf2be2d54ccd9e4f13f9df456190c85738bebb054f50c74e896e31c43d922",
-    url = "https://cache-redirector.jetbrains.com/packages.jetbrains.team/maven/p/ij/intellij-dependencies/org/jetbrains/intellij/deps/android/tools/streaming/ffmpeg-bundle/ffmpeg-macosx-x86_64/6.0-1.5.9-189/ffmpeg-macosx-x86_64-6.0-1.5.9-189.jar",
-)
-
-http_file(
-    name = "org_jetbrains_intellij_deps_android_tools_streaming_ffmpeg-bundle-ffmpeg-windows-x86_64-6_0-1_5_9-189_http",
-    downloaded_file_path = "ffmpeg-windows-x86_64-6.0-1.5.9-189.jar",
-    sha256 = "c2dba4e82e5ad865412f72b8f02ff5462088666100f9734b46a4023bac3e2a5c",
-    url = "https://cache-redirector.jetbrains.com/packages.jetbrains.team/maven/p/ij/intellij-dependencies/org/jetbrains/intellij/deps/android/tools/streaming/ffmpeg-bundle/ffmpeg-windows-x86_64/6.0-1.5.9-189/ffmpeg-windows-x86_64-6.0-1.5.9-189.jar",
-)
-
-http_file(
-    name = "org_jetbrains_intellij_deps_android_tools_streaming_ffmpeg-bundle-javacpp-linux-x86_64-1_5_9-189_http",
-    downloaded_file_path = "javacpp-linux-x86_64-1.5.9-189.jar",
-    sha256 = "433fd379cf807f5507318b77d83ad46c30a77b34beab868d5f925b939d73aef7",
-    url = "https://cache-redirector.jetbrains.com/packages.jetbrains.team/maven/p/ij/intellij-dependencies/org/jetbrains/intellij/deps/android/tools/streaming/ffmpeg-bundle/javacpp-linux-x86_64/1.5.9-189/javacpp-linux-x86_64-1.5.9-189.jar",
-)
-
-http_file(
-    name = "org_jetbrains_intellij_deps_android_tools_streaming_ffmpeg-bundle-javacpp-macosx-arm64-1_5_9-189_http",
-    downloaded_file_path = "javacpp-macosx-arm64-1.5.9-189.jar",
-    sha256 = "d35f7a03198f8f71d20e0838c8feb1576680ec1e16693246f200afcfe69e7f2d",
-    url = "https://cache-redirector.jetbrains.com/packages.jetbrains.team/maven/p/ij/intellij-dependencies/org/jetbrains/intellij/deps/android/tools/streaming/ffmpeg-bundle/javacpp-macosx-arm64/1.5.9-189/javacpp-macosx-arm64-1.5.9-189.jar",
-)
-
-http_file(
-    name = "org_jetbrains_intellij_deps_android_tools_streaming_ffmpeg-bundle-javacpp-macosx-x86_64-1_5_9-189_http",
-    downloaded_file_path = "javacpp-macosx-x86_64-1.5.9-189.jar",
-    sha256 = "974868dc67392dcf2c2443e0b75fe0840d114da7cd5a9b7ea3024b1cfa4ceef1",
-    url = "https://cache-redirector.jetbrains.com/packages.jetbrains.team/maven/p/ij/intellij-dependencies/org/jetbrains/intellij/deps/android/tools/streaming/ffmpeg-bundle/javacpp-macosx-x86_64/1.5.9-189/javacpp-macosx-x86_64-1.5.9-189.jar",
-)
-
-http_file(
-    name = "org_jetbrains_intellij_deps_android_tools_streaming_ffmpeg-bundle-javacpp-windows-x86_64-1_5_9-189_http",
-    downloaded_file_path = "javacpp-windows-x86_64-1.5.9-189.jar",
-    sha256 = "3fa369db5c0cdeb9fe3382512b874a3ccddd5f2799a31b564c438102f1aa7b86",
-    url = "https://cache-redirector.jetbrains.com/packages.jetbrains.team/maven/p/ij/intellij-dependencies/org/jetbrains/intellij/deps/android/tools/streaming/ffmpeg-bundle/javacpp-windows-x86_64/1.5.9-189/javacpp-windows-x86_64-1.5.9-189.jar",
-)
-
-http_file(
-    name = "com_android_tools_analytics-library-testing-31_5_0-alpha08_http",
-    downloaded_file_path = "testing-31.5.0-alpha08.jar",
-    sha256 = "a000df0643439bfc1a41cc35098491dcb5733766e629ecbed2d68adb473f8420",
-    url = "https://cache-redirector.jetbrains.com/dl.google.com/dl/android/maven2/com/android/tools/analytics-library/testing/31.5.0-alpha08/testing-31.5.0-alpha08.jar",
-)
-
-http_file(
     name = "app_cash_turbine-turbine-jvm-1_2_1_http",
     downloaded_file_path = "turbine-jvm-1.2.1.jar",
     sha256 = "d1a853be08d6c3562fdfef98ac25b7048e669d9cb1203a42fc36c56d17c037d5",
@@ -939,48 +750,6 @@ http_file(
 )
 
 http_file(
-    name = "nl_jqno_equalsverifier-equalsverifier-3_19_4_http",
-    downloaded_file_path = "equalsverifier-3.19.4.jar",
-    sha256 = "2bcbbf2f3227aa97527730eb92ca8724263e6d555b888fbb14aae52bc712d434",
-    url = "https://cache-redirector.jetbrains.com/repo1.maven.org/maven2/nl/jqno/equalsverifier/equalsverifier/3.19.4/equalsverifier-3.19.4.jar",
-)
-
-http_file(
-    name = "org_objenesis-objenesis-3_4_http",
-    downloaded_file_path = "objenesis-3.4.jar",
-    sha256 = "95488102feaf2e2858adf6b299353677dac6c15294006f8ed1c5556f8e3cd251",
-    url = "https://cache-redirector.jetbrains.com/repo1.maven.org/maven2/org/objenesis/objenesis/3.4/objenesis-3.4.jar",
-)
-
-http_file(
-    name = "net_bytebuddy-byte-buddy-1_17_5_http",
-    downloaded_file_path = "byte-buddy-1.17.5.jar",
-    sha256 = "71568c9f8396677219f650268fbf6493ded484edcdbdf2dae6129ca5be81e8db",
-    url = "https://cache-redirector.jetbrains.com/repo1.maven.org/maven2/net/bytebuddy/byte-buddy/1.17.5/byte-buddy-1.17.5.jar",
-)
-
-http_file(
-    name = "nl_jqno_equalsverifier-equalsverifier-3_19_4-sources_http",
-    downloaded_file_path = "equalsverifier-3.19.4-sources.jar",
-    sha256 = "50728701faf3624efe9c756629141ef17e4fd2c7c5591cf1865c35acc8de89cb",
-    url = "https://cache-redirector.jetbrains.com/repo1.maven.org/maven2/nl/jqno/equalsverifier/equalsverifier/3.19.4/equalsverifier-3.19.4-sources.jar",
-)
-
-http_file(
-    name = "org_objenesis-objenesis-3_4-sources_http",
-    downloaded_file_path = "objenesis-3.4-sources.jar",
-    sha256 = "896fa899a262c2f0f7e661848025fad22349300a5247ac175510993a9a5eede9",
-    url = "https://cache-redirector.jetbrains.com/repo1.maven.org/maven2/org/objenesis/objenesis/3.4/objenesis-3.4-sources.jar",
-)
-
-http_file(
-    name = "net_bytebuddy-byte-buddy-1_17_5-sources_http",
-    downloaded_file_path = "byte-buddy-1.17.5-sources.jar",
-    sha256 = "722eaa17b935a25e994f625b32ec166c53d23770d0659c615e62a0b26ce71615",
-    url = "https://cache-redirector.jetbrains.com/repo1.maven.org/maven2/net/bytebuddy/byte-buddy/1.17.5/byte-buddy-1.17.5-sources.jar",
-)
-
-http_file(
     name = "io_grpc-grpc-inprocess-1_65_1_http",
     downloaded_file_path = "grpc-inprocess-1.65.1.jar",
     sha256 = "6e3b197f5668e26fec19a831d2dd1f6d53b6eb9d4d3978b8ffd4ff68f1aae020",
@@ -1653,6 +1422,13 @@ http_file(
 )
 
 http_file(
+    name = "io_ktor-ktor-client-mock-jvm-3_6_0_http",
+    downloaded_file_path = "ktor-client-mock-jvm-3.6.0.jar",
+    sha256 = "9a65b4e2f799451b380e87729132768802389d2f1c4ac11d2f3fc6de9925cb41",
+    url = "https://cache-redirector.jetbrains.com/repo1.maven.org/maven2/io/ktor/ktor-client-mock-jvm/3.6.0/ktor-client-mock-jvm-3.6.0.jar",
+)
+
+http_file(
     name = "io_ktor-ktor-client-mock-jvm-3_6_0-sources_http",
     downloaded_file_path = "ktor-client-mock-jvm-3.6.0-sources.jar",
     sha256 = "a3d1560a43df5d60d204baaf83472fb8857eec4c89025a381f03c8b5a892ed85",
@@ -1937,48 +1713,6 @@ http_file(
     downloaded_file_path = "xz-1.9-sources.jar",
     sha256 = "5befa47f06b90e752f035191dde7f2deb59f36000f1ca6cc77d2362a82b6f462",
     url = "https://cache-redirector.jetbrains.com/repo1.maven.org/maven2/org/tukaani/xz/1.9/xz-1.9-sources.jar",
-)
-
-http_file(
-    name = "com_android_tools_smali-smali-baksmali-3_0_10_http",
-    downloaded_file_path = "smali-baksmali-3.0.10.jar",
-    sha256 = "7d6578dfe5c44f1984b64268e91834432b0942d49e08186a501039dd92b58213",
-    url = "https://cache-redirector.jetbrains.com/dl.google.com/dl/android/maven2/com/android/tools/smali/smali-baksmali/3.0.10/smali-baksmali-3.0.10.jar",
-)
-
-http_file(
-    name = "com_android_tools_smali-smali-util-3_0_10_http",
-    downloaded_file_path = "smali-util-3.0.10.jar",
-    sha256 = "cc2ef8349765644e4b15371f2c9f77d69b5412a094a38fe5fd992a124b7322fe",
-    url = "https://cache-redirector.jetbrains.com/dl.google.com/dl/android/maven2/com/android/tools/smali/smali-util/3.0.10/smali-util-3.0.10.jar",
-)
-
-http_file(
-    name = "com_android_tools_smali-smali-baksmali-3_0_10-sources_http",
-    downloaded_file_path = "smali-baksmali-3.0.10-sources.jar",
-    sha256 = "8a8dda341c59fcc90b2dfba189841ee4cf7eea0a3f9117c0381ee4bc20d6a43a",
-    url = "https://cache-redirector.jetbrains.com/dl.google.com/dl/android/maven2/com/android/tools/smali/smali-baksmali/3.0.10/smali-baksmali-3.0.10-sources.jar",
-)
-
-http_file(
-    name = "com_android_tools_smali-smali-util-3_0_10-sources_http",
-    downloaded_file_path = "smali-util-3.0.10-sources.jar",
-    sha256 = "b7581c53d89ce8321e0352b95ef42494761d81460bc82f2210cabde2af7afc77",
-    url = "https://cache-redirector.jetbrains.com/dl.google.com/dl/android/maven2/com/android/tools/smali/smali-util/3.0.10/smali-util-3.0.10-sources.jar",
-)
-
-http_file(
-    name = "com_android_tools_smali-smali-dexlib2-3_0_10_http",
-    downloaded_file_path = "smali-dexlib2-3.0.10.jar",
-    sha256 = "688dee6a46962a4dd1774b64be926534b0b6504bfd5d5c9f89c0f5af284f50c1",
-    url = "https://cache-redirector.jetbrains.com/dl.google.com/dl/android/maven2/com/android/tools/smali/smali-dexlib2/3.0.10/smali-dexlib2-3.0.10.jar",
-)
-
-http_file(
-    name = "com_android_tools_smali-smali-dexlib2-3_0_10-sources_http",
-    downloaded_file_path = "smali-dexlib2-3.0.10-sources.jar",
-    sha256 = "6bde2a8845cea10623cc46434053bc002feb89a28437d0cc6dd15568039da06a",
-    url = "https://cache-redirector.jetbrains.com/dl.google.com/dl/android/maven2/com/android/tools/smali/smali-dexlib2/3.0.10/smali-dexlib2-3.0.10-sources.jar",
 )
 
 http_file(
@@ -3116,20 +2850,6 @@ http_file(
 )
 
 http_file(
-    name = "com_google_guava-guava-testlib-33_7_1-jre_http",
-    downloaded_file_path = "guava-testlib-33.7.1-jre.jar",
-    sha256 = "eaee6892e3ae43eced37ef4401fd8989dc4b0f0b47f21b01c0913159a787bb4e",
-    url = "https://cache-redirector.jetbrains.com/repo1.maven.org/maven2/com/google/guava/guava-testlib/33.7.1-jre/guava-testlib-33.7.1-jre.jar",
-)
-
-http_file(
-    name = "com_google_guava-guava-testlib-33_7_1-jre-sources_http",
-    downloaded_file_path = "guava-testlib-33.7.1-jre-sources.jar",
-    sha256 = "93e553a3d404743b51b52481e55aa3c9ccb1f80e9a93f0eb3de71da2369183e9",
-    url = "https://cache-redirector.jetbrains.com/repo1.maven.org/maven2/com/google/guava/guava-testlib/33.7.1-jre/guava-testlib-33.7.1-jre-sources.jar",
-)
-
-http_file(
     name = "org_jetbrains_intellij_plugins-structure-intellij-3_335_http",
     downloaded_file_path = "structure-intellij-3.335.jar",
     sha256 = "e72a6dc69761e346f2f04f3987534bc0607a97f78880bcda7c447c4c252617c0",
@@ -3449,13 +3169,6 @@ http_file(
     downloaded_file_path = "scenebuilderkit-11.0.5.jar",
     sha256 = "36cd8f5bc933bcf726fadfc5276f0efcc7873d3a532e4e164674d2e8919f4781",
     url = "https://cache-redirector.jetbrains.com/packages.jetbrains.team/maven/p/ij/intellij-dependencies/org/jetbrains/intellij/deps/scenebuilderkit/11.0.5/scenebuilderkit-11.0.5.jar",
-)
-
-http_file(
-    name = "com_squareup-javapoet-1_13_0_http",
-    downloaded_file_path = "javapoet-1.13.0.jar",
-    sha256 = "4c7517e848a71b36d069d12bb3bf46a70fd4cda3105d822b0ed2e19c00b69291",
-    url = "https://cache-redirector.jetbrains.com/repo1.maven.org/maven2/com/squareup/javapoet/1.13.0/javapoet-1.13.0.jar",
 )
 
 http_file(
@@ -6263,6 +5976,76 @@ http_file(
     downloaded_file_path = "intellij-deps-fastutil-8.5.18-jb1-sources.jar",
     sha256 = "65223a891cb0b1ad3f444794a00ee458bf31780658b54c2d41192ad4cf3ece67",
     url = "https://cache-redirector.jetbrains.com/packages.jetbrains.team/maven/p/ij/intellij-dependencies/org/jetbrains/intellij/deps/fastutil/intellij-deps-fastutil/8.5.18-jb1/intellij-deps-fastutil-8.5.18-jb1-sources.jar",
+)
+
+http_file(
+    name = "org_jetbrains_intellij_deps_android_tools_streaming_ffmpeg-bundle-ffmpeg-6_0-1_5_9-189_http",
+    downloaded_file_path = "ffmpeg-6.0-1.5.9-189.jar",
+    sha256 = "38c437218569f861fd43f15aa810b3eb9af4bdb02a7003f54c4d454590378079",
+    url = "https://cache-redirector.jetbrains.com/packages.jetbrains.team/maven/p/ij/intellij-dependencies/org/jetbrains/intellij/deps/android/tools/streaming/ffmpeg-bundle/ffmpeg/6.0-1.5.9-189/ffmpeg-6.0-1.5.9-189.jar",
+)
+
+http_file(
+    name = "org_jetbrains_intellij_deps_android_tools_streaming_ffmpeg-bundle-javacpp-1_5_9-189_http",
+    downloaded_file_path = "javacpp-1.5.9-189.jar",
+    sha256 = "1f85780cda084ba11fe0611558397d02486154777226eedee640d2867ce4231d",
+    url = "https://cache-redirector.jetbrains.com/packages.jetbrains.team/maven/p/ij/intellij-dependencies/org/jetbrains/intellij/deps/android/tools/streaming/ffmpeg-bundle/javacpp/1.5.9-189/javacpp-1.5.9-189.jar",
+)
+
+http_file(
+    name = "org_jetbrains_intellij_deps_android_tools_streaming_ffmpeg-bundle-ffmpeg-linux-x86_64-6_0-1_5_9-189_http",
+    downloaded_file_path = "ffmpeg-linux-x86_64-6.0-1.5.9-189.jar",
+    sha256 = "3b26dc266a24da542c012a08e445b8a212703d152d0f0e4663dd7d253bebe819",
+    url = "https://cache-redirector.jetbrains.com/packages.jetbrains.team/maven/p/ij/intellij-dependencies/org/jetbrains/intellij/deps/android/tools/streaming/ffmpeg-bundle/ffmpeg-linux-x86_64/6.0-1.5.9-189/ffmpeg-linux-x86_64-6.0-1.5.9-189.jar",
+)
+
+http_file(
+    name = "org_jetbrains_intellij_deps_android_tools_streaming_ffmpeg-bundle-ffmpeg-macosx-arm64-6_0-1_5_9-189_http",
+    downloaded_file_path = "ffmpeg-macosx-arm64-6.0-1.5.9-189.jar",
+    sha256 = "9613ae5ae4f418e2cd0a4235bcd2911cb9b56ae9e42cc7e672fbc5031bd35d57",
+    url = "https://cache-redirector.jetbrains.com/packages.jetbrains.team/maven/p/ij/intellij-dependencies/org/jetbrains/intellij/deps/android/tools/streaming/ffmpeg-bundle/ffmpeg-macosx-arm64/6.0-1.5.9-189/ffmpeg-macosx-arm64-6.0-1.5.9-189.jar",
+)
+
+http_file(
+    name = "org_jetbrains_intellij_deps_android_tools_streaming_ffmpeg-bundle-ffmpeg-macosx-x86_64-6_0-1_5_9-189_http",
+    downloaded_file_path = "ffmpeg-macosx-x86_64-6.0-1.5.9-189.jar",
+    sha256 = "949cf2be2d54ccd9e4f13f9df456190c85738bebb054f50c74e896e31c43d922",
+    url = "https://cache-redirector.jetbrains.com/packages.jetbrains.team/maven/p/ij/intellij-dependencies/org/jetbrains/intellij/deps/android/tools/streaming/ffmpeg-bundle/ffmpeg-macosx-x86_64/6.0-1.5.9-189/ffmpeg-macosx-x86_64-6.0-1.5.9-189.jar",
+)
+
+http_file(
+    name = "org_jetbrains_intellij_deps_android_tools_streaming_ffmpeg-bundle-ffmpeg-windows-x86_64-6_0-1_5_9-189_http",
+    downloaded_file_path = "ffmpeg-windows-x86_64-6.0-1.5.9-189.jar",
+    sha256 = "c2dba4e82e5ad865412f72b8f02ff5462088666100f9734b46a4023bac3e2a5c",
+    url = "https://cache-redirector.jetbrains.com/packages.jetbrains.team/maven/p/ij/intellij-dependencies/org/jetbrains/intellij/deps/android/tools/streaming/ffmpeg-bundle/ffmpeg-windows-x86_64/6.0-1.5.9-189/ffmpeg-windows-x86_64-6.0-1.5.9-189.jar",
+)
+
+http_file(
+    name = "org_jetbrains_intellij_deps_android_tools_streaming_ffmpeg-bundle-javacpp-linux-x86_64-1_5_9-189_http",
+    downloaded_file_path = "javacpp-linux-x86_64-1.5.9-189.jar",
+    sha256 = "433fd379cf807f5507318b77d83ad46c30a77b34beab868d5f925b939d73aef7",
+    url = "https://cache-redirector.jetbrains.com/packages.jetbrains.team/maven/p/ij/intellij-dependencies/org/jetbrains/intellij/deps/android/tools/streaming/ffmpeg-bundle/javacpp-linux-x86_64/1.5.9-189/javacpp-linux-x86_64-1.5.9-189.jar",
+)
+
+http_file(
+    name = "org_jetbrains_intellij_deps_android_tools_streaming_ffmpeg-bundle-javacpp-macosx-arm64-1_5_9-189_http",
+    downloaded_file_path = "javacpp-macosx-arm64-1.5.9-189.jar",
+    sha256 = "d35f7a03198f8f71d20e0838c8feb1576680ec1e16693246f200afcfe69e7f2d",
+    url = "https://cache-redirector.jetbrains.com/packages.jetbrains.team/maven/p/ij/intellij-dependencies/org/jetbrains/intellij/deps/android/tools/streaming/ffmpeg-bundle/javacpp-macosx-arm64/1.5.9-189/javacpp-macosx-arm64-1.5.9-189.jar",
+)
+
+http_file(
+    name = "org_jetbrains_intellij_deps_android_tools_streaming_ffmpeg-bundle-javacpp-macosx-x86_64-1_5_9-189_http",
+    downloaded_file_path = "javacpp-macosx-x86_64-1.5.9-189.jar",
+    sha256 = "974868dc67392dcf2c2443e0b75fe0840d114da7cd5a9b7ea3024b1cfa4ceef1",
+    url = "https://cache-redirector.jetbrains.com/packages.jetbrains.team/maven/p/ij/intellij-dependencies/org/jetbrains/intellij/deps/android/tools/streaming/ffmpeg-bundle/javacpp-macosx-x86_64/1.5.9-189/javacpp-macosx-x86_64-1.5.9-189.jar",
+)
+
+http_file(
+    name = "org_jetbrains_intellij_deps_android_tools_streaming_ffmpeg-bundle-javacpp-windows-x86_64-1_5_9-189_http",
+    downloaded_file_path = "javacpp-windows-x86_64-1.5.9-189.jar",
+    sha256 = "3fa369db5c0cdeb9fe3382512b874a3ccddd5f2799a31b564c438102f1aa7b86",
+    url = "https://cache-redirector.jetbrains.com/packages.jetbrains.team/maven/p/ij/intellij-dependencies/org/jetbrains/intellij/deps/android/tools/streaming/ffmpeg-bundle/javacpp-windows-x86_64/1.5.9-189/javacpp-windows-x86_64-1.5.9-189.jar",
 )
 
 http_file(
@@ -15580,34 +15363,6 @@ http_file(
     downloaded_file_path = "tips-webstorm-241.72.jar",
     sha256 = "ad5067f70be670b07a22f6e403d51486370ae9d3e22fc8930b0abfdb3c02fae9",
     url = "https://cache-redirector.jetbrains.com/packages.jetbrains.team/maven/p/ij/intellij-dependencies/com/jetbrains/intellij/documentation/tips-webstorm/241.72/tips-webstorm-241.72.jar",
-)
-
-http_file(
-    name = "com_google_truth-truth-0_42_http",
-    downloaded_file_path = "truth-0.42.jar",
-    sha256 = "dd652bdf0c4427c59848ac0340fd6b6d20c2cbfaa3c569a8366604dbcda5214c",
-    url = "https://cache-redirector.jetbrains.com/repo1.maven.org/maven2/com/google/truth/truth/0.42/truth-0.42.jar",
-)
-
-http_file(
-    name = "com_googlecode_java-diff-utils-diffutils-1_3_0_http",
-    downloaded_file_path = "diffutils-1.3.0.jar",
-    sha256 = "61ba4dc49adca95243beaa0569adc2a23aedb5292ae78aa01186fa782ebdc5c2",
-    url = "https://cache-redirector.jetbrains.com/repo1.maven.org/maven2/com/googlecode/java-diff-utils/diffutils/1.3.0/diffutils-1.3.0.jar",
-)
-
-http_file(
-    name = "com_google_truth-truth-0_42-sources_http",
-    downloaded_file_path = "truth-0.42-sources.jar",
-    sha256 = "8cd0b42e58406ad1a4554235035d4d98f1897d182a1e4d064d6a3dab047f55f9",
-    url = "https://cache-redirector.jetbrains.com/repo1.maven.org/maven2/com/google/truth/truth/0.42/truth-0.42-sources.jar",
-)
-
-http_file(
-    name = "com_googlecode_java-diff-utils-diffutils-1_3_0-sources_http",
-    downloaded_file_path = "diffutils-1.3.0-sources.jar",
-    sha256 = "7f4d40e97827f8a3285c3e47e8d28797ecfd45fb2ff94bd12cb6a83760a5f427",
-    url = "https://cache-redirector.jetbrains.com/repo1.maven.org/maven2/com/googlecode/java-diff-utils/diffutils/1.3.0/diffutils-1.3.0-sources.jar",
 )
 
 http_file(
