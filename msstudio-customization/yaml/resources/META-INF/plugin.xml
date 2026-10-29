@@ -1,0 +1,24 @@
+<!-- BUILD_USING_BAZEL_MARKER: this plugin is also packaged by the `ij_plugin` Bazel rule, and IjPluginDistributionEquivalenceTest
+     checks that the result matches the distribution produced by the build scripts. See IJPL-251444. -->
+<idea-plugin>
+  <id>com.intellij.msstudio.yaml</id>
+  <name>MSStudio YAML</name>
+  <vendor>JetBrains</vendor>
+  <description><![CDATA[
+    YAML support for MSStudio: version-aware completion for Minecraft server configs.
+  ]]></description>
+
+  <!-- region Generated dependencies - run `Generate Product Layouts` to regenerate -->
+  <dependencies>
+    <module name="intellij.libraries.asm"/>
+    <module name="intellij.msstudio.ide.customization"/>
+    <module name="intellij.platform.analysis"/>
+    <module name="intellij.platform.core"/>
+    <module name="intellij.yaml"/>
+  </dependencies>
+  <!-- endregion -->
+  <extensions defaultExtensionNs="com.intellij">
+    <completion.contributor language="yaml"
+                            implementationClass="com.intellij.msstudio.yaml.material.YamlMaterialCompletionContributor"/>
+  </extensions>
+</idea-plugin>
