@@ -708,6 +708,14 @@ budget and the hard stop each write a build problem with the identity `lane-run-
 of a run that is not green and the hard stop also keep its evidence in `lane/` of `TEST_UNDECLARED_OUTPUTS_DIR`, as
 the next section states.
 
+`lane-run` runs each failed scenario of the lane IDE once more, on a recycled IDE, after the last suite of the lane
+IDE. A pass of the rerun makes the run green, and the JUnit XML keeps both attempts, so TeamCity shows the test as
+flaky when the build has the failure condition "Support test retry". More than 3 failures rerun nothing. The lane
+daemon of a worker reruns nothing, so `vm.cmd run` shows each flake.
+`env AIR_LANE_INJECT_FAILURE='first:<scenario>'` (or `every:`) with `--test_env` fails a scenario on purpose, to
+see the rerun. [lane-run reruns each failed scenario once](decisions/2026-10-29-lane-run-reruns-each-failed-scenario-once.md)
+records why.
+
 **The versioned JSON report is the contract, and the run stream is its one source.** The report, the
 JUnit XML and the TeamCity service messages are three readers of that stream. The controller writes
 the XML of each iteration beside its report, and the XML of the command to the file that
@@ -865,7 +873,7 @@ that could not be pulled leaves a green run green.
 | launcher | where the bundles land | who cleans up |
 | --- | --- | --- |
 | the lane daemon on a worker | `$AIR_VM_DATA/daemon/iterations/<iterationId>/air-traces` in the guest, then pulled after each test to `<runtime root>/runs/<runId>/traces/<iterationId>/<NNN>.zip` | the guest's iteration retention; the run directory on the host |
-| a `vm.cmd` run with `AIR_VM_EXPORT`, such as a run on the Mac Studio through yonder | a copy of the run's journal, its reports and the zips of the scenarios that did not pass (`all`: every zip) in `out/air/vm-export/runs/<runId>/` of the checkout. `.yonder.toml` sets the variable and names the directory in its `outputs`, so yonder copies it back. Under `failed`, a run that failed nothing exports nothing | the next yonder run with an export, which replaces the directory |
+| a `vm.cmd` run with `AIR_VM_EXPORT`, such as a run on the Mac Studio through `bd-host` | a copy of the run's journal, its reports and the zips of the scenarios that did not pass (`all`: every zip) in `out/air/vm-export/runs/<runId>/` of the checkout. `[host]` of `.branchdeck.toml` sets the variable and names the directory in its `outputs`, so `bd-host` copies it back. Under `failed`, a run that failed nothing exports nothing | the next `bd-host` run with an export, which replaces the directory |
 | a Bazel test, host `bt.cmd` included | `air-traces/` in the target's `bazel-testlogs/.../test.outputs/`, with `lane/` beside it for a run that is not green. A local Bazel packs them into `outputs.zip` there, and the TeamCity build keeps them as files in `bazel.logs.zip` | Bazel |
 
 A bundle is `<root>/<runId>/<TestClass>/<scenario>/`. A second attempt of the same scenario in one run is

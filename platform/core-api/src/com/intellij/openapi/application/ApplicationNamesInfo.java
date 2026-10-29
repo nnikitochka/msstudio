@@ -1,6 +1,7 @@
 // Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.application;
 
+import com.intellij.openapi.util.BuildNumber;
 import com.intellij.openapi.util.NlsSafe;
 import com.intellij.util.PlatformUtils;
 import com.intellij.util.xml.dom.XmlDomReader;
@@ -81,6 +82,16 @@ public final class ApplicationNamesInfo {
     XmlElement buildNode = data.getChild("build");
     assert buildNode != null;
     buildNode.attributes.put("number", System.getProperty("qodana.build.number", "QD-SNAPSHOT"));
+
+    String qodanaBuildDate = System.getProperty("qodana.build.date");
+    if (qodanaBuildDate == null || qodanaBuildDate.isEmpty()) {
+      String buildNumber = System.getProperty("qodana.build.number", "QD-SNAPSHOT");
+      if (!BuildNumber.fromString(buildNumber).isSnapshot()) {
+        throw new RuntimeException("qodana.build.date system property must be set for Qodana");
+      }
+    } else {
+      buildNode.attributes.put("date", qodanaBuildDate);
+    }
 
     String qodanaEap = System.getProperty("qodana.eap", "false");
     XmlElement versionNode = data.getChild("version");

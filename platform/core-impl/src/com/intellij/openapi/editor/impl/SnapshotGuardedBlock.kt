@@ -12,27 +12,24 @@ import com.intellij.openapi.util.TextRangeScalarUtil
 internal class SnapshotGuardedBlock private constructor(
     document: DocumentImpl,
     fileRoot: VirtualFileMarkerRoot?,
-    markerId: Long,
     initialSpec: Byte,
     initialRange: Long,
-) : SnapshotRangeMarkerImpl(document, fileRoot, markerId, initialSpec, initialRange, PersistentMarkerPolicy) {
+) : SnapshotRangeMarkerImpl(document, fileRoot, initialSpec, initialRange, retainStrong = true) {
   override fun getFlavorFlags(): Byte = GuardedBlock.GUARD_BLOCK_FLAVOR_FLAG
 
   companion object {
     @JvmStatic
     fun create(document: DocumentImpl, startOffset: Int, endOffset: Int): SnapshotGuardedBlock {
-      val snapshot = document.core.snapshot()
       val spec = MarkerSpec.create(isGreedyToLeft = false, isGreedyToRight = false)
       val initialRange = TextRangeScalarUtil.toScalarRange(startOffset, endOffset)
       return SnapshotMarkerEngineImpl.createRangeMarker(
         document,
-        snapshot,
         startOffset,
         endOffset,
         spec,
-        retainStrong = true,
-      ) { fileRoot, markerId ->
-        SnapshotGuardedBlock(document, fileRoot, markerId, spec, initialRange)
+        PersistentMarkerPolicy,
+      ) { fileRoot ->
+        SnapshotGuardedBlock(document, fileRoot, spec, initialRange)
       }
     }
   }

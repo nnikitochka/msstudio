@@ -16,7 +16,7 @@ load("//platform/build-scripts/bazel-rules:dev_dist_product_files.bzl", "dev_dis
 load("//platform/build-scripts/bazel-rules:dev_dist_runtime_module_repository.bzl", "dev_dist_runtime_layout_parts", "dev_dist_runtime_module_repository")
 load("//platform/build-scripts/bazel-rules:intellij_dev_dist.bzl", "intellij_dev_fragments_dist", "intellij_dev_packed_jars_component")
 load(":dev_launch_dependencies.bzl", "HOST_PLATFORMS", "jbr_runtime_executable_list_label", "jbr_runtime_repository_label", "platform_parts")
-load(":intellij_dev.bzl", "export_vm_options", "intellij_dev_java_launcher_binary")
+load(":intellij_dev.bzl", "export_vm_options", "intellij_dev_dist_config", "intellij_dev_java_launcher_binary")
 
 def _plugin_component_entries(platform_prefix, tier, entries):
     """Reads one tier of the generated component map as `struct(main_module, label, labels)` entries.
@@ -683,12 +683,14 @@ def _declare_fragments_dist(
         target_platform,
         create_local_launch,
         catalogue,
-        export_attrs = {}):
+        export_attrs = {},
+        export_visibility = None):
     """Declares the distribution `name` and, with `create_local_launch`, `<name>_launch` over `catalogue`.
 
     `catalogue` is `_plugin_component_catalogue(tables, product)`. A caller that declares several distributions of one
     product reads it once and passes it to each. `export_attrs` holds the attributes that only the export takes: the
-    sibling vmoptions attributes of `export_vm_options` in `intellij_dev.bzl`.
+    sibling vmoptions attributes of `export_vm_options` in `intellij_dev.bzl`. `export_visibility`, when set, is the
+    visibility of the export instead of `visibility`.
     """
     bundled_components = _plugin_components(target_platform, catalogue.bundled)
 
@@ -731,7 +733,7 @@ def _declare_fragments_dist(
     for local_launch in [False, True] if create_local_launch else [False]:
         intellij_dev_fragments_dist(
             name = name + ("_launch" if local_launch else ""),
-            visibility = visibility,
+            visibility = visibility if local_launch or export_visibility == None else export_visibility,
             tags = ["manual"],
             composer = tables.composer,
             fragments = fragments,
@@ -739,6 +741,7 @@ def _declare_fragments_dist(
             product_info = _product_info_label(tables, product),
             expect_fragments = expect_fragments,
             additional_modules = additional_modules,
+            bundled_modules = bundled_components.modules,
             local_launch = local_launch,
             home_prefix = prefix,
             **({} if local_launch else export_attrs)
@@ -769,23 +772,54 @@ def _check_plan(tables, name, product):
     if _community_product(tables, product) == None and product not in tables.plans:
         fail("%s: product '%s' has no generated dev-distribution plan; add it to the split distributions of its generator half and run plugin-model-tool" % (name, product))
 
-def _distribution_name(names):
-    """The distribution name of a group of rows: the shortest row name, ties in alphabetical order."""
-    return sorted(names, key = lambda name: (len(name), name))[0]
-
 def _distribution_groups(rows):
     """The rows of `DEV_RUN_CONFIGURATIONS` grouped by the distribution they share.
 
-    The result maps `(product, additional_modules, runtime_module_repository)` to the row names, in row order.
+    The plan generator names the distribution of each row in its `distribution` field. The result maps that name to
+    `struct(product, additional_modules, runtime_module_repository, names)`, with the row names in row order. Rows
+    that state one distribution and another product, `additional_modules` or `runtime_module_repository` fail. So do
+    rows that state the same three and two distributions.
     """
     groups = {}
+    names_by_key = {}
     for name, row in rows.items():
-        key = (row.product, tuple(getattr(row, "additional_modules", [])), getattr(row, "runtime_module_repository", False))
-        groups.setdefault(key, []).append(name)
+        distribution = getattr(row, "distribution", None)
+        if not distribution:
+            fail("%s: the row states no distribution; run the plan generator of its half" % name)
+        additional_modules = getattr(row, "additional_modules", [])
+        runtime_module_repository = getattr(row, "runtime_module_repository", False)
+        key = (row.product, tuple(additional_modules), runtime_module_repository)
+        known = names_by_key.setdefault(key, distribution)
+        if known != distribution:
+            fail("%s: the row states the distribution '%s', and a row with the same product, additional_modules and runtime_module_repository states '%s'" % (
+                name,
+                distribution,
+                known,
+            ))
+        group = groups.get(distribution)
+        if group == None:
+            groups[distribution] = struct(
+                product = row.product,
+                additional_modules = additional_modules,
+                runtime_module_repository = runtime_module_repository,
+                names = [name],
+            )
+            continue
+        if (group.product, group.additional_modules, group.runtime_module_repository) != (row.product, additional_modules, runtime_module_repository):
+            fail("%s: the row states the distribution '%s' of '%s' with another product, additional_modules or runtime_module_repository" % (
+                name,
+                distribution,
+                group.names[0],
+            ))
+        group.names.append(name)
     return groups
 
-def _declare_run_distribution(tables, name, product, additional_modules, runtime_module_repository, catalogue, visibility):
+def _declare_run_distribution(tables, name, product, additional_modules, runtime_module_repository, catalogue, visibility, export_visibility = None):
     """The distribution of one or more launchers: the self-contained `<name>_dist` and the local launch `<name>_dist_launch`.
+
+    `<name>_dist_ide_config` is the config file of `<name>_dist`, for `$(rlocationpath ...)`. A test that declares both
+    in `data` runs on the distribution, see `PrebuiltDevDistRunner`. `export_visibility`, when set, is the visibility
+    of the two instead of `visibility`.
 
     A row starts over the placement of `_dist_launch`, and on Windows over the home of `_dist`. A distribution with
     `runtime_module_repository` composes the `platform_runtime_module_repository` component of its product, which
@@ -814,6 +848,13 @@ def _declare_run_distribution(tables, name, product, additional_modules, runtime
             name + "_dist",
             runtime_module_repository = runtime_module_repository and not _modular_loader(tables, product),
         ),
+        export_visibility = export_visibility,
+    )
+    intellij_dev_dist_config(
+        name = name + "_dist_ide_config",
+        dist = ":" + name + "_dist",
+        tags = ["manual"],
+        visibility = visibility if export_visibility == None else export_visibility,
     )
 
 def _check_before_run(tables, name, jvm_flags, compile_clion_backend_before_run):
@@ -891,11 +932,12 @@ def _launch_assembles_test(name, rows, tags):
 def _run_configurations(tables, rows):
     """The launchers of `DEV_RUN_CONFIGURATIONS`. The factory result documents it as `run_configurations`."""
     catalogues = {}
-    for key, names in _distribution_groups(rows).items():
-        product, additional_modules, runtime_module_repository = key
+    for distribution, group in _distribution_groups(rows).items():
+        product = group.product
+        additional_modules = group.additional_modules
+        runtime_module_repository = group.runtime_module_repository
         if product not in catalogues:
             catalogues[product] = _plugin_component_catalogue(tables, product)
-        distribution = _distribution_name(names)
         _declare_run_distribution(
             tables = tables,
             name = distribution,
@@ -904,8 +946,10 @@ def _run_configurations(tables, rows):
             runtime_module_repository = runtime_module_repository,
             catalogue = catalogues[product],
             visibility = None,
+            # A test target declares the export and its config file, see `PrebuiltDevDistRunner`.
+            export_visibility = ["//visibility:public"],
         )
-        for name in names:
+        for name in group.names:
             row = rows[name]
             _declare_run_launcher(
                 tables = tables,
@@ -1072,11 +1116,12 @@ def intellij_dev_dist_declarations(tables):
     def run_configurations(rows):
         """The launchers of `DEV_RUN_CONFIGURATIONS`, the rows the plan generator writes into `dev_server_run_configurations.bzl`.
 
-        `rows` maps a launcher name to `struct(product, additional_modules?, jvm_flags?, program_args?, env?,
-        runtime_module_repository?, compile_clion_backend_before_run?)`. Rows with the same product,
-        `additional_modules` and `runtime_module_repository` share one distribution, named by `distribution_name`, and
-        each row is one launcher over it. A launch-time flag therefore never splits a distribution, and two rows of one
-        product compose once. The plugin catalogue of a product is read once for all its distributions.
+        `rows` maps a launcher name to `struct(product, distribution, additional_modules?, jvm_flags?, program_args?,
+        env?, runtime_module_repository?, compile_clion_backend_before_run?)`. Rows with the same product,
+        `additional_modules` and `runtime_module_repository` share one distribution, which the generator names in
+        `distribution`, and each row is one launcher over it. A launch-time flag therefore never splits a distribution,
+        and two rows of one product compose once. The plugin catalogue of a product is read once for all its
+        distributions.
         """
         _run_configurations(tables, rows)
 
@@ -1121,7 +1166,6 @@ def intellij_dev_dist_declarations(tables):
             implementation = run_configuration_impl,
             attrs = _RUN_CONFIGURATION_ATTRS,
         ),
-        distribution_name = _distribution_name,
         distribution_groups = _distribution_groups,
         plugin_component_catalogue = lambda product: _plugin_component_catalogue(tables, product),
         plugin_components = _plugin_components,

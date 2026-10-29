@@ -41,6 +41,17 @@ and a context, but no value: it reads the current value itself.
   [@test] ../test/src/com/intellij/platform/settings/v2/SettingsChangeListenerTest.kt
 - A contextual listener must ignore other keys and changes outside its context chain.
   [@test] ../test/src/com/intellij/platform/settings/v2/SettingsChangeListenerTest.kt
+- A reload that changes the value of an ancestor must fire a contextual listener at a descendant context, also when
+  no layer at the descendant context changed.
+  [@test] ../test/src/com/intellij/platform/settings/v2/SettingsReloadListenerTest.kt
+- The vault must deliver a notification only when the context that it carries is ready. A key-only event carries
+  the context of the change, and a contextual listener carries its own context. The vault queues a notification at
+  a dirty context, and delivers it when the context gets ready. This applies to a reload, a write and a push.
+  See [ADR 0161](../adr/0161-a-listener-notification-waits-until-the-context-it-carries-is-ready.md).
+  [@test] ../test/src/com/intellij/platform/settings/v2/SettingsQueuedNotificationTest.kt
+- A queued contextual listener must fire only on a net change of its value. A queued key-only event must fire once
+  per pair of a key and a changed context.
+  [@test] ../test/src/com/intellij/platform/settings/v2/SettingsQueuedNotificationTest.kt
 - `key.addListener(disposable, listener)` must fire on a change of the key at any context. It carries the context
   where the change happened.
   [@test] ../test/src/com/intellij/platform/settings/v2/SettingsChangeListenerTest.kt
@@ -55,10 +66,11 @@ and a context, but no value: it reads the current value itself.
   [@test] ../test/src/com/intellij/platform/settings/v2/PerFileLayerTest.kt
 - A listener on a map key must be rejected.
   [@test] ../test/src/com/intellij/platform/settings/v2/SettingsChangeListenerTest.kt
-- Disposing the `disposable` must remove the listener.
+- Disposing the `disposable` must remove the listener. A listener whose notification is queued must not fire after
+  the disposal.
   [@test] ../test/src/com/intellij/platform/settings/v2/SettingsChangeListenerTest.kt
+  [@test] ../test/src/com/intellij/platform/settings/v2/SettingsQueuedNotificationTest.kt
 - A contextual listener must fire at most once per model change, even when the change touches many layers.
-  Exception: two notifications at the same time can fire it twice for one change. See the risks below.
   [@test] ../test/src/com/intellij/platform/settings/v2/SettingsChangeListenerTest.kt
 - A key-only listener must fire at most once per changed context in one model change. Each call carries one of
   these contexts.
@@ -72,7 +84,6 @@ and a context, but no value: it reads the current value itself.
 
 ## Open Questions / Risks
 
-- The vault notifies the listeners outside its lock. Two notifications can compare against the same old value and
-  fire a contextual listener twice for one change. This is accepted: it is rare, and a listener reads the current
-  value anyway.
 - No listener observes every key at a context.
+- A key-only event arrives when its context is ready, but a context under it can still be dirty. A listener that
+  reads there must check the readiness itself.

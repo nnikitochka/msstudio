@@ -61,7 +61,10 @@ override it.
 
 ## Decision records
 
-- An ADR is `adr/NNNN-<slug>.md`. Numbers are sequential and never reused.
+- An ADR is `adr/NNNN-<slug>.md`.
+- Numbers are sequential and never reused: each number from `0001` up to the highest belongs to exactly one ADR
+  file or one fold entry `### NNNN,`. `SettingsDocsTest` checks it. After a rebase, a clash with another branch
+  fails the check. Then renumber your ADR and its links.
 - The title states the decision as a sentence, not a topic.
 - Sections: `Status`, `Context`, `Decision`, `Consequences`, and `Rejected alternatives` when there were real
   alternatives. A `Date:` line follows the title.
@@ -70,6 +73,8 @@ override it.
   issue.
 - An agent writes a new ADR as `Proposed`. Only the user accepts it. The agent sets `Accepted` only after the user
   says so, in the conversation. Code and specs may follow a `Proposed` ADR.
+- A `Proposed` ADR does not go to master. `SettingsDocsTest` fails on each `Proposed` ADR, also during the work on a
+  branch. Such a failure is expected until the user accepts the ADR.
 - A `Proposed` ADR that amends or supersedes another ADR does not change the status of that ADR. The old status
   changes when the new ADR is accepted.
 - An accepted ADR is not rewritten. A change to the decision is a new ADR that amends or supersedes it, and only
@@ -117,6 +122,9 @@ decision with its reason. A merge only reorganizes what the ADRs already say. It
 
      The decision and its consequences. Why it changed, and which later decision replaced it.
      ```
+
+     A folded ADR can be a merged ADR itself. Then its fold entries move into the new merged ADR. Every entry, moved
+     or new, stays in time order. `SettingsDocsTest` fails on a fold entry that the merge lost.
 3. Compare each folded ADR with the merged ADR. Every reason, consequence, example, rejected alternative and name
    of a person who agreed must be in the merged ADR. Then delete the files of the folded ADRs.
 4. Re-point the references in `adr/`, `spec/`, the sources of all the settings v2 modules, and the `AGENTS.md`
@@ -128,5 +136,5 @@ decision with its reason. A merge only reorganizes what the ADRs already say. It
    - An older ADR that names the merged ADR can read as if it came later. Write
      `the key identity rule ([ADR 0124](...))`, not `[ADR 0124](...) allowed`.
    - An ADR that named two ADRs of the chain now names the merged ADR twice. Keep one.
-6. Run `SettingsDocsTest`. Both checks must pass. Commit one chain per commit. The subject names the decision and
+6. Run `SettingsDocsTest`. Every check must pass. Commit one chain per commit. The subject names the decision and
    the merged number, and the message lists the folded numbers.

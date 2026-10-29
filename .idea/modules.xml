@@ -130,6 +130,8 @@
       <module fileurl="file://$PROJECT_DIR$/android/compose-designer/intellij.android.compose-designer.tests.iml" filepath="$PROJECT_DIR$/android/compose-designer/intellij.android.compose-designer.tests.iml" />
       <module fileurl="file://$PROJECT_DIR$/android/compose-ide-plugin/intellij.android.compose-ide-plugin.iml" filepath="$PROJECT_DIR$/android/compose-ide-plugin/intellij.android.compose-ide-plugin.iml" />
       <module fileurl="file://$PROJECT_DIR$/android/compose-ide-plugin/intellij.android.compose-ide-plugin.tests.iml" filepath="$PROJECT_DIR$/android/compose-ide-plugin/intellij.android.compose-ide-plugin.tests.iml" />
+      <module fileurl="file://$PROJECT_DIR$/android/android-concurrency/intellij.android.concurrency.iml" filepath="$PROJECT_DIR$/android/android-concurrency/intellij.android.concurrency.iml" />
+      <module fileurl="file://$PROJECT_DIR$/android/android-concurrency/intellij.android.concurrency.tests.iml" filepath="$PROJECT_DIR$/android/android-concurrency/intellij.android.concurrency.tests.iml" />
       <module fileurl="file://$PROJECT_DIR$/android/connection-assistant/intellij.android.connection-assistant.iml" filepath="$PROJECT_DIR$/android/connection-assistant/intellij.android.connection-assistant.iml" />
       <module fileurl="file://$PROJECT_DIR$/android/connection-assistant/intellij.android.connection-assistant-test.iml" filepath="$PROJECT_DIR$/android/connection-assistant/intellij.android.connection-assistant-test.iml" />
       <module fileurl="file://$PROJECT_DIR$/android/android/intellij.android.core.iml" filepath="$PROJECT_DIR$/android/android/intellij.android.core.iml" />
@@ -344,6 +346,8 @@
       <module fileurl="file://$PROJECT_DIR$/android/streaming/intellij.android.streaming.integration.iml" filepath="$PROJECT_DIR$/android/streaming/intellij.android.streaming.integration.iml" />
       <module fileurl="file://$PROJECT_DIR$/android/streaming/intellij.android.streaming.testUtil.iml" filepath="$PROJECT_DIR$/android/streaming/intellij.android.streaming.testUtil.iml" />
       <module fileurl="file://$PROJECT_DIR$/android/streaming/intellij.android.streaming.tests.iml" filepath="$PROJECT_DIR$/android/streaming/intellij.android.streaming.tests.iml" />
+      <module fileurl="file://$PROJECT_DIR$/android/studio-flags/intellij.android.studio-flags.iml" filepath="$PROJECT_DIR$/android/studio-flags/intellij.android.studio-flags.iml" />
+      <module fileurl="file://$PROJECT_DIR$/android/studio-flags/intellij.android.studio-flags-tests.iml" filepath="$PROJECT_DIR$/android/studio-flags/intellij.android.studio-flags-tests.iml" />
       <module fileurl="file://$PROJECT_DIR$/android/studio/integration/intellij.android.studio.integration/intellij.android.studio.integration.iml" filepath="$PROJECT_DIR$/android/studio/integration/intellij.android.studio.integration/intellij.android.studio.integration.iml" />
       <module fileurl="file://$PROJECT_DIR$/android/studio/tests/intellij.android.studio.tests.iml" filepath="$PROJECT_DIR$/android/studio/tests/intellij.android.studio.tests.iml" />
       <module fileurl="file://$PROJECT_DIR$/android/sync-memory-tests/intellij.android.sync-memory-tests.iml" filepath="$PROJECT_DIR$/android/sync-memory-tests/intellij.android.sync-memory-tests.iml" />
@@ -602,6 +606,7 @@
       <module fileurl="file://$PROJECT_DIR$/plugins/grazie/json/intellij.grazie.json.iml" filepath="$PROJECT_DIR$/plugins/grazie/json/intellij.grazie.json.iml" />
       <module fileurl="file://$PROJECT_DIR$/plugins/grazie/markdown/intellij.grazie.markdown.iml" filepath="$PROJECT_DIR$/plugins/grazie/markdown/intellij.grazie.markdown.iml" />
       <module fileurl="file://$PROJECT_DIR$/plugins/grazie/markdown/specification/intellij.grazie.markdown.specification.iml" filepath="$PROJECT_DIR$/plugins/grazie/markdown/specification/intellij.grazie.markdown.specification.iml" />
+      <module fileurl="file://$PROJECT_DIR$/plugins/grazie/markdown/specification/test/intellij.grazie.markdown.specification.tests.iml" filepath="$PROJECT_DIR$/plugins/grazie/markdown/specification/test/intellij.grazie.markdown.specification.tests.iml" />
       <module fileurl="file://$PROJECT_DIR$/plugins/grazie/properties/intellij.grazie.properties.iml" filepath="$PROJECT_DIR$/plugins/grazie/properties/intellij.grazie.properties.iml" />
       <module fileurl="file://$PROJECT_DIR$/plugins/grazie/src/test/intellij.grazie.tests.iml" filepath="$PROJECT_DIR$/plugins/grazie/src/test/intellij.grazie.tests.iml" />
       <module fileurl="file://$PROJECT_DIR$/plugins/grazie/todo/intellij.grazie.todo.iml" filepath="$PROJECT_DIR$/plugins/grazie/todo/intellij.grazie.todo.iml" />
@@ -2417,6 +2422,7 @@
       <module fileurl="file://$PROJECT_DIR$/tools/intellij.tools.ide.starter/intellij.tools.ide.starter.iml" filepath="$PROJECT_DIR$/tools/intellij.tools.ide.starter/intellij.tools.ide.starter.iml" />
       <module fileurl="file://$PROJECT_DIR$/tools/intellij.tools.ide.starter.bazel/intellij.tools.ide.starter.bazel.iml" filepath="$PROJECT_DIR$/tools/intellij.tools.ide.starter.bazel/intellij.tools.ide.starter.bazel.iml" />
       <module fileurl="file://$PROJECT_DIR$/tools/intellij.tools.ide.starter.build.server/intellij.tools.ide.starter.build.server.iml" filepath="$PROJECT_DIR$/tools/intellij.tools.ide.starter.build.server/intellij.tools.ide.starter.build.server.iml" />
+      <module fileurl="file://$PROJECT_DIR$/tools/intellij.tools.ide.starter.build.server/intellij.tools.ide.starter.build.server.tests.iml" filepath="$PROJECT_DIR$/tools/intellij.tools.ide.starter.build.server/intellij.tools.ide.starter.build.server.tests.iml" />
       <module fileurl="file://$PROJECT_DIR$/plugins/performanceTesting/event-bus/intellij.tools.ide.starter.bus.iml" filepath="$PROJECT_DIR$/plugins/performanceTesting/event-bus/intellij.tools.ide.starter.bus.iml" />
       <module fileurl="file://$PROJECT_DIR$/plugins/performanceTesting/event-bus/intellij.tools.ide.starter.bus.tests.iml" filepath="$PROJECT_DIR$/plugins/performanceTesting/event-bus/intellij.tools.ide.starter.bus.tests.iml" />
       <module fileurl="file://$PROJECT_DIR$/tools/intellij.tools.ide.starter.driver/intellij.tools.ide.starter.driver.iml" filepath="$PROJECT_DIR$/tools/intellij.tools.ide.starter.driver/intellij.tools.ide.starter.driver.iml" />

@@ -5,16 +5,12 @@ import com.intellij.openapi.editor.Document
 import com.intellij.openapi.editor.ex.DocumentSnapshot
 import com.intellij.openapi.editor.ex.RangeMarkerEx
 import com.intellij.openapi.editor.impl.DocumentImpl
-import com.intellij.openapi.editor.impl.StripedIDGenerator
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.util.TextRangeScalarUtil
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.util.Processor
-import it.unimi.dsi.fastutil.longs.LongArrayList
 import org.jetbrains.annotations.ApiStatus
 import java.lang.ref.ReferenceQueue
-import java.lang.ref.WeakReference
-import java.util.IdentityHashMap
 
 /**
  * Mutable snapshot-marker engine backed by immutable persistent [PMarkerRoot] values in external marker stores.
@@ -22,54 +18,18 @@ import java.util.IdentityHashMap
  * The inherited, snapshot-less IntelliJ `RangeMarker` operations resolve against the current [DocumentSnapshot]
  * returned by the document captured by each marker handle.
  *
- * Marker creation and removal replace only the root associated with the selected snapshot in its document's store.
+ * Marker creation and removal update the root for the document's current snapshot.
  * Existing descendant snapshots are not changed.
  *
  * Creating a child snapshot derives its marker root from the parent's current root. Marker creation, marker removal,
  * and child creation from the same parent are linearized by atomic root operations.
  */
 object SnapshotMarkerEngineImpl : SnapshotMarkerEngine {
-  private val markerQueue: ReferenceQueue<SnapshotRangeMarkerImpl> = ReferenceQueue()
-  private val nextMarkerId: StripedIDGenerator = StripedIDGenerator().also { it.next() /* id must not be 0 */ }
-
-  @ApiStatus.Internal
-  fun nextMarkerId(): Long = nextMarkerId.next()
-
-  /**
-   * Canonical weak handle reference retained by persistent marker states until the handle can be queue-purged.
-   * Document and file-root ownership is weak so the cleanup metadata does not extend either lifetime.
-   */
-  private class QueuedMarkerReference(
-    marker: SnapshotRangeMarkerImpl,
-    document: DocumentImpl?,
-    queue: ReferenceQueue<SnapshotRangeMarkerImpl>,
-  ) : WeakSnapshotMarkerReference(marker, queue) {
-    val markerId: Long = marker.markerId
-    val documentReference: WeakReference<DocumentImpl>? = document?.let(::WeakReference)
-    val fileRootReference: WeakReference<VirtualFileMarkerRoot>? = marker.fileRoot?.let(::WeakReference)
-  }
-
-  /**
-   * Adds a marker only to [snapshot]'s current root.
-   */
-  override fun createRangeMarker(
-    document: Document,
-    snapshot: DocumentSnapshot,
-    startOffset: Int,
-    endOffset: Int,
-    spec: Byte,
-    retainStrong: Boolean,
-    policy: MarkerPolicy,
-  ): SnapshotMarker {
-    return createRangeMarker(document, snapshot, startOffset, endOffset, spec, retainStrong) { fileRoot, markerId ->
-      val initialRange = TextRangeScalarUtil.toScalarRange(startOffset, endOffset)
-      SnapshotRangeMarkerImpl(document as DocumentImpl, fileRoot, markerId, spec, initialRange, policy)
-    }
-  }
+  internal val markerQueue: ReferenceQueue<SnapshotRangeMarkerImpl> = ReferenceQueue()
 
   /** Creates a marker in the current snapshot and retries if a text change publishes another snapshot. */
   @ApiStatus.Internal
-  fun createRangeMarker(
+  override fun createRangeMarker(
     document: Document,
     startOffset: Int,
     endOffset: Int,
@@ -77,54 +37,38 @@ object SnapshotMarkerEngineImpl : SnapshotMarkerEngine {
     retainStrong: Boolean,
     policy: MarkerPolicy,
   ): SnapshotMarker {
-    return createRangeMarker(document, null, startOffset, endOffset, spec, retainStrong) { fileRoot, markerId ->
+    return createRangeMarker(document, startOffset, endOffset, spec, policy) { fileRoot ->
       val initialRange = TextRangeScalarUtil.toScalarRange(startOffset, endOffset)
-      SnapshotRangeMarkerImpl(document as DocumentImpl, fileRoot, markerId, spec, initialRange, policy)
+      SnapshotRangeMarkerImpl(document as DocumentImpl, fileRoot, spec, initialRange, retainStrong)
     }
   }
 
   /**
-   * @param snapshot the target snapshot, or `null` to use the current snapshot.
-   * If `null`, retries insertion when a text change publishes another snapshot.
-   * @param markerFactory receives the file root and a new marker ID.
+   * Creates a marker in the current snapshot and retries when a text change publishes another snapshot.
+   *
+   * @param markerFactory receives the file root.
    * The file root is `null` when the document has no associated file or [FileDocumentManager] is unavailable.
    */
   internal fun <T : SnapshotRangeMarkerImpl> createRangeMarker(
     document: Document,
-    snapshot: DocumentSnapshot?,
     startOffset: Int,
     endOffset: Int,
     spec: Byte,
-    retainStrong: Boolean = false,
-    markerFactory: (VirtualFileMarkerRoot?, Long) -> T,
+    policy: MarkerPolicy,
+    markerFactory: (VirtualFileMarkerRoot?) -> T,
   ): T {
     processQueue()
     val documentImpl = document as DocumentImpl
     val rootStore = documentImpl.rangeMarkers.rootStore()
-    val rootReference = snapshot?.let { rootStore.rootReference(it) }
     require(startOffset >= 0) { "startOffset must be non-negative" }
     require(endOffset >= startOffset) { "endOffset must not precede startOffset" }
 
     val fileRoot = VirtualFileMarkerRoot.getOrCreate(documentImpl)
 
-    val markerId = nextMarkerId()
-    val marker = markerFactory(fileRoot, markerId)
-    val markerReference = if (retainStrong) {
-      StrongSnapshotMarkerReference(marker)
-    }
-    else {
-      QueuedMarkerReference(marker, documentImpl, markerQueue)
-    }
-
-    val update: (DocumentSnapshot, PMarkerRoot) -> PMarkerRoot = { currentSnapshot, root ->
+    val marker = markerFactory(fileRoot)
+    val insertedRoot = checkNotNull(rootStore.updateCurrentRootAtomically { currentSnapshot, root ->
       require(endOffset <= currentSnapshot.text().length()) { "Marker range exceeds snapshot length" }
-      root.insert(markerId, startOffset, endOffset, spec, marker.flavorFlags, markerReference, policy = marker.policy)
-    }
-    val insertedRoot = checkNotNull(if (snapshot == null) {
-      rootStore.updateCurrentRootAtomically(update)
-    }
-    else {
-      (fileRoot ?: rootStore).updateRootAtomically(rootReference) { update(snapshot, it) }
+      root.insert(marker.markerHandle, startOffset, endOffset, spec, marker.flavorFlags, policy = policy)
     })
     marker.cacheResolution(insertedRoot, PMarkerResolution.valid(TextRangeScalarUtil.toScalarRange(startOffset, endOffset)))
     return marker
@@ -145,7 +89,6 @@ object SnapshotMarkerEngineImpl : SnapshotMarkerEngine {
 
     val cachedDocument = FileDocumentManager.getInstance().getCachedDocument(file) as? DocumentImpl
     val fileRoot = VirtualFileMarkerRoot.getOrCreate(file)
-    val markerId = nextMarkerId()
     val spec = MarkerSpec.create(
       isGreedyToLeft = false,
       isGreedyToRight = false,
@@ -159,10 +102,9 @@ object SnapshotMarkerEngineImpl : SnapshotMarkerEngine {
       null
     }
     val initialRange = TextRangeScalarUtil.toScalarRange(startOffset, startOffset)
-    val marker = SnapshotLazyRangeMarker(fileRoot, markerId, spec, initialRange, initialLineColumns, policy)
-    val markerReference = QueuedMarkerReference(marker, cachedDocument, markerQueue)
+    val marker = SnapshotLazyRangeMarker(fileRoot, spec, initialRange, initialLineColumns)
     val insertedRoot = checkNotNull(fileRoot.updateRootAtomically(null) { it: PMarkerRoot ->
-      it.insert(markerId, startOffset, startOffset, spec, marker.flavorFlags, markerReference, policy = marker.policy)
+      it.insert(marker.markerHandle, startOffset, startOffset, spec, marker.flavorFlags, policy = policy)
     })
     marker.cacheResolution(insertedRoot, PMarkerResolution.valid(initialRange))
     return marker
@@ -174,49 +116,36 @@ object SnapshotMarkerEngineImpl : SnapshotMarkerEngine {
    * @return `true` when at least one root changed
    */
   fun processQueue(): Boolean {
-    var reference = markerQueue.poll() as? QueuedMarkerReference ?: return false
-    var firstRootStorage: MarkerRootUpdater? = null
-    val firstMarkerIds = LongArrayList()
-    var markerIdsByRoot: IdentityHashMap<MarkerRootUpdater, LongArrayList>? = null
+    var reference = markerQueue.poll() as? WeakSnapshotMarkerReference<*> ?: return false
+    var batchStorage: MarkerRootUpdater? = null
+    val handles = ArrayList<SnapshotMarkerReference<*>>()
+    var purgedAny = false
     while (true) {
-      val rootStorage = reference.fileRootReference?.get()
-                        ?: reference.documentReference?.get()?.rangeMarkers?.rootStore()
+      val rootStorage = reference.rootStorageReference.get()
       if (rootStorage != null) {
-        if (firstRootStorage == null) firstRootStorage = rootStorage
-        if (rootStorage === firstRootStorage) {
-          firstMarkerIds.add(reference.markerId)
+        if (rootStorage !== batchStorage) {
+          if (batchStorage != null && batchStorage.purgeCollected(handles)) purgedAny = true
+          handles.clear()
+          batchStorage = rootStorage
         }
-        else {
-          // allocate map only when there are at least two distinct storages found
-          val batches = markerIdsByRoot ?: IdentityHashMap<MarkerRootUpdater, LongArrayList>().also { markerIdsByRoot = it }
-          batches.getOrPut(rootStorage) { LongArrayList() }.add(reference.markerId)
-        }
+        handles.add(reference)
       }
-      reference = markerQueue.poll() as? QueuedMarkerReference ?: break
+      reference = markerQueue.poll() as? WeakSnapshotMarkerReference<*> ?: break
     }
-    var purgedAny = firstRootStorage?.updateCurrentRoot { it.purgeMany(firstMarkerIds) } ?: false
-    for ((rootStorage, markerIds) in markerIdsByRoot ?: return purgedAny) {
-      if (rootStorage.updateCurrentRoot { it.purgeMany(markerIds) }) purgedAny = true
-    }
+    if (batchStorage != null && batchStorage.purgeCollected(handles)) purgedAny = true
     return purgedAny
-  }
-
-  /** Creates a marker reference with the requested ownership for a root store. */
-  @ApiStatus.Internal
-  fun createMarkerReference(marker: SnapshotRangeMarkerImpl, retainStrong: Boolean): SnapshotMarkerReference {
-    return if (retainStrong) StrongSnapshotMarkerReference(marker) else WeakSnapshotMarkerReference(marker)
   }
 
   override fun removeRangeMarker(marker: SnapshotMarker): Boolean {
     processQueue()
     val storedMarker = marker as SnapshotRangeMarkerImpl
-    val markerId = storedMarker.markerId
+    val handle = storedMarker.markerHandle
     storedMarker.markDisposed()
-    return storedMarker.updateCurrentRoot { it.remove(markerId) }
+    return storedMarker.updateCurrentRoot { it.remove(handle) }
   }
 
   override fun processAllRangeMarkers(
-    rootStore: SnapshotMarkerRootStore,
+    rootStore: SnapshotMarkerRootStore<*>,
     snapshot: DocumentSnapshot,
     processor: Processor<in RangeMarkerEx>,
   ): Boolean {
@@ -232,7 +161,7 @@ object SnapshotMarkerEngineImpl : SnapshotMarkerEngine {
   }
 
   override fun processRangeMarkersOverlappingWith(
-    rootStore: SnapshotMarkerRootStore,
+    rootStore: SnapshotMarkerRootStore<*>,
     snapshot: DocumentSnapshot,
     startOffset: Int,
     endOffset: Int,
@@ -253,13 +182,13 @@ object SnapshotMarkerEngineImpl : SnapshotMarkerEngine {
   private class MarkerProcessor(
     private val processor: Processor<in RangeMarkerEx>,
   ) : Processor<PMarkerRoot.MarkerEntry>, PMarkerRoot.MarkerDeltaProcessor {
-    private var collectedMarkerIds: LongArrayList? = null
+    private var collectedHandles: ArrayList<SnapshotMarkerReference<*>>? = null
 
     override fun process(entry: PMarkerRoot.MarkerEntry): Boolean {
-      val marker = entry.markerReference?.get()
+      val marker = entry.marker
       if (marker == null) {
-        val markerIds = collectedMarkerIds ?: LongArrayList().also { collectedMarkerIds = it }
-        markerIds.add(entry.markerId)
+        val handles = collectedHandles ?: ArrayList<SnapshotMarkerReference<*>>().also { collectedHandles = it }
+        handles.add(entry.handle)
         return true
       }
       return marker.isDisposed() || processor.process(marker)
@@ -267,18 +196,21 @@ object SnapshotMarkerEngineImpl : SnapshotMarkerEngine {
 
     override fun process(entry: PMarkerRoot.MarkerEntry, ancestorDelta: Int): Boolean = process(entry)
 
-    fun purgeCollected(rootStore: SnapshotMarkerRootStore, snapshot: DocumentSnapshot) {
-      val markerIds = collectedMarkerIds ?: return
-      rootStore.purgeMany(snapshot, markerIds)
+    fun purgeCollected(rootStore: SnapshotMarkerRootStore<*>, snapshot: DocumentSnapshot) {
+      val handles = collectedHandles ?: return
+      rootStore.purgeMany(snapshot, handles)
     }
   }
 
+  /**
+   * Returns the marker state in [root], or [PMarkerResolution.ABSENT] when the marker is absent.
+   * Marks a retained state as invalid when the marker is disposed.
+   */
   @ApiStatus.Internal
   fun resolveRangeMarker(marker: SnapshotRangeMarkerImpl, root: PMarkerRoot): Long {
-    val resolution = root.resolve(marker.markerId)
+    val resolution = root.resolve(marker.markerHandle)
     return if (marker.isDisposed()) {
-      val range = if (PMarkerResolution.isAbsent(resolution)) marker.fallbackRange else resolution
-      PMarkerResolution.invalid(range)
+      PMarkerResolution.invalid(resolution)
     }
     else {
       resolution
@@ -288,7 +220,7 @@ object SnapshotMarkerEngineImpl : SnapshotMarkerEngine {
   /** Returns the disposal or invalidation reason, or `null` when the marker is valid or absent. */
   @ApiStatus.Internal
   fun invalidationReason(marker: SnapshotRangeMarkerImpl, root: PMarkerRoot): String? {
-    return if (marker.isDisposed()) DISPOSED_REASON else root.invalidationReason(marker.markerId)
+    return if (marker.isDisposed()) DISPOSED_REASON else root.invalidationReason(marker.markerHandle)
   }
 
   private const val DISPOSED_REASON: String = "Marker is disposed"

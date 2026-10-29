@@ -63,7 +63,6 @@ public class SnapshotMarkerEngineBenchmark {
       int startOffset = markerStart(index);
       SnapshotMarker marker = SnapshotMarkerEngineImpl.INSTANCE.createRangeMarker(
         state.document,
-        state.snapshot,
         startOffset,
         startOffset + MARKER_LENGTH,
         NON_GREEDY_SPEC,
@@ -102,7 +101,7 @@ public class SnapshotMarkerEngineBenchmark {
    *
    * <p>{@link IntersectionState#markersPerQuery} controls the exact output size {@code k}. The benchmark uses a
    * reusable consumer, so it does not allocate a capturing lambda for every query. The returned checksum consumes
-   * every reported marker ID and the total number of reported markers.</p>
+   * every reported marker identity and the total number of reported markers.</p>
    *
    * <p>This benchmark targets the persistent interval index directly to isolate tree reporting from marker-handle
    * lookup and materialization.</p>
@@ -112,7 +111,7 @@ public class SnapshotMarkerEngineBenchmark {
     PMarkerRoot root = state.root;
     int[] queryStarts = state.queryStarts;
     int[] queryEnds = state.queryEnds;
-    MarkerIdAccumulator accumulator = state.accumulator;
+    MarkerEntryAccumulator accumulator = state.accumulator;
     accumulator.reset();
 
     for (int index = 0; index < INTERSECTION_CALLS; index++) {
@@ -154,14 +153,12 @@ public class SnapshotMarkerEngineBenchmark {
   @State(Scope.Thread)
   public static class CreateState {
     DocumentImpl document;
-    DocumentSnapshot snapshot;
     SnapshotMarker[] createdMarkers;
 
     /** A new mutable engine is required for every measured creation batch. */
     @Setup(Level.Invocation)
     public void setUp() {
       document = new DocumentImpl(BENCHMARK_TEXT);
-      snapshot = document.getCore().snapshot();
       createdMarkers = new SnapshotMarker[MARKER_COUNT];
     }
   }
@@ -169,7 +166,6 @@ public class SnapshotMarkerEngineBenchmark {
   @State(Scope.Thread)
   public static class ResolveState {
     DocumentImpl document;
-    DocumentSnapshot snapshot;
     SnapshotMarker[] markers;
     int[] resolveOrder;
 
@@ -177,14 +173,12 @@ public class SnapshotMarkerEngineBenchmark {
     @Setup(Level.Trial)
     public void setUp() {
       document = new DocumentImpl(BENCHMARK_TEXT);
-      snapshot = document.getCore().snapshot();
       markers = new SnapshotMarker[MARKER_COUNT];
 
       for (int index = 0; index < MARKER_COUNT; index++) {
         int startOffset = markerStart(index);
         markers[index] = SnapshotMarkerEngineImpl.INSTANCE.createRangeMarker(
           document,
-          snapshot,
           startOffset,
           startOffset + MARKER_LENGTH,
           NON_GREEDY_SPEC,
@@ -203,21 +197,23 @@ public class SnapshotMarkerEngineBenchmark {
     public int markersPerQuery = 1;
 
     PMarkerRoot root;
+    SnapshotRangeMarkerImpl markerForHandles;
     int[] queryStarts;
     int[] queryEnds;
-    final MarkerIdAccumulator accumulator = new MarkerIdAccumulator();
+    final MarkerEntryAccumulator accumulator = new MarkerEntryAccumulator();
 
     /** Builds the root and deterministic query workload once per parameter value and fork. */
     @Setup(Level.Trial)
     public void setUp() {
+      markerForHandles = createMarkerForHandles();
       PMarkerRoot currentRoot = PMarkerRootImpl.Companion.empty();
       for (int index = 0; index < MARKER_COUNT; index++) {
         int startOffset = markerStart(index);
         currentRoot = currentRoot.insert(
-          (long)index + 1L,
+          currentRoot.createHandle(markerForHandles, false),
           startOffset,
           startOffset + MARKER_LENGTH,
-          NON_GREEDY_SPEC, (byte)0, null, 0, DefaultMarkerPolicy.INSTANCE
+          NON_GREEDY_SPEC, (byte)0, 0, DefaultMarkerPolicy.INSTANCE
         );
       }
       root = currentRoot;
@@ -235,7 +231,7 @@ public class SnapshotMarkerEngineBenchmark {
 
     DocumentImpl document;
     DocumentSnapshot snapshot;
-    SnapshotMarkerRootStore rootStore;
+    SnapshotMarkerRootStore<?> rootStore;
     SnapshotMarker[] markers;
     int[] queryStarts;
     int[] queryEnds;
@@ -253,7 +249,6 @@ public class SnapshotMarkerEngineBenchmark {
         int startOffset = markerStart(index);
         markers[index] = SnapshotMarkerEngineImpl.INSTANCE.createRangeMarker(
           document,
-          snapshot,
           startOffset,
           startOffset + MARKER_LENGTH,
           NON_GREEDY_SPEC,
@@ -269,13 +264,13 @@ public class SnapshotMarkerEngineBenchmark {
   }
 
   /** Reusable callback used by the intersection benchmark. */
-  public static final class MarkerIdAccumulator implements Processor<PMarkerRoot.MarkerEntry> {
+  public static final class MarkerEntryAccumulator implements Processor<PMarkerRoot.MarkerEntry> {
     private long checksum;
     private long count;
 
     @Override
     public boolean process(PMarkerRoot.MarkerEntry entry) {
-      checksum += entry.getMarkerId();
+      checksum += System.identityHashCode(entry.getHandle());
       count++;
       return true;
     }
@@ -357,6 +352,12 @@ public class SnapshotMarkerEngineBenchmark {
       .build();
 
     new Runner(opt).run();
+  }
+
+  private static SnapshotRangeMarkerImpl createMarkerForHandles() {
+    return (SnapshotRangeMarkerImpl)SnapshotMarkerEngineImpl.INSTANCE.createRangeMarker(
+      new DocumentImpl(""), 0, 0, NON_GREEDY_SPEC, false, DefaultMarkerPolicy.INSTANCE
+    );
   }
 
   private static int markerStart(int index) {

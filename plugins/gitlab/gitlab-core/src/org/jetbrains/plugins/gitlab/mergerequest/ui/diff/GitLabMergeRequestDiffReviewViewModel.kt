@@ -10,11 +10,11 @@ import com.intellij.collaboration.ui.codereview.diff.UnifiedCodeReviewItemPositi
 import com.intellij.collaboration.ui.icon.IconsProvider
 import com.intellij.collaboration.util.ComputedResult
 import com.intellij.collaboration.util.RefComparisonChange
-import com.intellij.collaboration.util.filePath
 import com.intellij.diff.util.Side
 import com.intellij.openapi.components.service
 import com.intellij.openapi.project.Project
 import com.intellij.platform.util.coroutines.childScope
+import git4idea.changes.GitBranchComparisonResult
 import git4idea.changes.GitTextFilePatchWithHistory
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
@@ -37,6 +37,7 @@ import org.jetbrains.plugins.gitlab.mergerequest.util.toLocations
 interface GitLabMergeRequestDiffReviewViewModel {
   val isCumulativeChange: Boolean
   val canAddMultilinePositionalNotes: Boolean
+  val canAddMultilineNotesInThisChange: Boolean
 
   val discussions: StateFlow<ComputedResult<Collection<GitLabMergeRequestDiffDiscussionViewModel>>>
   val draftDiscussions: StateFlow<ComputedResult<Collection<GitLabMergeRequestDiffDraftNoteViewModel>>>
@@ -65,6 +66,7 @@ internal class GitLabMergeRequestDiffReviewViewModelImpl(
   project: Project,
   parentCs: CoroutineScope,
   private val mergeRequest: GitLabMergeRequest,
+  private val parsedChanges: GitBranchComparisonResult,
   private val diffData: GitTextFilePatchWithHistory,
   private val change: RefComparisonChange,
   private val diffVm: GitLabMergeRequestDiffViewModel,
@@ -79,6 +81,7 @@ internal class GitLabMergeRequestDiffReviewViewModelImpl(
 
   override val isCumulativeChange: Boolean = diffData.isCumulative
   override val canAddMultilinePositionalNotes: Boolean = mergeRequest.canAddMultilinePositionalNotes
+  override val canAddMultilineNotesInThisChange: Boolean = isCumulativeChange || mergeRequest.canAddMultilinePositionalNotesInCommits
 
   override val discussions: StateFlow<ComputedResult<Collection<GitLabMergeRequestDiffDiscussionViewModel>>> =
     diffVm.discussions
@@ -115,13 +118,7 @@ internal class GitLabMergeRequestDiffReviewViewModelImpl(
   }
 
   override fun markViewed() {
-    val sha = mergeRequest.details.value.diffRefs?.headSha ?: return
-    persistentChangesViewedState.markViewed(
-      mergeRequest.serverPath, mergeRequest.projectId, mergeRequest.iid,
-      mergeRequest.gitRemote.repository,
-      listOf(change.filePath to sha),
-      true
-    )
+    persistentChangesViewedState.markViewed(mergeRequest, parsedChanges, listOf(change), true)
   }
 
   override fun showDiffAtComment(commentId: String) {

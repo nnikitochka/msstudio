@@ -8,6 +8,7 @@ import com.intellij.openapi.editor.impl.marker.SnapshotMarkerRootStore.CapturedR
 import com.intellij.util.containers.ContainerUtil
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.TestOnly
+import java.util.IdentityHashMap
 
 /**
  * Applies each [DocumentOp] to all marker roots for one document.
@@ -19,23 +20,42 @@ import org.jetbrains.annotations.TestOnly
  */
 @ApiStatus.Internal
 class SnapshotMarkerStores {
-  private val stores: MutableList<SnapshotMarkerRootStore> = ContainerUtil.createEmptyCOWList()
+  private val stores: MutableList<SnapshotMarkerRootStore<*>> = ContainerUtil.createEmptyCOWList()
+  private val currentRoots: MutableMap<SnapshotMarkerRootStore<*>, SnapshotMarkerRootStore.CurrentRootCache> = IdentityHashMap()
   private var storeVersion: Long = 0
 
-  internal fun register(store: SnapshotMarkerRootStore) {
+  /** The commit gate guards this flag. A lookup must not fill a slot while publication changes the current snapshot. */
+  internal var isPublishing: Boolean = false
+    private set
+
+  /**
+   * Registers [store] for document changes and returns an empty cache for its current root.
+   * The registry holds both strongly until [unregister] removes them.
+   */
+  internal fun register(store: SnapshotMarkerRootStore<*>): SnapshotMarkerRootStore.CurrentRootCache =
     synchronized(this) {
       stores.add(store)
       storeVersion++
+      SnapshotMarkerRootStore.CurrentRootCache().also { currentRoots[store] = it }
     }
-  }
 
-  internal fun unregister(store: SnapshotMarkerRootStore) {
+  /**
+   * Removes [store] and clears its cache for the current root under this registry's monitor.
+   * Commit attempts that captured the previous registration state must retry.
+   */
+  internal fun unregister(store: SnapshotMarkerRootStore<*>) {
     synchronized(this) {
       stores.remove(store)
+      currentRoots.remove(store)?.state = null
       storeVersion++
     }
   }
 
+  /**
+   * Updates registered roots from [beforeSnapshot] to [afterSnapshot] for tests, with retries when a commit fails.
+   * A `null` [patch] carries roots and pending notifications forward. Both snapshots must then share the same text instance.
+   * Identical snapshot instances need no update. This method leaves publication of the document snapshot to the caller.
+   */
   @TestOnly
   fun applyPatch(beforeSnapshot: DocumentSnapshot, afterSnapshot: DocumentSnapshot, patch: DocumentPatch?) {
     if (afterSnapshot === beforeSnapshot) return
@@ -44,6 +64,7 @@ class SnapshotMarkerStores {
     }
   }
 
+  /** Applies [patch] to [beforeSnapshot], updates all registered roots, and returns the resulting snapshot. */
   @TestOnly
   fun applyPatch(beforeSnapshot: DocumentSnapshot, patch: DocumentPatch): DocumentSnapshot {
     var afterSnapshot = beforeSnapshot
@@ -54,6 +75,19 @@ class SnapshotMarkerStores {
     return afterSnapshot
   }
 
+  /**
+   * Prepares roots for [afterSnapshot] and tries to publish the snapshot.
+   *
+   * Captures roots under this registry's monitor and transforms them outside it.
+   * Under the monitor, it checks [isCurrent], the registered stores, and the captured roots before installing roots and calling [publish].
+   * It clears the caches for current roots before [publish] and fills them afterward for stores whose current snapshot is [afterSnapshot].
+   * A `null` [patch] preserves roots and pending notifications. Both snapshots must then share the same text instance.
+   *
+   * @param isCurrent checks whether the expected document state is still current; runs under this registry's monitor
+   * @param publish makes [afterSnapshot] current after the roots are installed; runs under this registry's monitor
+   * @return `true` after [publish] returns; `false` if the document state, registrations, or captured roots changed
+   * @throws IllegalArgumentException if the patch range or resulting text length is invalid, or a `null` patch changes the text instance
+   */
   internal fun tryCommit(
     beforeSnapshot: DocumentSnapshot,
     afterSnapshot: DocumentSnapshot,
@@ -99,13 +133,34 @@ class SnapshotMarkerStores {
       for (i in capturedRoots.indices) {
         val captured = capturedRoots[i]
         val state = captured.afterState ?: continue
-        captured.store.installRoot(afterSnapshot, state)
+        captured.afterState = captured.store.installRoot(afterSnapshot, state)
       }
-      publish()
+      isPublishing = true
+      for (cache in currentRoots.values) cache.state = null
+      try {
+        publish()
+      }
+      finally {
+        isPublishing = false
+      }
+      for (i in capturedRoots.indices) {
+        val captured = capturedRoots[i]
+        val state = captured.afterState ?: continue
+        if (captured.store.isCurrentSnapshot(afterSnapshot)) {
+          currentRoots[captured.store]?.state = SnapshotMarkerRootStore.CurrentRootCache.State(afterSnapshot, state.rootReference)
+        }
+      }
       true
     }
   }
 
+  /**
+   * Returns a snapshot with metadata from [metadataSnapshot] and marker states from both snapshots.
+   * Each store keeps the states from [markerSnapshot] and adds valid markers found only in [metadataSnapshot].
+   * A store with a root for only one input snapshot keeps that root.
+   *
+   * @return [metadataSnapshot] if the snapshots are identical or no store contains either snapshot; otherwise, a new snapshot
+   */
   fun mergeMarkerRoots(markerSnapshot: DocumentSnapshot, metadataSnapshot: DocumentSnapshot): DocumentSnapshot {
     SnapshotMarkerEngineImpl.processQueue()
     if (markerSnapshot === metadataSnapshot) return metadataSnapshot
@@ -120,6 +175,11 @@ class SnapshotMarkerStores {
     return mergedSnapshot
   }
 
+  /**
+   * Checks the range of [patch] against [beforeSnapshot] and the resulting text length against [afterSnapshot].
+   *
+   * @throws IllegalArgumentException if the range is invalid or the resulting length differs
+   */
   private fun validatePatch(beforeSnapshot: DocumentSnapshot, afterSnapshot: DocumentSnapshot, patch: DocumentPatch) {
     val beforeLength = beforeSnapshot.text().length()
     val afterLength = afterSnapshot.text().length()
