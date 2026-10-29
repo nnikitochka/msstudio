@@ -752,7 +752,7 @@
                         serviceImplementation="com.intellij.openapi.progress.impl.ProgressManagerImpl"/>
     <applicationService serviceImplementation="com.intellij.ide.ui.customization.CustomActionsSchema"/>
     <applicationSettings service="com.intellij.ide.ui.customization.CustomActionsSchema"/>
-    <applicationService serviceInterface="com.intellij.ide.ui.ProductIcons"
+    <applicationService serviceInterface="com.intellij.ide.ui.ProductIcons" open="true"
                         serviceImplementation="com.intellij.ide.impl.ui.ProductIconsImpl"/>
     <applicationService serviceInterface="com.intellij.openapi.project.DefaultProjectFactory"
                         serviceImplementation="com.intellij.openapi.project.DefaultProjectFactoryImpl"/>
