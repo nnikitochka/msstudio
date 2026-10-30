@@ -12,12 +12,9 @@ import com.intellij.openapi.editor.colors.FontPreferences;
 import com.intellij.openapi.editor.colors.TextAttributesKey;
 import com.intellij.openapi.editor.colors.impl.AbstractColorsScheme;
 import com.intellij.openapi.editor.colors.impl.DelegateColorScheme;
-import com.intellij.openapi.editor.colors.impl.EditorFontCacheImpl;
 import com.intellij.openapi.editor.colors.impl.FontPreferencesImpl;
 import com.intellij.openapi.editor.markup.TextAttributes;
-import com.intellij.util.ArrayUtil;
 import com.intellij.util.ui.JdkConstants;
-import com.jetbrains.JBR;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -212,13 +209,17 @@ final class EditorColorSchemeDelegate extends DelegateColorScheme {
 
   @Override
   public @NotNull FontPreferences getConsoleFontPreferences() {
-    return myConsoleFontPreferences.getEffectiveFontFamilies().isEmpty() ?
-           getDelegate().getConsoleFontPreferences() : myConsoleFontPreferences;
+    if (myConsoleFontPreferences.getEffectiveFontFamilies().isEmpty()) {
+      return getDelegate().getConsoleFontPreferences();
+    }
+    return myConsoleFontPreferences;
   }
 
   @Override
   public void setConsoleFontPreferences(@NotNull FontPreferences preferences) {
-    if (preferences.getSnapshot() == myConsoleFontPreferences.getSnapshot()) return;
+    if (preferences.getSnapshot() == myConsoleFontPreferences.getSnapshot()) {
+      return;
+    }
     preferences.copyTo(myConsoleFontPreferences);
     reinitFontsAndSettings();
   }
@@ -236,7 +237,9 @@ final class EditorColorSchemeDelegate extends DelegateColorScheme {
 
   @Override
   public void setEditorFontName(String fontName) {
-    if (Objects.equals(fontName, myFaceName)) return;
+    if (Objects.equals(fontName, myFaceName)) {
+      return;
+    }
     if (LOG.isDebugEnabled()) {
       LOG.debug("Font name overridden for " + myEditor, new Throwable());
     }
@@ -275,11 +278,9 @@ final class EditorColorSchemeDelegate extends DelegateColorScheme {
   public void setConsoleFontSize(float fontSize) {
     if (fontSize == super.getConsoleFontSize2D()) {
       myConsoleFontSize = FONT_SIZE_TO_IGNORE;
-    }
-    else {
+    } else {
       myConsoleFontSize = fontSize;
     }
-
     reinitFontsAndSettings();
   }
 
@@ -319,6 +320,7 @@ final class EditorColorSchemeDelegate extends DelegateColorScheme {
     reinitFontsAndSettings();
   }
 
+  /// @noinspection MethodDoesntCallSuperMethod legacy
   @Override
   public @Nullable Object clone() {
     return null;
@@ -392,26 +394,8 @@ final class EditorColorSchemeDelegate extends DelegateColorScheme {
     float fontSize,
     @NotNull FontPreferences fontPreferences
   ) {
-    Font baseFont = FontFamilyService.getFont(
-      familyName,
-      fontPreferences.getRegularSubFamily(),
-      fontPreferences.getBoldSubFamily(),
-      style,
-      fontSize
-    );
-    Font fontWithLigatures = EditorFontCacheImpl.deriveFontWithLigatures(
-      baseFont,
-      myUseLigatures != null
-      ? myUseLigatures
-      : fontPreferences.useLigatures()
-    );
-    if (!fontPreferences.getCharacterVariants().isEmpty()) {
-      fontWithLigatures = JBR.getFontExtensions().deriveFontWithFeatures(
-        fontWithLigatures,
-        ArrayUtil.toStringArray(fontPreferences.getCharacterVariants())
-      );
-    }
-    myFontsMap.put(fontType, fontWithLigatures);
+    boolean useLigatures = myUseLigatures != null ? myUseLigatures : fontPreferences.useLigatures();
+    myFontsMap.put(fontType, EditorFontFeatures.createFont(familyName, style, fontSize, fontPreferences, useLigatures));
   }
 
   private void updateDelegate() {

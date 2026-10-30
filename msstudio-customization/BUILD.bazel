@@ -23,27 +23,6 @@ jvm_library(
         "//msstudio-customization/ide-customization:msstudio-ide-customization",
     ],
 )
-
-jvm_library(
-    name = "msstudio-customization_test_lib",
-    testonly = True,
-    srcs = glob(
-        [],
-        allow_empty = True,
-    ),
-    module_name = "intellij.msstudio.customization",
-    visibility = ["//visibility:public"],
-    runtime_deps = [
-        # do not sort,
-        ":msstudio-customization",
-        "//java/ide-resources:ide-resources_test_lib",
-        "//platform/platform-impl:ide-impl_test_lib",
-        "//idea/customization/min:min_test_lib",
-        "//platform/experiment:experiment_test_lib",
-        "//community-resources/ide-customization:ide-customization_test_lib",
-        "//msstudio-customization/ide-customization:msstudio-ide-customization_test_lib",
-    ],
-)
 ### auto-generated section `build intellij.msstudio.customization` end
 
 ### auto-generated section `iml intellij.msstudio.customization` start
