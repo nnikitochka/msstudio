@@ -5,12 +5,21 @@ import com.intellij.icons.AllIcons
 import com.intellij.ide.IdeBundle
 import com.intellij.msstudio.ide.customization.MSStudioBundle
 import com.intellij.msstudio.ide.customization.server.core.ServerCoreService
+import com.intellij.openapi.Disposable
 import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.options.ConfigurationException
 import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.roots.ProjectRootManager
+import com.intellij.openapi.roots.ui.configuration.SdkComboBox
+import com.intellij.openapi.roots.ui.configuration.SdkComboBoxModel
+import com.intellij.openapi.roots.ui.configuration.projectRoot.ProjectSdksModel
 import com.intellij.openapi.ui.DialogWrapper
+import com.intellij.openapi.ui.Messages
+import com.intellij.openapi.util.Disposer
 import com.intellij.ui.TabbedPaneWrapper
 import com.intellij.ui.TableUtil
 import com.intellij.ui.ToolbarDecorator
@@ -44,7 +53,7 @@ import kotlin.math.roundToInt
  * OK saves the rows for the next launch. An empty constructor means the
  * defaults of the core profile.
  */
-internal class ServerRunFlagsDialog(project: Project) : DialogWrapper(project) {
+private class ServerRunFlagsDialog(project: Project) : DialogWrapper(project) {
   private val service = ServerRunFlagService.getInstance(project)
   private val core = ServerCoreService.getInstance(project).detectedCore
 
@@ -58,6 +67,8 @@ internal class ServerRunFlagsDialog(project: Project) : DialogWrapper(project) {
   private val maximumMemory = MemoryAdjuster(
     MSStudioBundle.serverRunFlagsMemoryMaximumText, maximumMemoryEnabled(), maximumMemoryValue(),
     MemoryUnit.fromPersisted(service.maximumMemoryUnit()))
+
+  private val javaSelector by lazy { JavaRuntimeSelector(project, myDisposable) }
 
   init {
     title = MSStudioBundle.serverRunFlagsTitle
@@ -83,6 +94,7 @@ internal class ServerRunFlagsDialog(project: Project) : DialogWrapper(project) {
     val tabs = TabbedPaneWrapper(myDisposable)
     tabs.addTab(MSStudioBundle.serverRunFlagsJvmText, jvmTab)
     tabs.addTab(MSStudioBundle.serverRunFlagsProgramText, programEditor.component)
+    tabs.addTab(MSStudioBundle.serverRunFlagsJavaText, javaSelector.component)
 
     val hint = JBLabel(MSStudioBundle.serverRunFlagsHintText).apply {
       foreground = JBUI.CurrentTheme.ContextHelp.FOREGROUND
@@ -103,11 +115,19 @@ internal class ServerRunFlagsDialog(project: Project) : DialogWrapper(project) {
           service.initialMemoryMb() != null, initialMemoryValue(), MemoryUnit.fromPersisted(service.initialMemoryUnit()))
         maximumMemory.load(
           maximumMemoryEnabled(), maximumMemoryValue(), MemoryUnit.fromPersisted(service.maximumMemoryUnit()))
+        javaSelector.resetToProjectSdk()
       }
     }
   )
 
   override fun doOKAction() {
+    try {
+      javaSelector.applyModel()
+    }
+    catch (exception: ConfigurationException) {
+      Messages.showErrorDialog(contentPane, exception.messageHtml.toString(), exception.title)
+      return
+    }
     service.setJvmArguments(jvmEditor.arguments())
     service.setProgramArguments(programEditor.arguments())
     val maximumMb = maximumMemory.memoryMb() ?: ServerRunFlagService.DISABLED_MEMORY_MB
@@ -169,7 +189,7 @@ private class MemoryAdjuster(labelText: String, enabled: Boolean, valueMb: Int, 
     currentUnit = savedUnit
     unitCombo.selectedIndex = savedUnit.ordinal
     unitCombo.addActionListener {
-      val newUnit = selectedUnit()
+      val newUnit = MemoryUnit.entries[unitCombo.selectedIndex]
       if (newUnit == currentUnit) return@addActionListener
       // The old value converts under the old unit, not under the new one.
       val mb = memoryMb(currentUnit)
@@ -191,7 +211,7 @@ private class MemoryAdjuster(labelText: String, enabled: Boolean, valueMb: Int, 
   /**
    * Holds the selected size in MB, or null when the adjuster is off.
    */
-  fun memoryMb(): Int? = if (checkbox.isSelected) memoryMbValue() else null
+  fun memoryMb(): Int? = if (checkbox.isSelected) memoryMb(currentUnit) else null
 
   /**
    * Holds the selected unit of the adjuster.
@@ -205,8 +225,6 @@ private class MemoryAdjuster(labelText: String, enabled: Boolean, valueMb: Int, 
     spinner.model = model(unit, valueMb)
     updateEnabled()
   }
-
-  private fun memoryMbValue(): Int = memoryMb(currentUnit)
 
   private fun memoryMb(unit: MemoryUnit): Int {
     try {
@@ -222,8 +240,6 @@ private class MemoryAdjuster(labelText: String, enabled: Boolean, valueMb: Int, 
     }
   }
 
-  private fun selectedUnit(): MemoryUnit = MemoryUnit.entries[unitCombo.selectedIndex]
-
   private fun model(unit: MemoryUnit, mb: Int): SpinnerModel = when (unit) {
     MemoryUnit.MB -> SpinnerNumberModel(mb.coerceIn(MIN_MB, MAX_MB), MIN_MB, MAX_MB, STEP_MB)
     MemoryUnit.GB -> SpinnerNumberModel(mb.coerceIn(MIN_MB, MAX_MB) / MB_PER_GB, MIN_GB, MAX_GB, STEP_GB)
@@ -237,11 +253,11 @@ private class MemoryAdjuster(labelText: String, enabled: Boolean, valueMb: Int, 
   private companion object {
     const val MB_PER_GB: Double = 1024.0
 
-    val MIN_MB: Int = ServerRunFlagService.MIN_MEMORY_MB
-    val MAX_MB: Int = ServerRunFlagService.MAX_MEMORY_MB
-    val STEP_MB: Int = ServerRunFlagService.MEMORY_STEP_MB
-    val MIN_GB: Double = MIN_MB / MB_PER_GB
-    val MAX_GB: Double = MAX_MB / MB_PER_GB
+    const val MIN_MB: Int = ServerRunFlagService.MIN_MEMORY_MB
+    const val MAX_MB: Int = ServerRunFlagService.MAX_MEMORY_MB
+    const val STEP_MB: Int = ServerRunFlagService.MEMORY_STEP_MB
+    const val MIN_GB: Double = MIN_MB / MB_PER_GB
+    const val MAX_GB: Double = MAX_MB / MB_PER_GB
     const val STEP_GB: Double = 0.125
   }
 }
@@ -356,5 +372,67 @@ internal class ServerRunFlagsAction : DumbAwareAction() {
   override fun actionPerformed(event: AnActionEvent) {
     val project = event.project ?: return
     ServerRunFlagsDialog(project).show()
+  }
+}
+
+/**
+ * The selector of the Java SDK for the server start.
+ *
+ * The combo is the SDK picker of the IDE, the same control as in Project
+ * Structure: it lists the JDKs of the SDK table, detects the installed JDKs
+ * of the machine, and offers the add and download flows. The None item means
+ * the java command from PATH.
+ */
+private class JavaRuntimeSelector(
+  private val project: Project,
+  parentDisposable: Disposable,
+) {
+  private val sdksModel = ProjectSdksModel().apply {
+    reset(project)
+    Disposer.register(parentDisposable, Disposable { disposeUIResources() })
+  }
+  private val combo = SdkComboBox(SdkComboBoxModel.createJdkComboBoxModel(project, sdksModel))
+
+  init {
+    combo.showNoneSdkItem()
+    resetToProjectSdk()
+  }
+
+  val component: JComponent = JPanel(BorderLayout()).apply {
+    // The whole block sits in the north, so the combo keeps its preferred
+    // height when the window grows.
+    add(JPanel(BorderLayout()).apply {
+      border = JBUI.Borders.emptyTop(4)
+      add(JBLabel(MSStudioBundle.serverRunJavaTitleText).apply {
+        foreground = JBUI.CurrentTheme.ContextHelp.FOREGROUND
+      }, BorderLayout.NORTH)
+      add(combo, BorderLayout.CENTER)
+    }, BorderLayout.NORTH)
+  }
+
+  /**
+   * Selects the current SDK of the project. The None item means that the
+   * project and the server start use the java command from PATH.
+   */
+  fun resetToProjectSdk() {
+    val sdk = sdksModel.projectSdk
+    if (sdk == null) {
+      combo.selectedItem = combo.showNoneSdkItem()
+    }
+    else {
+      combo.setSelectedSdk(sdk)
+    }
+  }
+
+  /**
+   * Saves SDK changes and makes the selected SDK the SDK of the project.
+   */
+  @Throws(ConfigurationException::class)
+  fun applyModel() {
+    val selectedSdk = combo.getSelectedSdk()
+    sdksModel.apply()
+    ApplicationManager.getApplication().runWriteAction {
+      ProjectRootManager.getInstance(project).projectSdk = selectedSdk
+    }
   }
 }

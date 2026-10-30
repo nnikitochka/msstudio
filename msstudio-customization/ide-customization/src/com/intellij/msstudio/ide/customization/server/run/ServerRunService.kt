@@ -15,10 +15,13 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.invokeLater
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.roots.ProjectRootManager
+import com.intellij.openapi.util.SystemInfo
 import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.wm.ToolWindowAnchor
 import com.intellij.openapi.wm.ToolWindowManager
 import com.intellij.ui.content.ContentFactory
+import java.io.File
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
@@ -125,13 +128,24 @@ internal class ServerRunService(private val project: Project) : Disposable {
 
   private fun createCommandLine(core: ServerCore): GeneralCommandLine {
     val flags = ServerRunFlagService.getInstance(project)
-    val command = mutableListOf("java")
+    val command = mutableListOf(javaExecutable())
     command += flags.jvmArguments(core)
     command += listOf("-jar", core.file.toString())
     command += flags.programArguments(core)
     return GeneralCommandLine(command)
       .withWorkingDirectory(core.file.parent)
       .withCharset(Charsets.UTF_8)
+  }
+
+  /**
+   * Returns the java executable of the Project SDK. No Project SDK, or an SDK
+   * without a Java home, gives the java command from PATH.
+   */
+  private fun javaExecutable(): String {
+    val home = ProjectRootManager.getInstance(project).projectSdk?.homePath
+    val name = if (SystemInfo.isWindows) "java.exe" else "java"
+    val executable = home?.let { File(it, "bin/$name") }
+    return executable?.path?.takeIf { executable.isFile } ?: "java"
   }
 
   private fun showConsole(core: ServerCore, serverProcess: Process) {

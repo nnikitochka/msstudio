@@ -114,7 +114,7 @@ private class ServerRunWidgetGroup : ActionGroup(), DumbAware {
  * trim limits, and margins. It shows no own look like a hover background,
  * because it is an informational control and holds no popup.
  */
-internal class ServerRunCoreLabelAction : DumbAwareAction(), CustomComponentAction {
+private class ServerRunCoreLabelAction : DumbAwareAction(), CustomComponentAction {
   override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
 
   /**

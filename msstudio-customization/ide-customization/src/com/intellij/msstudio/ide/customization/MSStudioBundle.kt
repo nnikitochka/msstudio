@@ -68,6 +68,10 @@ internal object MSStudioBundle {
 
   val serverRunFlagsEmptyText inline get() = message("msstudio.serverRun.flags.empty.text")
 
+  val serverRunFlagsJavaText inline get() = message("msstudio.serverRun.flags.java.text")
+
+  val serverRunJavaTitleText inline get() = message("msstudio.serverRun.flags.java.title")
+
   val serverRunFlagsHintText inline get() = message("msstudio.serverRun.flags.hint.text")
 
   val serverRunFlagsRestoreText inline get() = message("msstudio.serverRun.flags.restore.text")
